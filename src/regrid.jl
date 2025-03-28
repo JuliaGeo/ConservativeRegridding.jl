@@ -1,4 +1,8 @@
-function regrid!(
+"""$(TYPEDSIGNATURES)
+Regrid data on `grid_in` onto `grid_out` conservativly (mean-preserving) using the `regridder` matrix.
+`area_out` is the area of each grid cell in `grid_out` and is used to normalize the result,
+if not provided, will recompute this from `regridder`."""
+Base.@propagate_inbounds function regrid!(
     grid_out::AbstractVector,
     grid_in::AbstractVector,
     regridder::AbstractMatrix,
@@ -14,14 +18,14 @@ function regrid!(
         regrid!(grid_out, grid_in, regridder)
     end
     
-    LinearAlgebra.mul!(grid_out, regridder, grid_in)
-    grid_out ./= area_out
+    # the actual regridding is a matrix-vector multiplication with the regridder, do in-place
+    LinearAlgebra.mul!(grid_out, regridder, grid_in)    # units of grid_in times area of grid cell
+    grid_out ./= area_out                               # normalize by area of each grid cell
 end
 
 """$(TYPEDSIGNATURES)
-regrid a vector `gridin` using the regridder `regridder` and writes the result in `gridout`.
-Recomputes the area vector for the output grid can be passed on as optional argument to prevent recalculating it from
-the regridder."""
+regrid a vector `grid_in` using `regridder` and writes the result in `grid_out`.
+Recomputes the area vector for the output grid from `regridder`. Pass on as optional argument to avoid this."""
 function regrid!(
     grid_out::AbstractVector,
     grid_in::AbstractVector,
@@ -32,14 +36,14 @@ function regrid!(
 end
 
 """$(TYPEDSIGNATURES)
-regrid a vector `gridin` using the regridder `regridder`. Area vector for the output grid can
+regrid a vector `grid_in` using `regridder`. Area vector for the output grid can
 be passed on as optional argument to prevent recalculating it from the regridder."""
 function regrid(
-    gridin::AbstractVector,
+    grid_in::AbstractVector,
     regridder::AbstractMatrix,
     args...
 )
     n_out, n_in = size(regridder)
-    gridout = typeof(gridin)(undef, n_out)
-    regrid!(gridout, gridin, regridder, args...)
+    grid_out = typeof(grid_in)(undef, n_out)
+    regrid!(grid_out, grid_in, regridder, args...)
 end
