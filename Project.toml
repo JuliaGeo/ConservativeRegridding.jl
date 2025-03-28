@@ -16,7 +16,7 @@ GeoInterface = "1.4.1"
 GeometryOps = "0.1.15"
 LinearAlgebra = "1.11.0"
 SortTileRecursiveTree = "0.1.4"
-julia = "1.10"
+julia = "1.11"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
