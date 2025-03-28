@@ -1,6 +1,6 @@
-using ConservativeRegridding
-using Test
+using Test, SafeTestsets
 
 @testset "ConservativeRegridding.jl" begin
-    # Write your tests here.
+    @safetestset "Simple Regridding" begin include("simple.jl") end
+    @safetestset "SpeedyWeather" begin include("speedyweather.jl") end
 end
