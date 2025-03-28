@@ -10,6 +10,8 @@ import Extents
 import GeometryOps as GO
 import GeoInterface as GI
 
+using SparseArrays: spzeros # for default operator construction
+
 include("regridder.jl")
 include("regrid.jl")
 
