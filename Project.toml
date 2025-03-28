@@ -8,19 +8,28 @@ DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 Extents = "411431e0-e8b7-467b-b5e0-f676ba4f2910"
 GeoInterface = "cf35fbd7-0cd7-5166-be24-54bfbe79505f"
 GeometryOps = "3251bfac-6a57-4b6d-aa61-ac1fef2975ab"
+GeometryOpsCore = "05efe853-fabf-41c8-927e-7063c8b9f013"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 SortTileRecursiveTree = "746ee33f-1797-42c2-866d-db2fce69d14d"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [compat]
-DocStringExtensions = "0.9.4"
-GeoInterface = "1.4.1"
-GeometryOps = "0.1.15"
-LinearAlgebra = "1.10"
-SortTileRecursiveTree = "0.1.4"
+DocStringExtensions = "0.8, 0.9"
+GeoInterface = "1"
+GeometryOps = "0.1"
+LinearAlgebra = "1"
+SortTileRecursiveTree = "0.1"
+SparseArrays = "1"
 julia = "1.10"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[sources.GeometryOps]
+rev = "as/trees-and-antimeridian"
+
+[sources.GeometryOpsCore]
+rev = "as/trees-and-antimeridian"
 
 [targets]
 test = ["Test"]
