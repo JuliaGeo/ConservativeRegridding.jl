@@ -1,4 +1,4 @@
-function regrid!(
+Base.@propagate_inbounds function regrid!(
     grid_out::AbstractVector,
     grid_in::AbstractVector,
     regridder::AbstractMatrix,
@@ -14,8 +14,8 @@ function regrid!(
         regrid!(grid_out, grid_in, regridder)
     end
     
-    LinearAlgebra.mul!(grid_out, regridder, grid_in)
-    grid_out ./= area_out
+    LinearAlgebra.mul!(grid_out, regridder, grid_in)    # units of grid_in times area of grid cell
+    grid_out ./= area_out                               # normalize by area of each grid cell
 end
 
 """$(TYPEDSIGNATURES)
@@ -35,11 +35,11 @@ end
 regrid a vector `gridin` using the regridder `regridder`. Area vector for the output grid can
 be passed on as optional argument to prevent recalculating it from the regridder."""
 function regrid(
-    gridin::AbstractVector,
+    grid_in::AbstractVector,
     regridder::AbstractMatrix,
     args...
 )
     n_out, n_in = size(regridder)
-    gridout = typeof(gridin)(undef, n_out)
-    regrid!(gridout, gridin, regridder, args...)
+    grid_out = typeof(grid_in)(undef, n_out)
+    regrid!(grid_out, grid_in, regridder, args...)
 end
