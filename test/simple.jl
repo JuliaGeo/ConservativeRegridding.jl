@@ -20,7 +20,7 @@ grid2 = begin
     [diamondpoly, trianglepolys...]
 end
 
-A = @test_nowarn ConservativeRegridding.area_of_intersection_operator(grid1, grid2)
+A = @test_nowarn ConservativeRegridding.intersection_areas(grid1, grid2)
 
 # Now, let's perform some interpolation!
 area1 = vec(sum(A, dims=2))

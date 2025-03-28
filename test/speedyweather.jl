@@ -62,7 +62,7 @@ faces2 = get_faces(grid2)
 polys1 = map(GO.ClosedRing() ∘ GO.CutAtAntimeridianAndPoles(), (GI.Polygon([GI.LinearRing(f)]) for f in eachcol(faces1)))
 polys2 = map(GO.ClosedRing() ∘ GO.CutAtAntimeridianAndPoles(), (GI.Polygon([GI.LinearRing(f)]) for f in eachcol(faces2)))
 
-A = ConservativeRegridding.area_of_intersection_operator(polys1, polys2)
+A = ConservativeRegridding.intersection_areas(polys1, polys2)
 
 
 # Now, let's perform some interpolation!
