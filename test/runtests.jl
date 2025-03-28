@@ -1,6 +1,6 @@
-using ConservativeInterpolation
+using ConservativeRegridding
 using Test
 
-@testset "ConservativeInterpolation.jl" begin
+@testset "ConservativeRegridding.jl" begin
     # Write your tests here.
 end
