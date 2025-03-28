@@ -1,0 +1,13 @@
+name = "ConservativeInterpolation"
+uuid = "f66d8102-94fd-43c7-a41c-b5c5adb77837"
+authors = ["Milan Kloewer <milankloewer@gmx.de> and contributors"]
+version = "0.1.0"
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
