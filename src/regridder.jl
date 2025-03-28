@@ -12,8 +12,8 @@ two grids."""
 areas(regridder::AbstractMatrix) = area(regridder, dims=:out), area(regridder, dims=:in)
 
 """$(TYPEDSIGNATURES) Area vector from `regridder`, `dims` can be `:in` or `:out`."""
-area(regridder::AbstractMatrix; dims) = area(regridder, dims)                     # pass on keyword as positional argument for dispatch
+area(regridder::AbstractMatrix; dims) = area(regridder, Val(dims))                  # pass on keyword as positional argument for dispatch
 
 # "in" is a sum along the 2nd dimension of the matrix, returning a vector of length of the 1st dimension (the output grid)
 area(regridder::AbstractMatrix, dims::Val{:in}) = vec(sum(regridder, dims=2))        
-area(regridder::AbstractMatrix, dims::Val{:out}) = vec(sum(regridder, dims=1))     # "out" vice versa
+area(regridder::AbstractMatrix, dims::Val{:out}) = vec(sum(regridder, dims=1))      # "out" vice versa
