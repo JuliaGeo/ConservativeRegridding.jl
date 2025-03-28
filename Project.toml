@@ -1,5 +1,5 @@
-name = "ConservativeInterpolation"
-uuid = "f66d8102-94fd-43c7-a41c-b5c5adb77837"
+name = "ConservativeRegridding"
+uuid = "8e50ac2c-eb48-49bc-a402-07c87b949343"
 authors = ["Milan Kloewer <milankloewer@gmx.de> and contributors"]
 version = "0.1.0"
 
