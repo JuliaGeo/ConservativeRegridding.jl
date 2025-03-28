@@ -5,6 +5,7 @@ version = "0.1.0"
 
 [deps]
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
+Extents = "411431e0-e8b7-467b-b5e0-f676ba4f2910"
 GeoInterface = "cf35fbd7-0cd7-5166-be24-54bfbe79505f"
 GeometryOps = "3251bfac-6a57-4b6d-aa61-ac1fef2975ab"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
