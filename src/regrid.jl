@@ -44,6 +44,6 @@ function regrid(
     args...
 )
     n_out, n_in = size(regridder)
-    grid_out = typeof(grid_in)(undef, n_out)
+    grid_out = similar(grid_in, n_out)
     regrid!(grid_out, grid_in, regridder, args...)
 end
