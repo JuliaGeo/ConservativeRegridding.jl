@@ -13,8 +13,8 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 SortTileRecursiveTree = "746ee33f-1797-42c2-866d-db2fce69d14d"
 
 [sources]
-GeometryOps = {url = "https://github.com/JuliaGeo/GeometryOps.jl", rev="as/trees-and-antimeridian"}
-GeometryOpsCore = {url = "https://github.com/JuliaGeo/GeometryOps.jl", subdir="GeometryOpsCore", rev="as/trees-and-antimeridian"}
+GeometryOps = {rev = "as/trees-and-antimeridian"}
+GeometryOpsCore = {rev = "as/trees-and-antimeridian"}
 
 [compat]
 DocStringExtensions = "0.9.4"
