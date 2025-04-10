@@ -12,15 +12,13 @@ Base.@propagate_inbounds function regrid!(
         @warn "regridder of size $(size(regridder)) matches input grid $(length(grid_in)) and output grid $(length(grid_out)) when transposed."*
                 " You may want to regrid with `transpose(regridder)` instead."
 
-    @boundscheck if size(grid_out, 1) != length(area_out)
-        @warn "Area vector of length $(length(area_out)) is incompatible with output grid vector of length $(length(grid_out))." *
-            " Recomputing the area vector from the regridder."
-        regrid!(grid_out, grid_in, regridder)
+    @boundscheck if length(grid_out) != length(area_out)
+        @warn "Area vector of length $(length(area_out)) is incompatible with output grid vector of length $(length(grid_out))."
     end
     
     # the actual regridding is a matrix-vector multiplication with the regridder, do in-place
     LinearAlgebra.mul!(grid_out, regridder, grid_in)    # units of grid_in times area of grid cell
-    grid_out ./= area_out                               # normalize by area of each grid cell
+    grid_out ./= area_out                               # normalize by area of each grid cell
 end
 
 """$(TYPEDSIGNATURES)
@@ -31,7 +29,7 @@ function regrid!(
     grid_in::AbstractVector,
     regridder::AbstractMatrix,
 )
-    area_out = area(regridder, dims=:out)
+    area_out = cell_area(regridder, :out)
     regrid!(grid_out, grid_in, regridder, area_out)
 end
 
@@ -44,6 +42,15 @@ function regrid(
     args...
 )
     n_out, n_in = size(regridder)
-    grid_out = typeof(grid_in)(undef, n_out)
+    @boundscheck if n_in != length(grid_in)
+        @warn "Regridder of size $(size(regridder)) does not match input grid of length $(length(grid_in))."
+    end
+
+    @boundscheck if n_out == length(grid_in)
+        @warn "Regridder of size $(size(regridder)) matches input grid of length $(length(grid_in)) if transposed." *
+            " You may want to regrid with `transpose(regridder)` instead."
+    end
+
+    grid_out = zeros(eltype(grid_in), n_out)    # default Julia vector for now
     regrid!(grid_out, grid_in, regridder, args...)
 end

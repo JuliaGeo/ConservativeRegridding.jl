@@ -1,19 +1,18 @@
 const DEFAULT_NODECAPACITY = 10
 const DEFAULT_FLOATTYPE = Float64
-
-# use GeometryOps.Planar() manifold if not provided
-intersection_areas(grid1, grid2; kwargs...) =
-    intersection_areas(grid1, grid2, GeometryOps.Planar(); kwargs...)
+const DEFAULT_MANIFOLD = GeometryOps.Planar()
+const DEFAULT_MATRIX = SparseArrays.spzeros         # SparseCSC for regridder
 
 # allocate the areas matrix as SparseCSC if not provided
 function intersection_areas(
-    grid1,                      # arrays of polygons
-    grid2,                      # arrays of polygons
-    m::GeometryOps.Manifold;
+    grid1,                                          # arrays of polygons of the first grid
+    grid2,                                          # arrays of polygons of the second grid
+    m::GeometryOps.Manifold = DEFAULT_MANIFOLD;
+    T::Type{<:Number} = DEFAULT_FLOATTYPE,          # float type used for the areas matrix = regridder
     kwargs...
 )
-    # unless `areas::AbstractMatrix` is provided, create a SparseCSC matrix
-    areas = spzeros(DEFAULT_FLOATTYPE, length(grid1), length(grid2))
+    # unless `areas::AbstractMatrix` is provided (see in-place method ! below), create a SparseCSC matrix
+    areas = DEFAULT_MATRIX(T, length(grid1), length(grid2))
     intersection_areas!(areas, grid1, grid2, m; kwargs...)
 end
 
@@ -21,7 +20,7 @@ function intersection_areas!(
     areas::AbstractMatrix,      # intersection areas for all combinatations of grid cells in grid1, grid2
     grid1,                      # arrays of polygons
     grid2,                      # arrays of polygons
-    m::GeometryOps.Manifold;
+    m::GeometryOps.Manifold = GeometryOps.Planar();
     nodecapacity1 = DEFAULT_NODECAPACITY,
     nodecapacity2 = DEFAULT_NODECAPACITY,
 )
@@ -64,18 +63,18 @@ Returns area vectors (out, in) for the grids used to create the regridder.
 The area vectors are computed by summing the regridder along the first and second dimensions
 as the regridder is a matrix of the intersection areas between each grid cell between the
 two grids."""
-areas(regridder::AbstractMatrix) = area(regridder, dims=:out), area(regridder, dims=:in)
+cell_area(regridder::AbstractMatrix) = cell_area(regridder, :out), cell_area(regridder, :in)
 
 """$(TYPEDSIGNATURES) Area vector from `regridder`, `dims` can be `:in` or `:out`."""
-Base.@propagate_inbounds function area(regridder::AbstractMatrix, dims::Symbol)
+Base.@propagate_inbounds function cell_area(regridder::AbstractMatrix, dims::Symbol)
     @boundscheck if !(dims in (:in, :out))
         throw(ArgumentError("Only accepts dims `:in` or `:out`; got $dims"))
     end
     
     # "in" is a sum along the 2nd dimension of the matrix, returning a vector of length of the 1st dimension (the output grid)
     if dims == :in
-        vec(sum(regridder, dims = 2))
-    elseif dims == :out
         vec(sum(regridder, dims = 1))
+    elseif dims == :out
+        vec(sum(regridder, dims = 2))
     end
 end
