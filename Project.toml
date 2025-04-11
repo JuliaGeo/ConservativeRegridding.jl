@@ -13,8 +13,15 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 SortTileRecursiveTree = "746ee33f-1797-42c2-866d-db2fce69d14d"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
+[sources.GeometryOps]
+rev = "as/trees-and-antimeridian"
+
+[sources.GeometryOpsCore]
+rev = "as/trees-and-antimeridian"
+
 [compat]
 DocStringExtensions = "0.8, 0.9"
+Extents = "0.1"
 GeoInterface = "1"
 GeometryOps = "0.1"
 LinearAlgebra = "1"
@@ -26,12 +33,6 @@ julia = "1.10"
 SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
 SpeedyWeather = "9e226e20-d153-4fed-8a5b-493def4f21a9"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[sources.GeometryOps]
-rev = "as/trees-and-antimeridian"
-
-[sources.GeometryOpsCore]
-rev = "as/trees-and-antimeridian"
 
 [targets]
 test = ["SafeTestsets", "SpeedyWeather", "Test"]
