@@ -1,7 +1,17 @@
 const DEFAULT_NODECAPACITY = 10
 const DEFAULT_FLOATTYPE = Float64
 const DEFAULT_MANIFOLD = GeometryOps.Planar()
-const DEFAULT_MATRIX = SparseArrays.spzeros         # SparseCSC for regridder
+const DEFAULT_MATRIX = SparseArrays.spzeros # SparseCSC for regridder
+
+abstract type AbstractRegridder end
+
+struct Regridder{W, A} <: AbstractRegridder
+    intersection_areas :: W # Matrix of area intersections between cells on the source and destination grid
+    areas_dst :: A          # Vector of areas on the destination grid
+    areas_src :: A          # Vector of areas on the source grid
+end
+
+Base.size(R::Regridder, args...; kwargs...) = size(R.intersection_areas, args...; kwargs...)
 
 # allocate the areas matrix as SparseCSC if not provided
 function intersection_areas(
@@ -13,10 +23,10 @@ function intersection_areas(
 )
     # unless `areas::AbstractMatrix` is provided (see in-place method ! below), create a SparseCSC matrix
     areas = DEFAULT_MATRIX(T, length(grid1), length(grid2))
-    intersection_areas!(areas, grid1, grid2, m; kwargs...)
+    return compute_intersection_areas!(areas, grid1, grid2, m; kwargs...)
 end
 
-function intersection_areas!(
+function compute_intersection_areas!(
     areas::AbstractMatrix,      # intersection areas for all combinatations of grid cells in grid1, grid2
     grid1,                      # arrays of polygons
     grid2,                      # arrays of polygons
@@ -55,26 +65,37 @@ function intersection_areas!(
     return areas
 end
 
-regridder(grid1, grid2) = intersection_areas(grid1, grid2)
-regridder!(regridder::AbstractMatrix, grid1, grid2) = intersection_areas!(regridder, grid1, grid2)
+"""$(TYPEDSIGNATURES)
+Return a Regridder that transfers data from `src_field` to `dst_field`.
+
+Regridder stores the intersection areas between
+The areas are computed by summing the regridder along the first and second dimensions
+as the regridder is a matrix of the intersection areas between each grid cell between the
+two grids."""
+function Regridder(
+    src_vertices,       # 
+    dst_vertices;
+    FT = Float64,
+    AT = SparseCSC,
+)
+    intersec_area = intersection_areas(AT{FT}, src_vertices, dst_vertices)
+    areas_src = cell_areas(intersec_area, dims = 1)
+    areas_dst = cell_areas(intersec_area, dims = 2)
+    return Regridder(intersec_area, areas_src, areas_dst)
+end
+    
+function compute_weights!(regridder::Regridder, grid1, grid2)
+    compute_intersection_areas!(regridder.intersection_areas, grid1, grid2)
+    return regridder
+end
 
 """$(TYPEDSIGNATURES)
 Returns area vectors (out, in) for the grids used to create the regridder.
 The area vectors are computed by summing the regridder along the first and second dimensions
 as the regridder is a matrix of the intersection areas between each grid cell between the
 two grids."""
-cell_area(regridder::AbstractMatrix) = cell_area(regridder, :out), cell_area(regridder, :in)
+cell_area(weights::AbstractMatrix) = cell_area(weights, :out), cell_area(weights, :in)
 
 """$(TYPEDSIGNATURES) Area vector from `regridder`, `dims` can be `:in` or `:out`."""
-Base.@propagate_inbounds function cell_area(regridder::AbstractMatrix, dims::Symbol)
-    @boundscheck if !(dims in (:in, :out))
-        throw(ArgumentError("Only accepts dims `:in` or `:out`; got $dims"))
-    end
+Base.@propagate_inbounds cell_areas(intersection_areas::AbstractMatrix; dims) == vec(sum(intersection_areas; dims)
     
-    # "in" is a sum along the 2nd dimension of the matrix, returning a vector of length of the 1st dimension (the output grid)
-    if dims == :in
-        vec(sum(regridder, dims = 1))
-    elseif dims == :out
-        vec(sum(regridder, dims = 2))
-    end
-end
