@@ -23,6 +23,8 @@ SparseArrays = "1"
 julia = "1.10"
 
 [extras]
+SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
+SpeedyWeather = "9e226e20-d153-4fed-8a5b-493def4f21a9"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources.GeometryOps]
@@ -32,4 +34,4 @@ rev = "as/trees-and-antimeridian"
 rev = "as/trees-and-antimeridian"
 
 [targets]
-test = ["Test"]
+test = ["SafeTestsets", "SpeedyWeather", "Test"]
