@@ -1,2 +1,5 @@
 [deps]
+ConservativeRegridding = "8e50ac2c-eb48-49bc-a402-07c87b949343"
+GeoMakie = "db073c08-6b98-4ee5-b6a4-5efafb3259c6"
+Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 SpeedyWeather = "9e226e20-d153-4fed-8a5b-493def4f21a9"
