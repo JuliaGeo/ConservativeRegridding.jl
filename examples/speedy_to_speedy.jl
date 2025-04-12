@@ -6,8 +6,8 @@ field1 = rand(OctaHEALPixGrid, 24)
 field2 = rand(OctaminimalGaussianGrid, 24)
 
 SpeedyWeatherGeoMakieExt = Base.get_extension(SpeedyWeather, :SpeedyWeatherGeoMakieExt)
-faces1 = SpeedyWeatherGeoMakieExt.get_faces(grid1)
-faces2 = SpeedyWeatherGeoMakieExt.get_faces(grid2)
+faces1 = SpeedyWeatherGeoMakieExt.get_faces(field1)
+faces2 = SpeedyWeatherGeoMakieExt.get_faces(field2)
 
 polys1 = GI.Polygon.(GI.LinearRing.(eachcol(faces1))) .|> GO.fix
 polys2 = GI.Polygon.(GI.LinearRing.(eachcol(faces2))) .|> GO.fix
