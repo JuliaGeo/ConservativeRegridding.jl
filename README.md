@@ -33,10 +33,10 @@ the re-use the regridder `R` for interpolation in the other direction (from `fie
 use
 
 ```julia
-ConservativeRegridding.regrid!(field1, tranpose(R), field2)
+ConservativeRegridding.regrid!(field1, transpose(R), field2)
 ```
 
-Note that `R, tranpose(R)` share the same underlying data, `tranpose(R)` just creates a
+Note that `R, transpose(R)` share the same underlying data, `transpose(R)` just creates a
 new regridder based on a matrix tranpose and by swapping the area vectors, see below.
 
 ## Example
