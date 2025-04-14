@@ -39,7 +39,7 @@ function compute_intersection_areas!(
     areas::AbstractMatrix,  # intersection areas for all combinatations of grid cells in field1, field2
     grid1,                  # arrays of polygons
     grid2;                  # arrays of polygons
-    manifold::GeometryOps.Manifold = DEFAULT_MANIFOLD,
+    manifold::GeometryOps.Manifold = DEFAULT_MANIFOLD,      # TODO currently not used
     nodecapacity1 = DEFAULT_NODECAPACITY,
     nodecapacity2 = DEFAULT_NODECAPACITY,
 )
@@ -89,6 +89,7 @@ function Regridder(
     src_vertices;
     kwargs...
 )
+    # wrap into GeoInterface.Polygon, apply antimeridian cuttng via fix
     dst_polys = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(dst_vertices))) .|> GeometryOps.fix
     src_polys = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(src_vertices))) .|> GeometryOps.fix
 
