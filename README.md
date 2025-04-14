@@ -71,7 +71,7 @@ perfectly invertible operation, while the mean is conserved, the variance usuall
 With the equations above $A$ (and $a_s, a_d$ consequently) only has to be precomputed once
 given two grids facilitating forward and backward regridding. 
 
-Conservative regridding means that the area-weighte means are conserved
+Conservative regridding means that the area-weighted means are conserved
 
 ```math
 \frac{\sum_i d_ia_{d, i}}{\sum_i a_{d, i}} = \frac{\sum_j s_j a_{s, j}}{\sum_j a_{d, j}}
