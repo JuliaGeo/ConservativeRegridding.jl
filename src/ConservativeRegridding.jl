@@ -9,7 +9,7 @@ import Extents
 import SparseArrays
 
 # piracy, remove when GeometryOps is fixed
-GeometryOps.area(::GeometryOps.Planar, x) = GeometryOps.area(x)
+# GeometryOps.area(::GeometryOps.Planar, x) = GeometryOps.area(x)
 
 import GeometryOps as GO
 import GeoInterface as GI

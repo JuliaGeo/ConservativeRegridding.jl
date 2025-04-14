@@ -1,9 +1,10 @@
 using SortTileRecursiveTree
 
 const DEFAULT_NODECAPACITY = 10
-const DEFAULT_FLOATTYPE = Float64
 const DEFAULT_MANIFOLD = GeometryOps.Planar()
-const DEFAULT_MATRIX = SparseArrays.spzeros # SparseCSC for regridder
+const DEFAULT_FLOATTYPE = Float64
+const DEFAULT_MATRIX = SparseArrays.SparseMatrixCSC{DEFAULT_FLOATTYPE}
+const DEFAULT_MATRIX_CONSTRUCTOR = SparseArrays.spzeros # SparseCSC for regridder
 
 abstract type AbstractRegridder end
 
@@ -13,29 +14,32 @@ struct Regridder{W, A} <: AbstractRegridder
     src_areas :: A     # Vector of areas on the source grid
 end
 
+"""$(TYPEDSIGNATURES)
+Return a Regridder for the backwards regridding, i.e. from destination to source grid.
+Does not copy any data, i.e. regridder for forward and backward share the same underlying arrays."""
 LinearAlgebra.transpose(regridder::Regridder) =
-    Regridder(regridder.intersections', regridder.src_areas, regridder.dst_areas)
+    Regridder(transpose(regridder.intersections), regridder.src_areas, regridder.dst_areas)
 
-Base.size(regridder::Regridder, args...; kwargs...) = size(regridder.intersections, args...; kwargs...)
+Base.size(regridder::Regridder, args...) = size(regridder.intersections, args...)
 
 # allocate the areas matrix as SparseCSC if not provided
 function intersection_areas(
     src_field, # arrays of polygons of the first grid
-    dst_field, # arrays of polygons of the second grid
-    m::GeometryOps.Manifold = DEFAULT_MANIFOLD;
-    T::Type{<:Number} = DEFAULT_FLOATTYPE,          # float type used for the areas matrix = regridder
+    dst_field; # arrays of polygons of the second grid
+    T::Type{<:Number} = DEFAULT_FLOATTYPE,              # float type used for the areas matrix = regridder
+    matrix_constructor = DEFAULT_MATRIX_CONSTRUCTOR,    # type of the areas matrix = regridder
     kwargs...
 )
     # unless `areas::AbstractMatrix` is provided (see in-place method ! below), create a SparseCSC matrix
-    areas = DEFAULT_MATRIX(T, length(src_field), length(dst_field))
+    areas = matrix_constructor(T, length(src_field), length(dst_field))
     return compute_intersection_areas!(areas, src_field, dst_field, m; kwargs...)
 end
 
 function compute_intersection_areas!(
-    areas::AbstractMatrix, # intersection areas for all combinatations of grid cells in field1, field2
-    field1,                # arrays of polygons
-    field2,                # arrays of polygons
-    m::GeometryOps.Manifold = GeometryOps.Planar();
+    areas::AbstractMatrix,  # intersection areas for all combinatations of grid cells in field1, field2
+    grid1,                  # arrays of polygons
+    grid2,                  # arrays of polygons
+    m::GeometryOps.Manifold = DEFAULT_MANIFOLD;
     nodecapacity1 = DEFAULT_NODECAPACITY,
     nodecapacity2 = DEFAULT_NODECAPACITY,
 )
@@ -43,13 +47,13 @@ function compute_intersection_areas!(
     # we may want to separately tune nodecapacity if one is much larger than the other.  
     # specifically we may want to tune leaf node capacity via Hilbert packing while still 
     # constraining inner node capacity.  But that can come later.
-    tree1 = SortTileRecursiveTree.STRtree(field1; nodecapacity = nodecapacity1) 
-    tree2 = SortTileRecursiveTree.STRtree(field2; nodecapacity = nodecapacity2)
+    tree1 = SortTileRecursiveTree.STRtree(grid1; nodecapacity = nodecapacity1) 
+    tree2 = SortTileRecursiveTree.STRtree(grid2; nodecapacity = nodecapacity2)
     # Do the dual query, which is the most efficient way to do this,
     # by iterating down both trees simultaneously, rejecting pairs of nodes that do not intersect.
     # when we find an intersection, we calculate the area of the intersection and add it to the result matrix.
     GO.SpatialTreeInterface.do_dual_query(Extents.intersects, tree1, tree2) do i1, i2
-        p1, p2 = field1[i1], field2[i2]
+        p1, p2 = grid1[i1], grid2[i2]
         # may want to check if the polygons intersect first, 
         # to avoid antimeridian-crossing multipolygons viewing a scanline.
         intersection_polys = try # can remove this now, got all the errors cleared up in the fix.
@@ -70,6 +74,9 @@ function compute_intersection_areas!(
     return areas
 end
 
+get_vertices(polygons) = polygons
+get_vertices(polygons::AbstractMatrix) = eachcol(polygons)
+
 """$(TYPEDSIGNATURES)
 Return a Regridder that transfers data from `src_field` to `dst_field`.
 
@@ -78,31 +85,19 @@ The areas are computed by summing the regridder along the first and second dimen
 as the regridder is a matrix of the intersection areas between each grid cell between the
 two grids."""
 function Regridder(
-    src_vertices,
-    dst_vertices;
-    FT = Float64,
-    AT = SparseArrays.SparseMatrixCSC,
+    dst_vertices, # assumes something like this ::AbstractVector{<:AbstractVector{Tuple}},
+    src_vertices;
+    kwargs...
 )
-    # TODO: make this work
-    # intersections = intersection_areas(AT{FT}, src_vertices, dst_vertices)
-    intersections = intersection_areas(dst_vertices, src_vertices)
-    src_areas = cell_areas(intersections, dims = 2)
-    dst_areas = cell_areas(intersections, dims = 1)
+    dst_vertices = GeometryInterface.Polygon.(GeometryOps.LinearRing.(get_vertices(dst_vertices))) .|> GO.fix
+    src_vertices = GeometryInterface.Polygon.(GeometryOps.LinearRing.(get_vertices(src_vertices))) .|> GO.fix
+
+    intersections = intersection_areas(dst_polys, src_vertices; kwargs...)
+
+    # The area vectors are computed by summing the regridder along the first and second dimensions
+    # as the regridder is a matrix of the intersection areas between each grid cell between the two grids
+    src_areas = vec(sum(intersections; dims=2))     # sum along 2nd dimensions returns length of 1st = src grid
+    dst_areas = vec(sum(intersections; dims=1))     # and vice versa
 
     return Regridder(intersections, src_areas, dst_areas)
 end
-    
-function compute_weights!(regridder::Regridder, src_vertices, dst_vertices)
-    compute_intersection_areas!(regridder.intersections, src_vertices, dst_vertices)
-    return regridder
-end
-
-"""$(TYPEDSIGNATURES)
-Returns area vectors (out, in) for the grids used to create the regridder.
-The area vectors are computed by summing the regridder along the first and second dimensions
-as the regridder is a matrix of the intersection areas between each grid cell between the
-two grids."""
-cell_area(weights::AbstractMatrix) = cell_area(weights, :out), cell_area(weights, :in)
-
-"""$(TYPEDSIGNATURES) Area vector from `regridder`, `dims` can be `1` (source grid) or `2` (destination grid)."""
-Base.@propagate_inbounds cell_areas(intersections::AbstractMatrix; dims) = vec(sum(intersections; dims))
