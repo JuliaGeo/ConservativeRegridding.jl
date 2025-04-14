@@ -2,7 +2,7 @@
 Regrid data on `src_field` onto `dst_field` conservativly (mean-preserving) using the `regridder` matrix.
 `dst_area` is the area of each grid cell in `dst_field` and is used to normalize the result,
 if not provided, will recompute this from `regridder`."""
-function regrid!(dst_field::AbstractVector, regridder::Regridder, src_field::AbstractVector)
+function regrid!(field2::AbstractVector, regridder::Regridder, field1::AbstractVector)
 
     # Mathematics of regridding: if A are the inersection areas between
     # the respective grids of the fields d (dst) and s (src),
@@ -19,10 +19,22 @@ function regrid!(dst_field::AbstractVector, regridder::Regridder, src_field::Abs
     # aᵈ = sum(A, 2)
     # aˢ = sum(A, 1)
 
-    LinearAlgebra.mul!(dst_field, regridder.intersections, src_field) # units of src_field times area of grid cell
-    dst_field ./= regridder.dst_areas # normalize by area of each grid cell
+    N2, N1 = size(regridder.intersections)
+    forward = N2 == length(field2) && N1 == length(field1)
 
-    return dst_field
+    if forward
+        A = regridder.intersections # transpose the regridder
+        areas = regridder.src_areas # area of each grid cell
+        LinearAlgebra.mul!(field1, A, field2) # units of src_field times area of grid cell
+    else
+        A = transpose(regridder.intersections) # transpose the regridder
+        areas = regridder.dst_areas # area of each grid cell
+        LinearAlgebra.mul!(field1, A, field2) # units of src_field times area of grid cell
+    end
+
+    field1 ./= areas # normalize by area of each grid cell
+
+    return field1
 end
 
 """$(TYPEDSIGNATURES)

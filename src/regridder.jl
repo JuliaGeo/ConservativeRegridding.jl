@@ -13,6 +13,9 @@ struct Regridder{W, A} <: AbstractRegridder
     src_areas :: A     # Vector of areas on the source grid
 end
 
+LinearAlgebra.transpose(regridder::Regridder) =
+    Regridder(regridder.intersections', regridder.src_areas, regridder.dst_areas)
+
 Base.size(regridder::Regridder, args...; kwargs...) = size(regridder.intersections, args...; kwargs...)
 
 # allocate the areas matrix as SparseCSC if not provided
