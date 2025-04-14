@@ -39,6 +39,92 @@ ConservativeRegridding.regrid!(field1, tranpose(R), field2)
 Note that `R, tranpose(R)` share the same underlying data, `tranpose(R)` just creates a
 new regridder based on a matrix tranpose and by swapping the area vectors, see below.
 
+## Example
+
+Let us tessellate the `[0, 2] x [0, 2]` space in two ways, blue grid and orange grid.
+
+<img width="537" alt="Image" src="https://github.com/user-attachments/assets/04bc4b30-e8d3-4418-a53a-f6a4307d9bba" />
+
+These grids are defined through their polygons, namely
+
+```julia
+# blue grid
+blue_grid = [[(1, 1), (1, 0), (0, 0), (0, 1), (1, 1)],    # polygon 1
+             [(2, 1), (2, 0), (1, 0), (1, 1), (2, 1)],    # polygon 2
+             [(1, 2), (1, 1), (0, 1), (0, 2), (1, 2)],    # polygon 3
+             [(2, 2), (2, 1), (1, 1), (1, 2), (2, 2)]]    # polygon 4
+
+# orange grid
+orange_grid = [[(0, 2), (1, 2), (0, 1), (0, 2)],            # polygon 1
+               [(1, 2), (2, 2), (2, 1), (1, 2)],            # polygon 2
+               [(0, 1), (1, 2), (2, 1), (1, 0), (0, 1)],    # polygon 3
+               [(0, 0), (0, 1), (1, 0), (0, 0)],            # polygon 4
+               [(1, 0), (2, 1), (2, 0), (1, 0)]]            # polygon 5
+```
+
+Note how all polygons are closed by repeating the first vertex as the last.
+The regridder from 5-element orange grid to 4-element blue grid is now
+
+```julia
+julia> R = ConservativeRegridding.Regridder(blue_grid, orange_grid, normalize=false)
+4×5 Regridder{SparseArrays.SparseMatrixCSC{Float64, Int64}, Vector{Float64}}
+  ⋅    ⋅   0.5  0.5   ⋅ 
+  ⋅    ⋅   0.5   ⋅   0.5
+ 0.5   ⋅   0.5   ⋅    ⋅ 
+  ⋅   0.5  0.5   ⋅    ⋅ 
+
+Source areas: [0.5, 0.5, 2.0, 0.5, 0.5]
+Dest.  areas: [1.0, 1.0, 1.0, 1.0]
+```
+
+We disabled the area normalization with `normalize=false` as the units of the
+areas are technically irrelevant, but here it shows nicely how every intersect
+has the area of 1/2.
+
+Start with some data on orange, allocate blue, and regrid
+
+```julia
+orange = rand(5)
+blue = similar(orange, 4)
+ConservativeRegridding.regrid!(blue, R, orange)
+```
+
+Now we test whether the mean is conserved
+
+```julia
+julia> sum(orange .* R.src_areas) / sum(R.src_areas)
+0.4120316695084635
+
+julia> sum(blue .* R.dst_areas) / sum(R.dst_areas)
+0.4120316695084635
+```
+
+Indeed, even exactly. In this case with two very simple grids and intersects
+there is not even rounding error which however has to be expected in general.
+
+The backwards regridding via `tranpose(::Regridder)` is
+
+```julia
+julia> orange_tilde = similar(orange)
+julia> ConservativeRegridding.regrid!(orange_tilde, transpose(R), blue)
+5-element Vector{Float64}:
+ 0.48307071648257566
+ 0.49377895828829815
+ 0.4120316695084635
+ 0.30573011277148604
+ 0.3655468904914942
+
+julia> orange
+5-element Vector{Float64}:
+ 0.9108833154485086
+ 0.9322997990599536
+ 0.05525811751664267
+ 0.5562021080263294
+ 0.6758356634663457
+```
+
+still conserves the mean but has clearly lost in variance.
+
 ## Mathematical background
 
 Let matrix $A$ be the intersection areas between the respective grids of the fields $d$
