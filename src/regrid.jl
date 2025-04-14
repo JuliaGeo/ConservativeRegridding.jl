@@ -2,9 +2,7 @@
 Regrid data on `src_field` onto `dst_field` conservativly (mean-preserving) using the `regridder` matrix.
 `dst_area` is the area of each grid cell in `dst_field` and is used to normalize the result,
 if not provided, will recompute this from `regridder`."""
-Base.@propagate_inbounds function regrid!(dst_field::AbstractVector,
-                                          regridder::Regridder,
-                                          src_field::AbstractVector)
+function regrid!(dst_field::AbstractVector, regridder::Regridder, src_field::AbstractVector)
 
     # Mathematics of regridding: if A are the inersection areas between
     # the respective grids of the fields d (dst) and s (src),
