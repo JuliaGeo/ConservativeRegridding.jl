@@ -14,6 +14,14 @@ struct Regridder{W, A} <: AbstractRegridder
     src_areas :: A     # Vector of areas on the source grid
 end
 
+function Base.show(io::IO, regridder::Regridder{W, A}) where {W, A}
+    n2, n1 = size(regridder)
+    println(io, "$n2×$n1 Regridder{$W, $A}")
+    Base.print_array(io, regridder.intersections)
+    println(io, "\n\nSource areas: ", regridder.src_areas)
+    print(io, "Dest.  areas: ", regridder.dst_areas)
+end
+
 """$(TYPEDSIGNATURES)
 Return a Regridder for the backwards regridding, i.e. from destination to source grid.
 Does not copy any data, i.e. regridder for forward and backward share the same underlying arrays."""
