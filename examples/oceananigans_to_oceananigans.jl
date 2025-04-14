@@ -77,11 +77,11 @@ right_index(i, ::Face) = i
     end
 end
 
-global_grid = LatitudeLongitudeGrid(size=(90, 45, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-hi_res_regional_grid = LatitudeLongitudeGrid(size=(60, 60, 1), longitude=(0, 60), latitude=(0, 60), z=(0, 1))
+coarse_grid = LatitudeLongitudeGrid(size=(90, 45, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+fine_grid = LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
 
-c1 = CenterField(global_grid)
-c2 = CenterField(hi_res_regional_grid)
+c1 = CenterField(coarse_grid)
+c2 = CenterField(fine_grid)
 
 c1_cells = compute_cell_matrix(c1)
 c2_cells = compute_cell_matrix(c2)
