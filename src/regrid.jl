@@ -4,17 +4,11 @@ Regrid data on `src_field` onto `dst_field` conservativly (mean-preserving) usin
 if not provided, will recompute this from `regridder`. `src_field` and `dst_field` can be any n-dimensional array
 in which case it regridding of the 1st dimension is broadcast to additional dimensions.
 
-Mathematics of regridding: if A are the inersection areas between the respective grids of the fields d (dst) and s (src),
-and aˢ and aᵈ are the areas of the source and destination grid cells,
+Mathematics of regridding: if A are the intersection areas between the respective grids of the fields d (dst) and s (src),
+and aˢ and aᵈ are the areas of the source and destination grid cells, then ``d`` is computed via
 
 ```math
-d = (A * s) / aˢ # regrid from s to d
-```
-
-and
-
-```math
-s = (Aᵀ * d) ./ aᵈ # regrid from d to s
+d = (A s) / aˢ 
 ```
 
 Note that by construction,
