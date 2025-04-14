@@ -38,12 +38,12 @@ function compute_intersection_areas!(
     # we may want to separately tune nodecapacity if one is much larger than the other.  
     # specifically we may want to tune leaf node capacity via Hilbert packing while still 
     # constraining inner node capacity.  But that can come later.
-    tree1 = SortTileRecursiveTree.STRtree(grid1; nodecapacity = nodecapacity1) 
-    tree2 = SortTileRecursiveTree.STRtree(grid2; nodecapacity = nodecapacity2)
+    tree1 = GO.SortTileRecursiveTree.STRtree(grid1; nodecapacity = nodecapacity1) 
+    tree2 = GO.SortTileRecursiveTree.STRtree(grid2; nodecapacity = nodecapacity2)
     # Do the dual query, which is the most efficient way to do this,
     # by iterating down both trees simultaneously, rejecting pairs of nodes that do not intersect.
     # when we find an intersection, we calculate the area of the intersection and add it to the result matrix.
-    GeometryOps.SpatialTreeInterface.do_dual_query(Extents.intersects, tree1, tree2) do i1, i2
+    GO.SpatialTreeInterface.do_dual_query(Extents.intersects, tree1, tree2) do i1, i2
         p1, p2 = grid1[i1], grid2[i2]
         # may want to check if the polygons intersect first, 
         # to avoid antimeridian-crossing multipolygons viewing a scanline.
@@ -56,7 +56,7 @@ function compute_intersection_areas!(
             rethrow(e)
         end
 
-        area_of_intersection = GeometryOps.area(m, intersection_polys)
+        area_of_intersection = GO.area(intersection_polys)
         if area_of_intersection > 0
             areas[i1, i2] += area_of_intersection
         end
@@ -98,6 +98,5 @@ as the regridder is a matrix of the intersection areas between each grid cell be
 two grids."""
 cell_area(weights::AbstractMatrix) = cell_area(weights, :out), cell_area(weights, :in)
 
-"""$(TYPEDSIGNATURES) Area vector from `regridder`, `dims` can be `:in` or `:out`."""
+"""$(TYPEDSIGNATURES) Area vector from `regridder`, `dims` can be `1` (source grid) or `2` (destination grid)."""
 Base.@propagate_inbounds cell_areas(intersections::AbstractMatrix; dims) = vec(sum(intersections; dims))
-    

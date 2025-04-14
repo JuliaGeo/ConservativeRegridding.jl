@@ -43,6 +43,7 @@ function regrid(
     args...
 )
     n_out, n_in = size(regridder)
+
     @boundscheck if n_in != length(src_field)
         @warn "Regridder of size $(size(regridder)) does not match input grid of length $(length(src_field))."
     end
@@ -53,5 +54,5 @@ function regrid(
     end
 
     dst_field = zeros(eltype(src_field), n_out) # default Julia vector for now
-    return regrid!(dst_field, src_field, regridder, args...)
+    return regrid!(dst_field, regridder, src_field, args...)
 end
