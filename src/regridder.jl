@@ -22,6 +22,16 @@ LinearAlgebra.transpose(regridder::Regridder) =
 
 Base.size(regridder::Regridder, args...) = size(regridder.intersections, args...)
 
+function LinearAlgebra.normalize!(regridder::Regridder)
+    (; intersections) = regridder
+    norm = maximum(intersections)   # TODO is this the best normalizer?
+    intersections ./= norm
+
+    regridder.src_areas ./= norm
+    regridder.dst_areas ./= norm
+    return regridder
+end
+
 # allocate the areas matrix as SparseCSC if not provided
 function intersection_areas(
     src_field, # arrays of polygons of the first grid
@@ -74,7 +84,7 @@ function compute_intersection_areas!(
     return areas
 end
 
-get_vertices(polygons) = polygons
+get_vertices(polygons) = polygons       # normally vector of polygons, which are vectors of points
 get_vertices(polygons::AbstractMatrix) = eachcol(polygons)
 
 """$(TYPEDSIGNATURES)
