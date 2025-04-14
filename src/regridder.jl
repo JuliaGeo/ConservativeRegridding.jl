@@ -32,14 +32,14 @@ function intersection_areas(
 )
     # unless `areas::AbstractMatrix` is provided (see in-place method ! below), create a SparseCSC matrix
     areas = matrix_constructor(T, length(src_field), length(dst_field))
-    return compute_intersection_areas!(areas, src_field, dst_field, m; kwargs...)
+    return compute_intersection_areas!(areas, src_field, dst_field; kwargs...)
 end
 
 function compute_intersection_areas!(
     areas::AbstractMatrix,  # intersection areas for all combinatations of grid cells in field1, field2
     grid1,                  # arrays of polygons
-    grid2,                  # arrays of polygons
-    m::GeometryOps.Manifold = DEFAULT_MANIFOLD;
+    grid2;                  # arrays of polygons
+    manifold::GeometryOps.Manifold = DEFAULT_MANIFOLD,
     nodecapacity1 = DEFAULT_NODECAPACITY,
     nodecapacity2 = DEFAULT_NODECAPACITY,
 )
@@ -52,7 +52,7 @@ function compute_intersection_areas!(
     # Do the dual query, which is the most efficient way to do this,
     # by iterating down both trees simultaneously, rejecting pairs of nodes that do not intersect.
     # when we find an intersection, we calculate the area of the intersection and add it to the result matrix.
-    GO.SpatialTreeInterface.do_dual_query(Extents.intersects, tree1, tree2) do i1, i2
+    GeometryOps.SpatialTreeInterface.do_dual_query(Extents.intersects, tree1, tree2) do i1, i2
         p1, p2 = grid1[i1], grid2[i2]
         # may want to check if the polygons intersect first, 
         # to avoid antimeridian-crossing multipolygons viewing a scanline.
@@ -65,7 +65,7 @@ function compute_intersection_areas!(
             rethrow(e)
         end
 
-        area_of_intersection = GO.area(intersection_polys)
+        area_of_intersection = GeometryOps.area(intersection_polys)
         if area_of_intersection > 0
             areas[i1, i2] += area_of_intersection
         end
@@ -89,10 +89,10 @@ function Regridder(
     src_vertices;
     kwargs...
 )
-    dst_vertices = GeometryInterface.Polygon.(GeometryOps.LinearRing.(get_vertices(dst_vertices))) .|> GO.fix
-    src_vertices = GeometryInterface.Polygon.(GeometryOps.LinearRing.(get_vertices(src_vertices))) .|> GO.fix
+    dst_polys = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(dst_vertices))) .|> GO.fix
+    src_polys = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(src_vertices))) .|> GO.fix
 
-    intersections = intersection_areas(dst_polys, src_vertices; kwargs...)
+    intersections = intersection_areas(dst_polys, src_polys; kwargs...)
 
     # The area vectors are computed by summing the regridder along the first and second dimensions
     # as the regridder is a matrix of the intersection areas between each grid cell between the two grids
