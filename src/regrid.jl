@@ -26,18 +26,6 @@ function regrid!(dst_field::AbstractVector, regridder::Regridder, src_field::Abs
 end
 
 """$(TYPEDSIGNATURES)
-regrid a vector `src_field` using `regridder` and writes the result in `dst_field`.
-Recomputes the area vector for the output grid from `regridder`. Pass on as optional argument to avoid this."""
-function regrid!(
-    dst_field::AbstractVector,
-    regridder::AbstractMatrix,
-    src_field::AbstractVector,
-)
-    dst_area = cell_area(regridder, :out)
-    regrid!(dst_field, src_field, regridder, dst_area)
-end
-
-"""$(TYPEDSIGNATURES)
 regrid a vector `src_field` using `regridder`. Area vector for the output grid can
 be passed on as optional argument to prevent recalculating it from the regridder."""
 function regrid(

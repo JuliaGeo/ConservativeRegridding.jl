@@ -6,37 +6,6 @@ using ConservativeRegridding
 
 instantiate(L) = L()
 
-struct InteriorVector{FT, I, S} <: AbstractVector{FT}
-    interior :: I
-    size :: S
-    function InteriorVector(interior::I) where I
-        sz = size(interior)
-        S = typeof(sz)
-        return new{eltype(interior), I, S}(interior, size)
-    end
-end
-
-InteriorVector(f::Field) = InteriorVector(interior(f))
-
-Base.@propagate_inbounds function Base.getindex(iv::InteriorVector, I::Integer)
-    Nx, Ny, Nz = iv.size
-    # Convert to 0-based for calculation
-    I0 = I - 1
-    
-    # Calculate indices using column-major order (Julia's default)
-    # In column-major, indices change fastest from first dimension to last (i → j → k)
-        # Convert to 0-based for calculation
-    I0 = I - 1
-    
-    # In row-major, indices change fastest from last dimension to first (k → j → i)
-    i = I0 ÷ (Ny * Nz) + 1
-    remaining_offset = I0 % (Ny * Nz)
-    j = remaining_offset ÷ Nz + 1
-    k = remaining_offset % Nz + 1
-    
-    return vf.interior[i, j, k]
-end
-
 function compute_cell_matrix(field::AbstractField)
     Fx, Fy, _ = size(field)
     LX, LY, _ = Oceananigans.Fields.location(field)
@@ -126,13 +95,4 @@ polys2 = GI.Polygon.(GI.LinearRing.(eachcol(c2_cells))) .|> GO.fix
 
 regridder = ConservativeRegridding.Regridder(polys1, polys2)
 
-ConservativeRegridding.regrid!(interior(c2), regridder, interior(c1))
-
-# semantics: going from b → c
-# c = (R * b) ./ ac
-#
-# b = (Rᵀ * c) ./ ab
-#
-# ac = sum(R, 2)
-# ab = sum(R, 1)
-=#
+ConservativeRegridding.regrid!(vec(interior(c2)), regridder, vec(interior(c1)))

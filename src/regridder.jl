@@ -83,8 +83,9 @@ function Regridder(
     # TODO: make this work
     # intersections = intersection_areas(AT{FT}, src_vertices, dst_vertices)
     intersections = intersection_areas(dst_vertices, src_vertices)
-    src_areas = cell_areas(intersections, dims = 1)
-    dst_areas = cell_areas(intersections, dims = 2)
+    src_areas = cell_areas(intersections, dims = 2)
+    dst_areas = cell_areas(intersections, dims = 1)
+
     return Regridder(intersections, src_areas, dst_areas)
 end
     
