@@ -1,3 +1,5 @@
+using SortTileRecursiveTree
+
 const DEFAULT_NODECAPACITY = 10
 const DEFAULT_FLOATTYPE = Float64
 const DEFAULT_MANIFOLD = GeometryOps.Planar()
@@ -27,9 +29,9 @@ function intersection_areas(
 end
 
 function compute_intersection_areas!(
-    areas::AbstractMatrix,      # intersection areas for all combinatations of grid cells in grid1, grid2
-    grid1,                      # arrays of polygons
-    grid2,                      # arrays of polygons
+    areas::AbstractMatrix, # intersection areas for all combinatations of grid cells in field1, field2
+    field1,                # arrays of polygons
+    field2,                # arrays of polygons
     m::GeometryOps.Manifold = GeometryOps.Planar();
     nodecapacity1 = DEFAULT_NODECAPACITY,
     nodecapacity2 = DEFAULT_NODECAPACITY,
@@ -38,13 +40,13 @@ function compute_intersection_areas!(
     # we may want to separately tune nodecapacity if one is much larger than the other.  
     # specifically we may want to tune leaf node capacity via Hilbert packing while still 
     # constraining inner node capacity.  But that can come later.
-    tree1 = GO.SortTileRecursiveTree.STRtree(grid1; nodecapacity = nodecapacity1) 
-    tree2 = GO.SortTileRecursiveTree.STRtree(grid2; nodecapacity = nodecapacity2)
+    tree1 = SortTileRecursiveTree.STRtree(field1; nodecapacity = nodecapacity1) 
+    tree2 = SortTileRecursiveTree.STRtree(field2; nodecapacity = nodecapacity2)
     # Do the dual query, which is the most efficient way to do this,
     # by iterating down both trees simultaneously, rejecting pairs of nodes that do not intersect.
     # when we find an intersection, we calculate the area of the intersection and add it to the result matrix.
     GO.SpatialTreeInterface.do_dual_query(Extents.intersects, tree1, tree2) do i1, i2
-        p1, p2 = grid1[i1], grid2[i2]
+        p1, p2 = field1[i1], field2[i2]
         # may want to check if the polygons intersect first, 
         # to avoid antimeridian-crossing multipolygons viewing a scanline.
         intersection_polys = try # can remove this now, got all the errors cleared up in the fix.
@@ -80,10 +82,10 @@ function Regridder(
 )
     # TODO: make this work
     # intersections = intersection_areas(AT{FT}, src_vertices, dst_vertices)
-    intersections = intersection_areas(src_vertices, dst_vertices)
-    src_areas = cell_areas(intersec_area, dims = 1)
-    dst_areas = cell_areas(intersec_area, dims = 2)
-    return Regridder(intersec_area, src_areas, dst_areas)
+    intersections = intersection_areas(dst_vertices, src_vertices)
+    src_areas = cell_areas(intersections, dims = 1)
+    dst_areas = cell_areas(intersections, dims = 2)
+    return Regridder(intersections, src_areas, dst_areas)
 end
     
 function compute_weights!(regridder::Regridder, src_vertices, dst_vertices)

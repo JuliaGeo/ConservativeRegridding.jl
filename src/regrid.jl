@@ -2,24 +2,29 @@
 Regrid data on `src_field` onto `dst_field` conservativly (mean-preserving) using the `regridder` matrix.
 `dst_area` is the area of each grid cell in `dst_field` and is used to normalize the result,
 if not provided, will recompute this from `regridder`."""
-Base.@propagate_inbounds function regrid!(
-    dst_field::AbstractVector,
-    regridder::AbstractMatrix,
-    src_field::AbstractVector,
-    dst_area::AbstractVector,
-)
-    @boundscheck (size(regridder, 2) == length(dst_field) && size(regridder, 1) == length(src_field)) &&
-        @warn "regridder of size $(size(regridder)) matches input grid $(length(src_field)) and output grid $(length(dst_field)) when transposed."*
-                " You may want to regrid with `transpose(regridder)` instead."
+Base.@propagate_inbounds function regrid!(dst_field::AbstractVector,
+                                          regridder::AbstractMatrix,
+                                          src_field::AbstractVector)
 
-    @boundscheck if length(dst_field) != length(dst_area)
-        @warn "Area vector of length $(length(dst_area)) is incompatible with output grid vector of length $(length(dst_field))."
-    end
-    
-    # the actual regridding is a matrix-vector multiplication with the regridder, do in-place
-    LinearAlgebra.mul!(dst_field, regridder, src_field) # units of src_field times area of grid cell
+    # Mathematics of regridding: if A are the inersection areas between
+    # the respective grids of the fields d (dst) and s (src),
+    # and aˢ and aᵈ are the areas of the source and destination grid cells,
+    # 
+    # d = (A * s) ./ aˢ # regrid from s to d
+    #
+    # and
+    #
+    # s = (Aᵀ * d) ./ aᵈ # regrid from d to s
+    #
+    # Note that by construction,
+    #
+    # aᵈ = sum(A, 2)
+    # aˢ = sum(A, 1)
 
-    return dst_field ./= dst_area # normalize by area of each grid cell
+    LinearAlgebra.mul!(dst_field, regridder.intersections, src_field) # units of src_field times area of grid cell
+    dst_field ./= regridder.dst_areas # normalize by area of each grid cell
+
+    return dst_field
 end
 
 """$(TYPEDSIGNATURES)
