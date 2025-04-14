@@ -93,10 +93,12 @@ Return a Regridder that transfers data from `src_field` to `dst_field`.
 Regridder stores the intersection areas between
 The areas are computed by summing the regridder along the first and second dimensions
 as the regridder is a matrix of the intersection areas between each grid cell between the
-two grids."""
+two grids. Additional `kwargs` are passed to the `intersection_areas` function.
+"""
 function Regridder(
     dst_vertices, # assumes something like this ::AbstractVector{<:AbstractVector{Tuple}},
     src_vertices;
+    normalize::Bool = true,
     kwargs...
 )
     # wrap into GeoInterface.Polygon, apply antimeridian cuttng via fix
@@ -110,5 +112,7 @@ function Regridder(
     src_areas = vec(sum(intersections; dims=2))     # sum along 2nd dimensions returns length of 1st = src grid
     dst_areas = vec(sum(intersections; dims=1))     # and vice versa
 
-    return Regridder(intersections, src_areas, dst_areas)
+    regridder = Regridder(intersections, src_areas, dst_areas)
+    normalize && LinearAlgebra.normalize!(regridder)
+    return regridder
 end
