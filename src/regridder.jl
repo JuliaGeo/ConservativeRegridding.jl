@@ -89,8 +89,8 @@ function Regridder(
     src_vertices;
     kwargs...
 )
-    dst_polys = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(dst_vertices))) .|> GO.fix
-    src_polys = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(src_vertices))) .|> GO.fix
+    dst_polys = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(dst_vertices))) .|> GeometryOps.fix
+    src_polys = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(src_vertices))) .|> GeometryOps.fix
 
     intersections = intersection_areas(dst_polys, src_polys; kwargs...)
 
