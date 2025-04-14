@@ -3,6 +3,7 @@ using Oceananigans.Grids: ξnode, ηnode
 using Oceananigans.Fields: AbstractField
 using KernelAbstractions: @index, @kernel
 using ConservativeRegridding
+using Statistics
 
 instantiate(L) = L()
 
@@ -77,22 +78,44 @@ right_index(i, ::Face) = i
     end
 end
 
-coarse_grid = LatitudeLongitudeGrid(size=(90, 45, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-fine_grid = LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+coarse_grid = LatitudeLongitudeGrid(size=(90, 45, 1),   longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+fine_grid   = LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
 
-c1 = CenterField(coarse_grid)
-c2 = CenterField(fine_grid)
+dst = CenterField(coarse_grid)
+src = CenterField(fine_grid)
 
-c1_cells = compute_cell_matrix(c1)
-c2_cells = compute_cell_matrix(c2)
+dst_cells = compute_cell_matrix(dst)
+src_cells = compute_cell_matrix(src)
 
-set!(c1, (x, y, z) -> rand())
+set!(src, (x, y, z) -> rand())
 
-import GeoInterface as GI, GeometryOps as GO
+regridder = ConservativeRegridding.Regridder(dst_cells, src_cells)
 
-polys1 = GI.Polygon.(GI.LinearRing.(eachcol(c1_cells))) .|> GO.fix
-polys2 = GI.Polygon.(GI.LinearRing.(eachcol(c2_cells))) .|> GO.fix
+ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
 
-regridder = ConservativeRegridding.Regridder(polys1, polys2)
+@test mean(dst) ≈ mean(src)
 
-ConservativeRegridding.regrid!(vec(interior(c2)), regridder, vec(interior(c1)))
+set!(dst, (x, y, z) -> rand())
+
+ConservativeRegridding.regrid!(vec(interior(src)), transpose(regridder), vec(interior(dst)))
+
+@test mean(c2) ≈ mean(c1)
+
+# Does not pass until we figure out what to do for zero areas
+# large_domain_grid = RectilinearGrid(size=(100, 100), x=(0, 2), y=(0, 2), topology=(Periodic, Periodic, Flat))
+# small_domain_grid = RectilinearGrid(size=(200, 200), x=(0, 1), y=(0, 1), topology=(Periodic, Periodic, Flat))
+
+# src = CenterField(small_domain_grid)
+# dst = CenterField(large_domain_grid)
+
+# src_cells = compute_cell_matrix(src)
+# dst_cells = compute_cell_matrix(dst)
+
+# set!(src, 1)
+
+# regridder = ConservativeRegridding.Regridder(dst_cells, src_cells)
+
+# ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+
+# @test mean(dst) ≈ mean(src)
+

@@ -13,10 +13,6 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 SortTileRecursiveTree = "746ee33f-1797-42c2-866d-db2fce69d14d"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
-[sources]
-GeometryOps = {rev = "as/trees-and-antimeridian", url = "https://github.com/JuliaGeo/GeometryOps.jl.git"}
-GeometryOpsCore = {rev = "as/trees-and-antimeridian"}
-
 [compat]
 DocStringExtensions = "0.8, 0.9"
 Extents = "0.1"
@@ -31,7 +27,15 @@ julia = "1.10"
 [extras]
 SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
 SpeedyWeather = "9e226e20-d153-4fed-8a5b-493def4f21a9"
+Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
+[sources.GeometryOps]
+rev = "as/trees-and-antimeridian"
+url = "https://github.com/JuliaGeo/GeometryOps.jl.git"
+
+[sources.GeometryOpsCore]
+rev = "as/trees-and-antimeridian"
+
 [targets]
-test = ["SafeTestsets", "SpeedyWeather", "Test"]
+test = ["SafeTestsets", "SpeedyWeather", "Oceananigans", "Test"]
