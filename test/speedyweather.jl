@@ -59,18 +59,13 @@ grid2 = rand(OctaminimalGaussianGrid, 5 + 100)
 faces1 = get_faces(grid1)
 faces2 = get_faces(grid2)
 
-polys1 = map(GO.ClosedRing() ∘ GO.CutAtAntimeridianAndPoles(), (GI.Polygon([GI.LinearRing(f)]) for f in eachcol(faces1)))
-polys2 = map(GO.ClosedRing() ∘ GO.CutAtAntimeridianAndPoles(), (GI.Polygon([GI.LinearRing(f)]) for f in eachcol(faces2)))
-
-A = ConservativeRegridding.intersection_areas(polys1, polys2)
-
+A = ConservativeRegridding.intersection_areas(faces1, faces2)
 
 # Now, let's perform some interpolation!
 area1 = vec(sum(A, dims=2))
 @test area1 == GO.area.(polys1)
 area2 = vec(sum(A, dims=1))
 @test area2 == GO.area.(polys2)
-
 
 values_on_grid1 = A * grid2 ./ area1
 @test sum(values_on_grid1 .* area1) == sum(grid2 .* area2)

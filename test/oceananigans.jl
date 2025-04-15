@@ -99,7 +99,7 @@ set!(dst, (x, y, z) -> rand())
 
 ConservativeRegridding.regrid!(vec(interior(src)), transpose(regridder), vec(interior(dst)))
 
-@test mean(c2) ≈ mean(c1)
+@test mean(dst) ≈ mean(src)
 
 # Does not pass until we figure out what to do for zero areas
 # large_domain_grid = RectilinearGrid(size=(100, 100), x=(0, 2), y=(0, 2), topology=(Periodic, Periodic, Flat))
