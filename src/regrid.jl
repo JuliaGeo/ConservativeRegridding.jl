@@ -1,24 +1,28 @@
 """$(TYPEDSIGNATURES)
 Regrid data on `src_field` onto `dst_field` conservativly (mean-preserving) using the `regridder` matrix.
 `dst_area` is the area of each grid cell in `dst_field` and is used to normalize the result,
-if not provided, will recompute this from `regridder`."""
-function regrid!(dst_field::AbstractVector, regridder::Regridder, src_field::AbstractVector)
+if not provided, will recompute this from `regridder`. `src_field` and `dst_field` can be any n-dimensional array
+in which case it regridding of the 1st dimension is broadcast to additional dimensions.
 
-    # Mathematics of regridding: if A are the inersection areas between
-    # the respective grids of the fields d (dst) and s (src),
-    # and aˢ and aᵈ are the areas of the source and destination grid cells,
-    # 
-    # d = (A * s) ./ aˢ # regrid from s to d
-    #
-    # and
-    #
-    # s = (Aᵀ * d) ./ aᵈ # regrid from d to s
-    #
-    # Note that by construction,
-    #
-    # aᵈ = sum(A, 2)
-    # aˢ = sum(A, 1)
+Mathematics of regridding: if A are the intersection areas between the respective grids of the fields d (dst) and s (src),
+and aˢ and aᵈ are the areas of the source and destination grid cells, then ``d`` is computed via
 
+```math
+d = (A s) / aˢ 
+```
+
+Note that by construction,
+
+```math
+    aᵈ = sum(A, 2)
+    aˢ = sum(A, 1)
+```
+"""
+function regrid!(
+    dst_field,
+    regridder::Regridder,
+    src_field,
+)
     areas = regridder.dst_areas # area of each grid cell
     LinearAlgebra.mul!(dst_field, regridder.intersections, src_field) # units of src_field times area of grid cell
     dst_field ./= areas # normalize by area of each grid cell
