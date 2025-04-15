@@ -59,7 +59,10 @@ grid2 = rand(OctaminimalGaussianGrid, 5 + 100)
 faces1 = get_faces(grid1)
 faces2 = get_faces(grid2)
 
-A = ConservativeRegridding.intersection_areas(faces1, faces2)
+polys1 = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(faces1))) .|> GeometryOps.fix
+polys2 = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(faces2))) .|> GeometryOps.fix
+
+A = ConservativeRegridding.intersection_areas(polys1, polys2)
 
 # Now, let's perform some interpolation!
 area1 = vec(sum(A, dims=2))
