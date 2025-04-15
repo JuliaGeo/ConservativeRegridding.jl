@@ -98,8 +98,8 @@ function Regridder(
     # If the two grids completely overlap, then the areas should be equivalent
     # to the sum of the intersection areas along the second and fisrt dimensions, 
     # for src and dst, respectively. This is not the case if the two grids do not cover the same area.
-    src_areas = GeometryOps.area(src_polys) 
-    dst_areas = GeometryOps.area(dst_polys) 
+    dst_areas = GeometryOps.area.(dst_polys) 
+    src_areas = GeometryOps.area.(src_polys) 
 
-    return Regridder(intersections, src_areas, dst_areas)
+    return Regridder(intersections, dst_areas, src_areas)
 end

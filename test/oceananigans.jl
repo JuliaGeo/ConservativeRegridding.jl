@@ -101,21 +101,27 @@ ConservativeRegridding.regrid!(vec(interior(src)), transpose(regridder), vec(int
 
 @test mean(dst) ≈ mean(src)
 
-# Does not pass until we figure out what to do for zero areas
-# large_domain_grid = RectilinearGrid(size=(100, 100), x=(0, 2), y=(0, 2), topology=(Periodic, Periodic, Flat))
-# small_domain_grid = RectilinearGrid(size=(200, 200), x=(0, 1), y=(0, 1), topology=(Periodic, Periodic, Flat))
+large_domain_grid = RectilinearGrid(size=(100, 100), x=(0, 2), y=(0, 2), topology=(Periodic, Periodic, Flat))
+small_domain_grid = RectilinearGrid(size=(200, 200), x=(0, 1), y=(0, 1), topology=(Periodic, Periodic, Flat))
 
-# src = CenterField(small_domain_grid)
-# dst = CenterField(large_domain_grid)
+src = CenterField(small_domain_grid)
+dst = CenterField(large_domain_grid)
 
-# src_cells = compute_cell_matrix(src)
-# dst_cells = compute_cell_matrix(dst)
+src_cells = compute_cell_matrix(src)
+dst_cells = compute_cell_matrix(dst)
 
-# set!(src, 1)
+set!(src, 1)
 
-# regridder = ConservativeRegridding.Regridder(dst_cells, src_cells)
+regridder = ConservativeRegridding.Regridder(dst_cells, src_cells)
 
-# ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
 
-# @test mean(dst) ≈ mean(src)
+# Compute the integral and make sure it is the same as the original field
+dst_int = Field(Integral(dst))
+src_int = Field(Integral(src))
+
+compute!(dst_int)
+compute!(src_int)
+
+@test dst_int[1, 1, 1] ≈ src[1, 1, 1]
 
