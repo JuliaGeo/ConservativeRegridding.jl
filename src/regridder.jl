@@ -115,12 +115,13 @@ function Regridder(
 
     intersections = intersection_areas(dst_polys, src_polys; kwargs...)
 
-    # The area vectors are computed by summing the regridder along the first and second dimensions
-    # as the regridder is a matrix of the intersection areas between each grid cell between the two grids
-    src_areas = vec(sum(intersections; dims=2))     # sum along 2nd dimensions returns length of 1st = src grid
-    dst_areas = vec(sum(intersections; dims=1))     # and vice versa
+    # If the two grids completely overlap, then the areas should be equivalent
+    # to the sum of the intersection areas along the second and fisrt dimensions, 
+    # for src and dst, respectively. This is not the case if the two grids do not cover the same area.
+    dst_areas = GeometryOps.area.(dst_polys) 
+    src_areas = GeometryOps.area.(src_polys) 
 
-    regridder = Regridder(intersections, src_areas, dst_areas)
+    regridder = Regridder(intersections, dst_areas, src_areas)
     normalize && LinearAlgebra.normalize!(regridder)
     return regridder
 end
