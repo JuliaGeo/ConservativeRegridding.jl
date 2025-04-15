@@ -1,8 +1,7 @@
 using ConservativeRegridding
 using SpeedyWeather
-
-import GeometryOps as GO, GeoInterface as GI
-
+using GeoInterface
+using GeometryOps
 using Test
 
 # Copied from SpeedyWeather.jl/ext/SpeedyWeatherGeoMakieExt/get_faces.jl
@@ -50,25 +49,23 @@ end
 
 get_faces(grid::AbstractGridArray; kwargs...) = get_faces(typeof(grid), grid.nlat_half; kwargs...)
 
-
 # Now begin the test for real
 
-grid1 = rand(OctaHEALPixGrid, 5 + 100)
-grid2 = rand(OctaminimalGaussianGrid, 5 + 100)
+src = rand(OctaHEALPixGrid, 5 + 100)
+dst = rand(OctaminimalGaussianGrid, 5 + 100)
 
-faces1 = get_faces(grid1)
-faces2 = get_faces(grid2)
+src_cells = get_faces(src)
+dst_cells = get_faces(dst)
 
-polys1 = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(faces1))) .|> GeometryOps.fix
-polys2 = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(faces2))) .|> GeometryOps.fix
+regridder = ConservativeRegridding.Regridder(dst_cells, src_cells)
 
-A = ConservativeRegridding.intersection_areas(polys1, polys2)
+A = regridder.intersections
 
 # Now, let's perform some interpolation!
 area1 = vec(sum(A, dims=2))
-@test area1 == GO.area.(polys1)
+@test area1 == A.dst_areas
 area2 = vec(sum(A, dims=1))
-@test area2 == GO.area.(polys2)
+@test area2 == A.src_areas
 
 values_on_grid1 = A * grid2 ./ area1
 @test sum(values_on_grid1 .* area1) == sum(grid2 .* area2)
