@@ -57,6 +57,18 @@ function compute_intersection_areas!(
     areas::AbstractMatrix,  # intersection areas for all combinatations of grid cells in field1, field2
     grid1,                  # arrays of polygons
     grid2;                  # arrays of polygons
+    threaded = false,
+    kwargs...
+)
+
+    return compute_intersection_areas!(areas, grid1, grid2, GeometryOps.booltype(threaded); kwargs...)
+end
+
+function compute_intersection_areas!(
+    areas::AbstractMatrix,  # intersection areas for all combinatations of grid cells in field1, field2
+    grid1,                  # arrays of polygons
+    grid2,                  # arrays of polygons
+    threaded::GeometryOps.False;
     manifold::GeometryOps.Manifold = DEFAULT_MANIFOLD,      # TODO currently not used
     nodecapacity1 = DEFAULT_NODECAPACITY,
     nodecapacity2 = DEFAULT_NODECAPACITY,
@@ -70,7 +82,7 @@ function compute_intersection_areas!(
     # Do the dual query, which is the most efficient way to do this,
     # by iterating down both trees simultaneously, rejecting pairs of nodes that do not intersect.
     # when we find an intersection, we calculate the area of the intersection and add it to the result matrix.
-    GeometryOps.SpatialTreeInterface.do_dual_query(Extents.intersects, tree1, tree2) do i1, i2
+    GeometryOps.SpatialTreeInterface.dual_depth_first_search(Extents.intersects, tree1, tree2) do i1, i2
         p1, p2 = grid1[i1], grid2[i2]
         # may want to check if the polygons intersect first, 
         # to avoid antimeridian-crossing multipolygons viewing a scanline.
@@ -86,6 +98,80 @@ function compute_intersection_areas!(
         area_of_intersection = GeometryOps.area(intersection_polys)
         if area_of_intersection > 0
             areas[i1, i2] += area_of_intersection
+        end
+    end
+
+    return areas
+end
+
+function _poly_poly_area_of_intersection(p1, p2)
+    intersection_polys = GeometryOps.intersection(p1, p2; target = GeoInterface.PolygonTrait())
+    return GeometryOps.area(intersection_polys)
+end
+
+function compute_intersection_areas!(
+    areas::AbstractMatrix{T},  # intersection areas for all combinatations of grid cells in field1, field2
+    grid1,                  # arrays of polygons
+    grid2,                  # arrays of polygons
+    threaded::GeometryOps.True;
+    manifold::GeometryOps.Manifold = DEFAULT_MANIFOLD,      # TODO currently not used
+    nodecapacity1 = DEFAULT_NODECAPACITY,
+    nodecapacity2 = DEFAULT_NODECAPACITY,
+    ntasks = max(1, 3 * Threads.nthreads()),
+    progress = false,
+    area_of_intersection_operator = _poly_poly_area_of_intersection,
+) where T <: Number
+
+    # Prepare STRtrees for the two grids, to speed up intersection queries
+    # we may want to separately tune nodecapacity if one is much larger than the other.  
+    # specifically we may want to tune leaf node capacity via Hilbert packing while still 
+    # constraining inner node capacity.  But that can come later.
+    tree1 = SortTileRecursiveTree.STRtree(grid1; nodecapacity = nodecapacity1) 
+    tree2 = SortTileRecursiveTree.STRtree(grid2; nodecapacity = nodecapacity2)
+    # Do the dual query, which is the most efficient way to do this,
+    # by iterating down both trees simultaneously, rejecting pairs of nodes that do not intersect.
+    # when we find an intersection, we calculate the area of the intersection and add it to the result matrix.
+    potential_pairs = Tuple{Int, Int}[]
+    # Iterate over the dual tree search, and add the pairs to the array we are collecting them in.
+    @time GeometryOps.SpatialTreeInterface.dual_depth_first_search((i1, i2) -> push!(potential_pairs, (i1, i2)), Extents.intersects, tree1, tree2)
+
+    progress && (prog = Progress("Computing intersection areas...", length(potential_pairs)))
+
+    chunk_size = max(1, cld(length(potential_pairs), ntasks))
+    task_chunks = Iterators.partition(potential_pairs, chunk_size)
+
+    tasks = map(task_chunks) do chunk
+        GeometryOps.GeometryOpsCore.StableTasks.@spawn begin
+            output = Pair{Tuple{Int, Int}, T}[]
+            sizehint!(output, length($chunk))
+            for (i1, i2) in $chunk
+                p1, p2 = grid1[i1], grid2[i2]
+                # may want to check if the polygons intersect first, 
+                # to avoid antimeridian-crossing multipolygons viewing a scanline.
+                area_of_intersection = try # can remove this now, got all the errors cleared up in the fix.
+                # At some future point, we may want to add the manifold here
+                # but for right now, GeometryOps only supports planar polygons anyway.
+                area_of_intersection_operator(p1, p2)
+                catch e
+                    @error "Intersection failed!" i1 i2
+                    rethrow(e)
+                end
+
+                if area_of_intersection > 0
+                    push!(output, (i1, i2) => area_of_intersection)
+                end
+            end
+            progress && next!(prog; step = length(chunk))
+            output
+        end
+    end
+
+    foreach(tasks) do task
+        result = fetch(task)
+        for ((i1, i2), area) in result
+            if area > 0
+                areas[i1, i2] += area
+            end
         end
     end
 
