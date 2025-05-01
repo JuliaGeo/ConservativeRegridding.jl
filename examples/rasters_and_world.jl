@@ -27,13 +27,20 @@ all_countries = naturalearth("admin_0_countries", 10)
 import ConservativeRegridding
 
 
-intersections = @time ConservativeRegridding.intersection_areas(exts, all_countries.geometry; threaded = true, area_of_intersection_operator = (e, p) -> GO.coverage(p, e))
+intersections_int = @time ConservativeRegridding.intersection_areas(rects, all_countries.geometry; threaded = true)
+intersections_cvg = @time ConservativeRegridding.intersection_areas(exts, all_countries.geometry; threaded = true, area_of_intersection_operator = (e, p) -> GO.coverage(p, e))
 
 # If the two grids completely overlap, then the areas should be equivalent
 # to the sum of the intersection areas along the second and fisrt dimensions, 
 # for src and dst, respectively. This is not the case if the two grids do not cover the same area.
-dst_areas = GeometryOps.area.(all_countries.geometry) 
-src_areas = GeometryOps.area.(src_polys) 
+dst_areas = GO.area.(all_countries.geometry) 
+src_areas = GO.area.(vec(rects)) 
+
+sum(src_areas)
+sum(intersections; dims = 1) |> sum
+
+sum(dst_areas)
+sum(intersections; dims = 2) |> sum
 
 regridder = ConservativeRegridding.Regridder(intersections, dst_areas, src_areas)
 normalize && LinearAlgebra.normalize!(regridder)
