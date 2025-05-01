@@ -12,9 +12,13 @@ yb = Y(DD.intervalbounds(ras, Y))
 function _rectfrombounds((xmin, xmax), (ymin, ymax))
     GI.Polygon(StaticArrays.@SVector[GI.LinearRing(StaticArrays.@SVector[(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax), (xmin, ymin)])])
 end
+using Extents
+function _extentfrombounds(X, Y)
+    Extents.Extent(; X, Y)
+end
 
 rects = @d _rectfrombounds.(xb, yb)
-
+exts = @d _extentfrombounds.(xb, yb)
 
 # here comes the work
 using NaturalEarth
@@ -23,7 +27,7 @@ all_countries = naturalearth("admin_0_countries", 10)
 import ConservativeRegridding
 
 
-intersections = @time ConservativeRegridding.intersection_areas(rects, all_countries.geometry; threaded = true, area_of_intersection_operator = (p1, p2) -> GO.coverage(p1, GI.extent(p2)))
+intersections = @time ConservativeRegridding.intersection_areas(exts, all_countries.geometry; threaded = true, area_of_intersection_operator = (e, p) -> GO.coverage(p, e))
 
 # If the two grids completely overlap, then the areas should be equivalent
 # to the sum of the intersection areas along the second and fisrt dimensions, 
