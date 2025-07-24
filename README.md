@@ -145,14 +145,15 @@ a_d &= \sum_j A_{ij}
 \end{aligned}
 ```
 
-While the division with $a_s$ could be absorbed in $A$, not doing so means that $A$
-can be reused to regrid in the other direction, from $d$ to $s$.
+While the division with $a_d$ could be absorbed in $A$, not doing so means that $A$
+can be reused to regrid in the other direction, from $d$ to $s$ by using the
+transpose of $A$, called $A^T$ and now the normalization is with $a_s$.
 
 ```math
-\tilde{s} = (A^T d) / a_d
+\tilde{s} = (A^T d) / a_s
 ```
 
-where the tilde was only added to highlight that conservative regridding is not a
+The tilde for $s$ was only added to highlight that conservative regridding is not a
 perfectly invertible operation, while the mean is conserved, the variance usually is not.
 With the equations above $A$ (and $a_s, a_d$ consequently) only has to be precomputed once
 given two grids facilitating forward and backward regridding. 
@@ -160,8 +161,9 @@ given two grids facilitating forward and backward regridding.
 Conservative regridding means that the area-weighted means are conserved
 
 ```math
-\frac{\sum_i d_ia_{d, i}}{\sum_i a_{d, i}} = \frac{\sum_j s_j a_{s, j}}{\sum_j a_{d, j}}
+\frac{\sum_i d_ia_{d, i}}{\sum_i a_{d, i}} = \frac{\sum_j s_j a_{s, j}}{\sum_j a_{s, j}}
 ```
 
-And in many cases the two grids cover the same area, such that $\sum_i a_{d, i} = \sum_j a_{s, j}$,
-e.g. the surface of a sphere.
+Which however requires that both grids cover the same area and $\sum_i a_{d, i} = \sum_j a_{s, j}$,
+e.g. the surface of a sphere. Going from a grid that covers an area which contains a smaller grid
+within is also fine but a regridding in the other direction would leave grid cells undefined.
