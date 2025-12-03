@@ -70,7 +70,7 @@ function compute_intersection_areas!(
     # Do the dual query, which is the most efficient way to do this,
     # by iterating down both trees simultaneously, rejecting pairs of nodes that do not intersect.
     # when we find an intersection, we calculate the area of the intersection and add it to the result matrix.
-    GeometryOps.SpatialTreeInterface.do_dual_query(Extents.intersects, tree1, tree2) do i1, i2
+    GeometryOps.SpatialTreeInterface.dual_depth_first_search(Extents.intersects, tree1, tree2) do i1, i2
         p1, p2 = grid1[i1], grid2[i2]
         # may want to check if the polygons intersect first, 
         # to avoid antimeridian-crossing multipolygons viewing a scanline.

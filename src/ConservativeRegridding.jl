@@ -7,7 +7,7 @@ import GeometryOps
 import SortTileRecursiveTree
 import Extents
 import SparseArrays
-
+import ProgressMeter
 # piracy, remove when GeometryOps is fixed
 # GeometryOps.area(::GeometryOps.Planar, x) = GeometryOps.area(x)
 
