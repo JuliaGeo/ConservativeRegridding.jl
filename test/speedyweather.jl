@@ -35,7 +35,7 @@ function get_faces(
         faces[2, ij] = (S[1, ij], S[2, ij])
         faces[3, ij] = (W[1, ij], W[2, ij])
         faces[4, ij] = (N[1, ij], N[2, ij])
-        faces[5, ij] = (E[1, ij], E[2, ij])  # back to east to close the polygon        
+        faces[5, ij] = (E[1, ij], E[2, ij])  # back to east to close the polygon
     end
 
     if add_nan  # add a NaN to separate grid cells
@@ -62,10 +62,10 @@ regridder = ConservativeRegridding.Regridder(dst_cells, src_cells)
 A = regridder.intersections
 
 # Now, let's perform some interpolation!
-area1 = vec(sum(A, dims=2))
-@test area1 == A.dst_areas
-area2 = vec(sum(A, dims=1))
-@test area2 == A.src_areas
+area1 = vec(sum(A, dims=1))
+@test area1 == regridder.src_areas
+area2 = vec(sum(A, dims=2))
+@test area2 == regridder.dst_areas
 
 values_on_grid1 = A * grid2 ./ area1
 @test sum(values_on_grid1 .* area1) == sum(grid2 .* area2)

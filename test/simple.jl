@@ -3,12 +3,13 @@ using Test
 
 import GeometryOps as GO, GeoInterface as GI
 
-
+# Target grid
 grid1 = begin
     gridpoints = [(i, j) for i in 0:2, j in 0:2]
     [GI.Polygon([GI.LinearRing([gridpoints[i, j], gridpoints[i, j+1], gridpoints[i+1, j+1], gridpoints[i+1, j], gridpoints[i, j]])]) for i in 1:size(gridpoints, 1)-1, j in 1:size(gridpoints, 2)-1] |> vec
 end
 
+# Source grid
 grid2 = begin
     diamondpoly = GI.Polygon([GI.LinearRing([(0, 1), (1, 2), (2, 1), (1, 0), (0, 1)])])
     trianglepolys = GI.Polygon.([
@@ -20,6 +21,7 @@ grid2 = begin
     [diamondpoly, trianglepolys...]
 end
 
+# Construct a regridder from grid2 to grid1
 A = @test_nowarn ConservativeRegridding.intersection_areas(grid1, grid2)
 
 # Now, let's perform some interpolation!
@@ -30,9 +32,11 @@ area2 = vec(sum(A, dims=1))
 
 values_on_grid2 = [0, 0, 5, 0, 0]
 
+# Regrid from the source grid2 to the target grid1
 values_on_grid1 = A * values_on_grid2 ./ area1
 @test sum(values_on_grid1 .* area1) == sum(values_on_grid2 .* area2)
 
+# Regrid from the target grid1 to the source grid2 using the transpose of A
 values_back_on_grid2 = A' * values_on_grid1 ./ area2
 @test sum(values_back_on_grid2 .* area2) == sum(values_on_grid2 .* area2)
 # We can see here that some data has diffused into the central diamond cell of grid2,
