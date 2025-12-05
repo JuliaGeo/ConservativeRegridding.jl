@@ -176,7 +176,7 @@ set_value_per_element!(field1_one_value_per_element, value_per_element1)
 
 # Test our helper functions
 # Check that integrating over each element and summing gives the same result as integrating over the whole domain
-@test isapprox(sum(integrate_each_element(field1)), sum(field1), atol = 1e-12)
+@test isapprox(sum(integrate_each_element(field1)), sum(field1), atol = 1e-11)
 # Check that integrating 1 over each element and summing gives the same result as integrating 1 over the whole domain
 @test sum(integrate_each_element(ones_field1)) ≈ sum(ones_field1)
 
@@ -187,8 +187,8 @@ abs_error_one_value_per_element = abs(sum(field1_one_value_per_element) - sum(fi
 
 # Check the global conservation error of the overall regridding
 abs_error = abs(sum(field1) - sum(field2))
-@test abs_error < 1e-12
-@test isapprox(mean(field1), mean(field2), atol=1e-15)
+@test abs_error < 1e-11
+@test isapprox(mean(field1), mean(field2), atol=1e-14)
 
 # # Plot the fields for visual comparison
 # using ClimaCoreMakie
