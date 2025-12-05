@@ -3,6 +3,7 @@ using Test, SafeTestsets
 @testset "ConservativeRegridding.jl" begin
     @safetestset "Simple Regridding" begin include("simple.jl") end
     @safetestset "Oceananigans" begin include("oceananigans.jl") end
+    @safetestset "ClimaCore" begin include("climacore.jl") end
     # This test is erroring with so it's commented out for now
     # """
     # ┌ Error: Intersection failed!
