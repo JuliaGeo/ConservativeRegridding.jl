@@ -42,37 +42,37 @@ end
 
 # allocate the areas matrix as SparseCSC if not provided
 function intersection_areas(
-    src_field, # arrays of polygons of the first grid
-    dst_field; # arrays of polygons of the second grid
+    dst_field, # array of polygons of the target grid
+    src_field; # array of polygons of the source grid
     T::Type{<:Number} = DEFAULT_FLOATTYPE,              # float type used for the areas matrix = regridder
     matrix_constructor = DEFAULT_MATRIX_CONSTRUCTOR,    # type of the areas matrix = regridder
     kwargs...
 )
     # unless `areas::AbstractMatrix` is provided (see in-place method ! below), create a SparseCSC matrix
-    areas = matrix_constructor(T, length(src_field), length(dst_field))
-    return compute_intersection_areas!(areas, src_field, dst_field; kwargs...)
+    areas = matrix_constructor(T, length(dst_field), length(src_field))
+    return compute_intersection_areas!(areas, dst_field, src_field; kwargs...)
 end
 
 function compute_intersection_areas!(
     areas::AbstractMatrix,  # intersection areas for all combinatations of grid cells in field1, field2
-    grid1,                  # arrays of polygons
-    grid2;                  # arrays of polygons
+    dst_grid,               # array of polygons
+    src_grid;               # array of polygons
     manifold::GeometryOps.Manifold = DEFAULT_MANIFOLD,      # TODO currently not used
-    nodecapacity1 = DEFAULT_NODECAPACITY,
-    nodecapacity2 = DEFAULT_NODECAPACITY,
+    dst_nodecapacity = DEFAULT_NODECAPACITY,
+    src_nodecapacity = DEFAULT_NODECAPACITY,
 )
     # Prepare STRtrees for the two grids, to speed up intersection queries
-    # we may want to separately tune nodecapacity if one is much larger than the other.  
-    # specifically we may want to tune leaf node capacity via Hilbert packing while still 
+    # we may want to separately tune nodecapacity if one is much larger than the other.
+    # specifically we may want to tune leaf node capacity via Hilbert packing while still
     # constraining inner node capacity.  But that can come later.
-    tree1 = SortTileRecursiveTree.STRtree(grid1; nodecapacity = nodecapacity1) 
-    tree2 = SortTileRecursiveTree.STRtree(grid2; nodecapacity = nodecapacity2)
+    tree1 = SortTileRecursiveTree.STRtree(src_grid; nodecapacity = src_nodecapacity)
+    tree2 = SortTileRecursiveTree.STRtree(dst_grid; nodecapacity = dst_nodecapacity)
     # Do the dual query, which is the most efficient way to do this,
     # by iterating down both trees simultaneously, rejecting pairs of nodes that do not intersect.
     # when we find an intersection, we calculate the area of the intersection and add it to the result matrix.
     GeometryOps.SpatialTreeInterface.dual_depth_first_search(Extents.intersects, tree1, tree2) do i1, i2
-        p1, p2 = grid1[i1], grid2[i2]
-        # may want to check if the polygons intersect first, 
+        p1, p2 = src_grid[i1], dst_grid[i2]
+        # may want to check if the polygons intersect first,
         # to avoid antimeridian-crossing multipolygons viewing a scanline.
         intersection_polys = try # can remove this now, got all the errors cleared up in the fix.
             # At some future point, we may want to add the manifold here
@@ -85,7 +85,7 @@ function compute_intersection_areas!(
 
         area_of_intersection = GeometryOps.area(intersection_polys)
         if area_of_intersection > 0
-            areas[i1, i2] += area_of_intersection
+            areas[i2, i1] += area_of_intersection
         end
     end
 
@@ -116,10 +116,10 @@ function Regridder(
     intersections = intersection_areas(dst_polys, src_polys; kwargs...)
 
     # If the two grids completely overlap, then the areas should be equivalent
-    # to the sum of the intersection areas along the second and fisrt dimensions, 
+    # to the sum of the intersection areas along the second and fisrt dimensions,
     # for src and dst, respectively. This is not the case if the two grids do not cover the same area.
-    dst_areas = GeometryOps.area.(dst_polys) 
-    src_areas = GeometryOps.area.(src_polys) 
+    dst_areas = GeometryOps.area.(dst_polys)
+    src_areas = GeometryOps.area.(src_polys)
 
     regridder = Regridder(intersections, dst_areas, src_areas)
     normalize && LinearAlgebra.normalize!(regridder)
