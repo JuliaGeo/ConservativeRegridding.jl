@@ -23,9 +23,11 @@ function regrid!(
     regridder::Regridder,
     src_field,
 )
-    areas = regridder.dst_areas # area of each grid cell
+
+    src_field .*= regridder.src_areas # multiply by area of each grid cell
     LinearAlgebra.mul!(dst_field, regridder.intersections, src_field) # units of src_field times area of grid cell
-    dst_field ./= areas # normalize by area of each grid cell
+    dst_field ./= regridder.dst_areas # normalize by area of each grid cell
+    src_field ./= regridder.src_areas # normalize by area of each grid cell
     return dst_field
 end
 
