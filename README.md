@@ -1,6 +1,8 @@
 # ConservativeRegridding.jl
 
 [![Build Status](https://github.com/JuliaGEO/ConservativeRegridding.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/JuliaGEO/ConservativeRegridding.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://JuliaGEO.github.io/ConservativeRegridding.jl/stable/)
+[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://JuliaGEO.github.io/ConservativeRegridding.jl/dev/)
 
 ConservativeRegridding.jl provides functionality to regrid between two grids.
 A grid is a tessellation of a space into polygons (or grid cells) each with an associated value.
