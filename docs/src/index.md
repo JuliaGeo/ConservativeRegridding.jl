@@ -13,30 +13,35 @@ averaging from neighboring cells.
 
 Here's an example of regridding between two different geodesic grids from [SpeedyWeather.jl](https://github.com/SpeedyWeather/SpeedyWeather.jl):
 
-```@example
-using SpeedyWeather, GeoMakie
+```@example speedy
+using SpeedyWeather
 using ConservativeRegridding
-import GeoInterface as GI, GeometryOps as GO
+
+import GeoInterface as GI
+import GeometryOps as GO
 
 # Create random data on two different geodesic grid types
-field1 = rand(OctaHEALPixGrid, 24)
-field2 = rand(OctaminimalGaussianGrid, 24)
+field1 = rand(OctaHEALPixGrid, 4)
+field2 = rand(OctaminimalGaussianGrid, 4)
 
-# Get the polygon faces for each grid
-SpeedyWeatherGeoMakieExt = Base.get_extension(SpeedyWeather, :SpeedyWeatherGeoMakieExt)
-faces1 = SpeedyWeatherGeoMakieExt.get_faces(field1)
-faces2 = SpeedyWeatherGeoMakieExt.get_faces(field2)
+# Get the polygon vertices for each grid (each column is a polygon as (lon, lat) tuples)
+# The Regridder constructor handles wrapping these as GeoInterface polygons and
+# fixing antimeridian crossings internally
+verts1 = RingGrids.get_gridcell_polygons(field1.grid)
+verts2 = RingGrids.get_gridcell_polygons(field2.grid)
+```
 
-# Convert to GeoInterface polygons and fix for antimeridian crossings
-polys1 = GI.Polygon.(GI.LinearRing.(eachcol(faces1))) .|> GO.fix
-polys2 = GI.Polygon.(GI.LinearRing.(eachcol(faces2))) .|> GO.fix
-
+```@example speedy
 # Build the regridder (precomputes intersection areas)
-R = ConservativeRegridding.Regridder(polys1, polys2)
+R = ConservativeRegridding.Regridder(verts1, verts2)
+```
 
+```@example speedy
 # Regrid from field2 to field1
 ConservativeRegridding.regrid!(field1, R, field2)
+```
 
+```@example speedy
 # Regrid in the reverse direction using the transpose
 ConservativeRegridding.regrid!(field2, transpose(R), field1)
 ```
