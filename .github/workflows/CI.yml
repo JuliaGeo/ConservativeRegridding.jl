@@ -38,32 +38,23 @@ jobs:
   docs:
     name: Documentation
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      statuses: write
     steps:
-      - name: Install binary dependencies
-        run: sudo apt-get update && sudo apt-get install -y xorg-dev mesa-utils xvfb libgl1 freeglut3-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev
-      - uses: actions/checkout@v6
-      - name: Download all workflow run artifacts
-        uses: actions/download-artifact@v5
-      - uses: julia-actions/setup-julia@latest
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
         with:
           version: '1'
       - uses: julia-actions/cache@v2
-      - name: Install documentation dependencies
+      - name: Install dependencies
         run: |
-          xvfb-run -s '-screen 0 1024x768x24' julia --project=docs -e '
+          julia --project=docs -e '
             using Pkg
+            Pkg.develop(PackageSpec(path=pwd()))
             Pkg.instantiate()'
+      - name: Build and deploy
         env:
-          DISPLAY: ':0'
-          DATADEPS_ALWAYS_ACCEPT: 'true'
-          RASTERDATASOURCES_PATH: '~/.julia/artifacts/RasterDataSources'
-      - uses: julia-actions/julia-docdeploy@v1
-        with:
-          prefix: xvfb-run
-          install-package: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # If authenticating with GitHub Actions token
-          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }} # If authenticating with SSH deploy key
-          DISPLAY: ':0'
-          DATADEPS_ALWAYS_ACCEPT: 'true'
-          RASTERDATASOURCES_PATH: '~/.julia/artifacts/RasterDataSources'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
+        run: julia --project=docs docs/make.jl

@@ -13,26 +13,39 @@ averaging from neighboring cells.
 
 Here's an example of regridding between two different geodesic grids from [SpeedyWeather.jl](https://github.com/SpeedyWeather/SpeedyWeather.jl):
 
-```@example
-using SpeedyWeather, GeoMakie
+```julia
+using SpeedyWeather
+using RingGrids
 using ConservativeRegridding
-import GeoInterface as GI, GeometryOps as GO
+
+# Helper function to get polygon faces for SpeedyWeather grids
+function get_faces(field)
+    grid = field.grid
+    Grid = typeof(grid)
+    nlat_half = grid.nlat_half
+    npoints = RingGrids.get_npoints2D(field)
+    E, S, W, N = RingGrids.get_vertices(Grid, nlat_half)
+    faces = Matrix{NTuple{2, Float64}}(undef, 5, npoints)
+    @inbounds for ij in 1:npoints
+        faces[1, ij] = (E[1, ij], E[2, ij])
+        faces[2, ij] = (S[1, ij], S[2, ij])
+        faces[3, ij] = (W[1, ij], W[2, ij])
+        faces[4, ij] = (N[1, ij], N[2, ij])
+        faces[5, ij] = (E[1, ij], E[2, ij])  # close the polygon
+    end
+    return faces
+end
 
 # Create random data on two different geodesic grid types
 field1 = rand(OctaHEALPixGrid, 24)
 field2 = rand(OctaminimalGaussianGrid, 24)
 
-# Get the polygon faces for each grid
-SpeedyWeatherGeoMakieExt = Base.get_extension(SpeedyWeather, :SpeedyWeatherGeoMakieExt)
-faces1 = SpeedyWeatherGeoMakieExt.get_faces(field1)
-faces2 = SpeedyWeatherGeoMakieExt.get_faces(field2)
+# Get the polygon faces (vertices) for each grid
+faces1 = get_faces(field1)
+faces2 = get_faces(field2)
 
-# Convert to GeoInterface polygons and fix for antimeridian crossings
-polys1 = GI.Polygon.(GI.LinearRing.(eachcol(faces1))) .|> GO.fix
-polys2 = GI.Polygon.(GI.LinearRing.(eachcol(faces2))) .|> GO.fix
-
-# Build the regridder (precomputes intersection areas)
-R = ConservativeRegridding.Regridder(polys1, polys2)
+# Build the regridder (internally converts vertices to polygons and fixes antimeridian crossings)
+R = ConservativeRegridding.Regridder(faces1, faces2)
 
 # Regrid from field2 to field1
 ConservativeRegridding.regrid!(field1, R, field2)
@@ -117,5 +130,7 @@ In ConservativeRegridding.jl:
 ```@docs
 ConservativeRegridding.Regridder
 ConservativeRegridding.regrid!
+ConservativeRegridding.regrid
+Base.transpose(::ConservativeRegridding.Regridder)
 ```
 
