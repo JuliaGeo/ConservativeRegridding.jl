@@ -6,7 +6,7 @@ makedocs(
     authors = "Milan Kloewer and contributors",
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", nothing) == "true",
-        canonical = "https://JuliaGEO.github.io/ConservativeRegridding.jl/stable/",
+        canonical = "https://juliageo.org/ConservativeRegridding.jl/stable/",
         assets = String[],
     ),
     modules = [ConservativeRegridding],
@@ -17,7 +17,7 @@ makedocs(
 )
 
 deploydocs(
-    repo = "github.com/JuliaGEO/ConservativeRegridding.jl.git",
+    repo = "github.com/JuliaGeo/ConservativeRegridding.jl.git",
     devbranch = "main",
     push_preview = true,
 )
