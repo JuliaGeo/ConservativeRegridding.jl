@@ -114,7 +114,7 @@ In ConservativeRegridding.jl:
 - **Sparse storage**: The intersection matrix ``A`` is stored as a sparse matrix since most grid cell pairs do not intersect.
 - **STRtree acceleration**: A Sort-Tile-Recursive tree enables efficient spatial queries to find intersecting cell pairs.
 - **GeometryOps integration**: Polygon intersections and area calculations are handled by [GeometryOps.jl](https://github.com/JuliaGeo/GeometryOps.jl).
-- **Antimeridian handling**: Polygons crossing the antimeridian are automatically fixed via `GeometryOps.fix`.
+- ~**Antimeridian handling**: Polygons crossing the antimeridian are automatically fixed via `GeometryOps.fix`.~
 - **Normalization**: By default, the intersection areas are normalized to improve numerical conditioning.
 
 ## API Reference
