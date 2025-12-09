@@ -13,7 +13,7 @@ averaging from neighboring cells.
 
 Here's an example of regridding between two different geodesic grids from [SpeedyWeather.jl](https://github.com/SpeedyWeather/SpeedyWeather.jl):
 
-```julia
+```@example
 using SpeedyWeather, GeoMakie
 using ConservativeRegridding
 import GeoInterface as GI, GeometryOps as GO
