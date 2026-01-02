@@ -2,6 +2,7 @@ using ConservativeRegridding
 using Test
 
 import GeometryOps as GO, GeoInterface as GI
+using SparseArrays
 
 # Target grid
 grid1 = begin

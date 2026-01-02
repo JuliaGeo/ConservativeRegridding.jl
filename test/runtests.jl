@@ -1,9 +1,11 @@
 using Test, SafeTestsets
 
 @testset "ConservativeRegridding.jl" begin
-    @safetestset "Simple Regridding" begin include("simple.jl") end
-    @safetestset "Oceananigans" begin include("oceananigans.jl") end
-    @safetestset "ClimaCore" begin include("climacore.jl") end
+    @testset "Use cases" begin
+        @safetestset "Simple Regridding" begin include("usecases/simple.jl") end
+        @safetestset "Oceananigans" begin include("usecases/oceananigans.jl") end
+        @safetestset "ClimaCore" begin include("usecases/climacore.jl") end
+    end
     # This test is erroring with so it's commented out for now
     # """
     # ┌ Error: Intersection failed!
