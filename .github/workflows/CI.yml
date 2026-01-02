@@ -20,7 +20,7 @@ jobs:
       matrix:
         version:
           - '1.10'
-          - '1'
+          - '1.12.2' # TODO: until 1.12.4 is released
         os:
           - ubuntu-latest
         arch:
@@ -46,7 +46,7 @@ jobs:
         uses: actions/download-artifact@v5
       - uses: julia-actions/setup-julia@latest
         with:
-          version: '1'
+          version: '1.12.2' # TODO: until 1.12.4 is released
       - uses: julia-actions/cache@v2
       - name: Install documentation dependencies
         run: |
