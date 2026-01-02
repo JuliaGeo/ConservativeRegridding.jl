@@ -53,6 +53,27 @@ function intersection_areas(
     return compute_intersection_areas!(areas, dst_field, src_field; kwargs...)
 end
 
+struct DefaultIntersectionFailureError{T1, T2, E} <: Base.Exception
+    p1::T1
+    p2::T2
+    e::E
+end
+
+function Base.showerror(io::IO, e::DefaultIntersectionFailureError)
+    print(io, "Intersection failed with the following error.  Capture this error object and access `err.p1` and `err.p2` to access the polygons that failed to intersect.")
+    Base.showerror(io, e.e)
+end
+
+
+function _default_intersection_operator(p1, p2)
+    intersection_polys = try
+        GeometryOps.intersection(p1, p2; target = GeoInterface.PolygonTrait())
+    catch
+        throw(DefaultIntersectionFailureError(p1, p2, e))
+    end
+    return GeometryOps.area(intersection_polys)
+end
+
 function compute_intersection_areas!(
     areas::AbstractMatrix,  # intersection areas for all combinatations of grid cells in field1, field2
     dst_grid,               # array of polygons
@@ -60,7 +81,8 @@ function compute_intersection_areas!(
     manifold::GeometryOps.Manifold = DEFAULT_MANIFOLD,      # TODO currently not used
     dst_nodecapacity = DEFAULT_NODECAPACITY,
     src_nodecapacity = DEFAULT_NODECAPACITY,
-)
+    intersection_operator::F = _default_intersection_operator
+) where {F}
     # Prepare STRtrees for the two grids, to speed up intersection queries
     # we may want to separately tune nodecapacity if one is much larger than the other.
     # specifically we may want to tune leaf node capacity via Hilbert packing while still
@@ -74,16 +96,7 @@ function compute_intersection_areas!(
         p1, p2 = src_grid[i1], dst_grid[i2]
         # may want to check if the polygons intersect first,
         # to avoid antimeridian-crossing multipolygons viewing a scanline.
-        intersection_polys = try # can remove this now, got all the errors cleared up in the fix.
-            # At some future point, we may want to add the manifold here
-            # but for right now, GeometryOps only supports planar polygons anyway.
-            GeometryOps.intersection(p1, p2; target = GeoInterface.PolygonTrait())
-        catch e
-            @error "Intersection failed!" i1 i2
-            rethrow(e)
-        end
-
-        area_of_intersection = GeometryOps.area(intersection_polys)
+        area_of_intersection = intersection_operator(p1, p2)
         if area_of_intersection > 0
             areas[i2, i1] += area_of_intersection
         end
