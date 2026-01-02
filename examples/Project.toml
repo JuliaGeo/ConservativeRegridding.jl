@@ -7,3 +7,7 @@ KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 SpeedyWeather = "9e226e20-d153-4fed-8a5b-493def4f21a9"
+
+[sources]
+ConservativeRegridding = {path = ".."}
+GeometryOps = {path = "../../GeometryOps.jl"}
