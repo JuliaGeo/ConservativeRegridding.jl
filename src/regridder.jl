@@ -16,9 +16,9 @@ struct Regridder{W, A, V} <: AbstractRegridder
     src_temp :: V      # Dense vectors used as work-arrays if trying to regrid non-contiguous memory
 end
 
-function Base.show(io::IO, regridder::Regridder{W, A}) where {W, A}
+function Base.show(io::IO, regridder::Regridder{W, A, V}) where {W, A, V}
     n2, n1 = size(regridder)
-    println(io, "$n2×$n1 Regridder{$W, $A}")
+    println(io, "$n2×$n1 Regridder{$W, $A, $V}")
     Base.print_array(io, regridder.intersections)
     println(io, "\n\nSource areas: ", regridder.src_areas)
     print(io, "Dest.  areas: ", regridder.dst_areas)

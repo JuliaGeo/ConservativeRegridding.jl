@@ -41,38 +41,10 @@ function regrid!(dst_field::DenseVector, regridder::Regridder, src_field::Abstra
 end
 
 function regrid!(dst_field::AbstractVector, regridder::Regridder, src_field::DenseVector)
-    regrid!(regridder.dst_tmp, regridder, src_field)
+    regrid!(regridder.dst_temp, regridder, src_field)
     dst_field .= regridder.dst_temp
     return dst_field
 end
-
-# Actual regridding, only on dense vectors...
-
-# The easy case, for dense vectors, the regridding operation defaults to a matrix multiplication
-(regridder::Regridder)(dst::DenseVector, src::DenseVector) = LinearAlgebra.mul!(dst, regridder.weights, src)
-
-# Generic regridding function that does not check the dimensions of the `src` and
-# `dst` arrays. For general vectors that might be discontinuous in memory, we need
-# to broadcast the value to a `DenseArray` before performing the sparse matrix multiply
-function (regridder::Regridder)(dst::AbstractVector, src::AbstractVector)
-    regridder.src_temp .= src
-    LinearAlgebra.mul!(regridder.dst_temp, regridder.weights, regridder.src_temp)
-    dst .= regridder.dst_temp
-    return dst
-end
-
-# Mixed cases
-function (regridder::Regridder)(dst::DenseVector, src::AbstractVector)
-    regridder.src_temp .= src
-    return LinearAlgebra.mul!(dst, regridder.weights, regridder.src_temp)
-end
-
-function (regridder::Regridder)(dst::AbstractVector, src::DenseVector)
-    LinearAlgebra.mul!(regridder.dst_temp, regridder.weights, src)
-    dst .= regridder.dst_temp
-    return dst
-end
-
 
 """$(TYPEDSIGNATURES)
 regrid a vector `src_field` using `regridder`. Area vector for the output grid can
