@@ -41,3 +41,55 @@ values_back_on_grid2 = A' * values_on_grid1 ./ area2
 @test sum(values_back_on_grid2 .* area2) == sum(values_on_grid2 .* area2)
 # We can see here that some data has diffused into the central diamond cell of grid2,
 # since it was overlapped by the top left cell of grid1.
+
+# Test the Regridder struct with temporary vectors
+@testset "Regridder with temporary vectors" begin
+    regridder = ConservativeRegridding.Regridder(grid1, grid2; normalize=false)
+
+    # Test that temporary vectors are properly initialized
+    @test length(regridder.dst_temp) == length(grid1)
+    @test length(regridder.src_temp) == length(grid2)
+    @test all(regridder.dst_temp .== 0)
+    @test all(regridder.src_temp .== 0)
+
+    # Test regridding with dense vectors (should use optimized path)
+    src_dense = Float64[0, 0, 5, 0, 0]
+    dst_dense = zeros(Float64, length(grid1))
+    ConservativeRegridding.regrid!(dst_dense, regridder, src_dense)
+    @test sum(dst_dense .* regridder.dst_areas) ≈ sum(src_dense .* regridder.src_areas)
+
+    # Test regridding with non-contiguous arrays (should use temporary vectors)
+    # Create a view to simulate non-contiguous memory
+    src_matrix = reshape(Float64[0, 0, 5, 0, 0, 1, 2, 3, 4, 5], 5, 2)
+    src_view = view(src_matrix, :, 1)
+    dst_view = view(zeros(Float64, length(grid1), 2), :, 1)
+
+    ConservativeRegridding.regrid!(dst_view, regridder, src_view)
+    @test sum(dst_view .* regridder.dst_areas) ≈ sum(src_view .* regridder.src_areas)
+
+    # Test mixed cases: dense dst, non-contiguous src
+    dst_dense2 = zeros(Float64, length(grid1))
+    ConservativeRegridding.regrid!(dst_dense2, regridder, src_view)
+    @test dst_dense2 ≈ dst_view
+
+    # Test mixed cases: non-contiguous dst, dense src
+    dst_view2 = view(zeros(Float64, length(grid1), 2), :, 1)
+    ConservativeRegridding.regrid!(dst_view2, regridder, src_dense)
+    @test sum(dst_view2 .* regridder.dst_areas) ≈ sum(src_dense .* regridder.src_areas)
+end
+
+# Test transpose functionality with temporary vectors
+@testset "Transposed Regridder" begin
+    regridder = ConservativeRegridding.Regridder(grid1, grid2; normalize=false)
+    regridder_T = transpose(regridder)
+
+    # Verify that transpose shares the same temporary arrays
+    @test regridder_T.src_areas === regridder.dst_areas
+    @test regridder_T.dst_areas === regridder.src_areas
+
+    # Test regridding in reverse direction
+    src_on_grid1 = Float64[1, 2, 3, 4]
+    dst_on_grid2 = zeros(Float64, length(grid2))
+    ConservativeRegridding.regrid!(dst_on_grid2, regridder_T, src_on_grid1)
+    @test sum(dst_on_grid2 .* regridder_T.dst_areas) ≈ sum(src_on_grid1 .* regridder_T.src_areas)
+end
