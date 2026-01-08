@@ -18,6 +18,5 @@ WellKnownGeometry = "0f680547-7be7-4555-8820-bb198eeb646b"
 
 [sources]
 ConservativeRegridding = {path = ".."}
-GeoMakie = {path = "../../GeoMakie.jl"}
-GeometryOps = {path = "../../GeometryOps.jl"}
+
 Oceananigans = {rev = "FPivot", url = "https://github.com/briochemc/Oceananigans.jl"}
