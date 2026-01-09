@@ -11,7 +11,16 @@ import ProgressMeter
 # piracy, remove when GeometryOps is fixed
 # GeometryOps.area(::GeometryOps.Planar, x) = GeometryOps.area(x)
 
-include("regridder.jl")
-include("regrid.jl")
+include("trees/Trees.jl")
+using .Trees
+
+export AbstractQuadtree, ncells, getcell
+export ExplicitPolygonQuadtree, CellBasedQuadtree
+export QuadtreeCursor
+
+include("regridder/regridder.jl")
+include("regridder/regrid.jl")
+
+public Regridder
 
 end
