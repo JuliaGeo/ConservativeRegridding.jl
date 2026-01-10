@@ -51,23 +51,38 @@ end
 # src = CenterField(fine_grid)
 
 src_grid = LatitudeLongitudeGrid(size=(3600, 1800, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-dest_grid = TripolarGrid(size=(3600, 1800, 1), fold_topology = RightCenterFolded)
+dst_grid = TripolarGrid(size=(3600, 1800, 1), fold_topology = RightCenterFolded)
 
 src_field = CenterField(src_grid)
-dest_field = CenterField(dest_grid)
+dst_field = CenterField(det_grid)
 
-dst_cells = GO.UnitSphereFromGeographic().(compute_cell_matrix(dest_field))
 src_cells = GO.UnitSphereFromGeographic().(compute_cell_matrix(src_field))
+dst_cells = GO.UnitSphereFromGeographic().(compute_cell_matrix(dst_field))
 
 set!(src_field, (x, y, z) -> rand())
 
-dst_qt = Trees.CellBasedQuadtree(dst_cells) |> Trees.TopDownQuadtreeCursor |> Trees.KnownFullSphereExtentWrapper
-src_qt = Trees.CellBasedQuadtree(src_cells) |> Trees.TopDownQuadtreeCursor |> Trees.KnownFullSphereExtentWrapper
+src_qt = Trees.CellBasedQuadtree(src_cells) 
+dst_qt = Trees.CellBasedQuadtree(dst_cells) 
+
+src_tree = src_qt|> Trees.TopDownQuadtreeCursor |> Trees.KnownFullSphereExtentWrapper
+dst_tree = dst_qt |> Trees.TopDownQuadtreeCursor |> Trees.KnownFullSphereExtentWrapper
 
 idxs = NTuple{2, NTuple{2, Int}}[]
-@time STI.dual_depth_first_search(GO.UnitSpherical._intersects, src_qt, src_qt) do i1, i2
+@time STI.dual_depth_first_search(GO.UnitSpherical._intersects, src_tree, dst_tree) do i1, i2
     push!(idxs, (i1, i2))
 end
 idxs
 
+using SparseArrays
 
+mat = spzeros(Float64, prod(size(src_cells).-1), prod(size(dst_cells).-1))
+
+linearizer1 = LinearIndices(size(src_cells).-1)
+linearizer2 = LinearIndices(size(dst_cells).-1)
+for (i1, i2) in idxs
+    p1 = Trees.getcell(src_tree, i1...)
+    p2 = Trees.getcell(dst_tree, i2...)
+    polygon_of_intersection = try; GO.intersection(GO.Spherical(), p1, p2; target = GO.PolygonTrait()) catch e; @show "Error during intersection" i1 i2 e; rethrow(e); end
+    area_of_intersection = GO.area(polygon_of_intersection)
+    mat[i1..., i2...] += area
+end
