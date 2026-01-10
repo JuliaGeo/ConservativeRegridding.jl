@@ -85,7 +85,36 @@ linearizer2 = LinearIndices(size(dst_cells).-1)
 @showprogress for (i1, i2) in idxs
     p1 = Trees.getcell(src_qt, i1...)
     p2 = Trees.getcell(dst_qt, i2...)
-    polygon_of_intersection = try; GO.intersection(GO.Spherical(), p1, p2; target = GO.PolygonTrait()) catch e; @show "Error during intersection" i1 i2 e; rethrow(e); end
+    polygon_of_intersection = try; 
+        GO.intersection(GO.Spherical(), p1, p2; target = GO.PolygonTrait()) 
+    catch e; 
+        @show "Error during intersection" i1 i2; 
+        continue;
+    end
     area_of_intersection = GO.area(GO.Spherical(), polygon_of_intersection)
     mat[linearizer1[i1...], linearizer2[i2...]] += area_of_intersection
 end
+
+i1 = (161, 129)
+i2 = (271, 126)
+
+p1 = Trees.getcell(src_qt, i1...)
+p2 = Trees.getcell(dst_qt, i2...)
+
+p1_longlat = GO.transform(GO.GeographicFromUnitSphere(), p1)
+p2_longlat = GO.transform(GO.GeographicFromUnitSphere(), p2)
+
+using GLMakie, GeoMakie
+fig, ax, plt = poly(p1_longlat; transparency = true, alpha = 0.7, strokewidth = 1)
+poly!(ax, p2_longlat; transparency = true, alpha = 0.7, strokewidth = 1)
+
+GO.intersection(p1_longlat, p2_longlat; target = GO.PolygonTrait())
+GO.intersection(GO.Spherical(), p1, p2; target = GO.PolygonTrait())
+GO.intersection(GO.Spherical(), p1_longlat, p2_longlat; target = GO.PolygonTrait())
+
+fig, ax, plt = poly(p1_longlat; transparency = true, alpha = 0.7, strokewidth = 1, axis = (; type = GlobeAxis))
+poly!(ax, p2_longlat; transparency = true, alpha = 0.7, strokewidth = 1)
+meshimage!(ax, -180..180, -90..90, reshape([colorant"white"], 1, 1); zlevel = -300_000)
+
+using GeoJSON
+GeoJSON.write("p1_longlat.geojson", [(; geometry = p1_longlat, name = "p1"), (; geometry = p2_longlat, name = "p2")])
