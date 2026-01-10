@@ -84,6 +84,6 @@ linearizer2 = LinearIndices(size(dst_cells).-1)
     p1 = Trees.getcell(src_qt, i1...)
     p2 = Trees.getcell(dst_qt, i2...)
     polygon_of_intersection = try; GO.intersection(GO.Spherical(), p1, p2; target = GO.PolygonTrait()) catch e; @show "Error during intersection" i1 i2 e; rethrow(e); end
-    area_of_intersection = GO.area(polygon_of_intersection)
+    area_of_intersection = GO.area(GO.Spherical(), polygon_of_intersection)
     mat[linearizer1[i1...], linearizer2[i2...]] += area_of_intersection
 end
