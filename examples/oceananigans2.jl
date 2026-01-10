@@ -5,6 +5,8 @@ using KernelAbstractions: @index, @kernel
 using ConservativeRegridding
 using ConservativeRegridding.Trees
 import GeoInterface as GI
+import GeometryOps as GO
+import GeometryOps: SpatialTreeInterface as STI
 using Statistics
 
 instantiate(L) = L()
@@ -50,11 +52,11 @@ end
 # dst = CenterField(coarse_grid)
 # src = CenterField(fine_grid)
 
-src_grid = LatitudeLongitudeGrid(size=(3600, 1800, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-dst_grid = TripolarGrid(size=(3600, 1800, 1), fold_topology = RightCenterFolded)
+src_grid = LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+dst_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightCenterFolded)
 
 src_field = CenterField(src_grid)
-dst_field = CenterField(det_grid)
+dst_field = CenterField(dst_grid)
 
 src_cells = GO.UnitSphereFromGeographic().(compute_cell_matrix(src_field))
 dst_cells = GO.UnitSphereFromGeographic().(compute_cell_matrix(dst_field))
@@ -64,7 +66,7 @@ set!(src_field, (x, y, z) -> rand())
 src_qt = Trees.CellBasedQuadtree(src_cells) 
 dst_qt = Trees.CellBasedQuadtree(dst_cells) 
 
-src_tree = src_qt|> Trees.TopDownQuadtreeCursor |> Trees.KnownFullSphereExtentWrapper
+src_tree = src_qt |> Trees.TopDownQuadtreeCursor |> Trees.KnownFullSphereExtentWrapper
 dst_tree = dst_qt |> Trees.TopDownQuadtreeCursor |> Trees.KnownFullSphereExtentWrapper
 
 idxs = NTuple{2, NTuple{2, Int}}[]
