@@ -73,16 +73,17 @@ idxs = NTuple{2, NTuple{2, Int}}[]
 end
 idxs
 
-using SparseArrays
+using SparseArrays, ProgressMeter
 
 mat = spzeros(Float64, prod(size(src_cells).-1), prod(size(dst_cells).-1))
 
 linearizer1 = LinearIndices(size(src_cells).-1)
 linearizer2 = LinearIndices(size(dst_cells).-1)
-for (i1, i2) in idxs
-    p1 = Trees.getcell(src_tree, i1...)
-    p2 = Trees.getcell(dst_tree, i2...)
+
+@showprogress for (i1, i2) in idxs
+    p1 = Trees.getcell(src_qt, i1...)
+    p2 = Trees.getcell(dst_qt, i2...)
     polygon_of_intersection = try; GO.intersection(GO.Spherical(), p1, p2; target = GO.PolygonTrait()) catch e; @show "Error during intersection" i1 i2 e; rethrow(e); end
     area_of_intersection = GO.area(polygon_of_intersection)
-    mat[i1..., i2...] += area
+    mat[linearizer1[i1...], linearizer2[i2...]] += area_of_intersection
 end
