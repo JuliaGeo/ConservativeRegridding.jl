@@ -8,15 +8,17 @@ const DEFAULT_MATRIX_CONSTRUCTOR = SparseArrays.spzeros # SparseCSC for regridde
 
 abstract type AbstractRegridder end
 
-struct Regridder{W, A} <: AbstractRegridder
+struct Regridder{W, A, V} <: AbstractRegridder
     intersections :: W # Matrix of area intersections between cells on the source and destination grid
     dst_areas :: A     # Vector of areas on the destination grid
     src_areas :: A     # Vector of areas on the source grid
+    dst_temp :: V      # Dense vectors used as work-arrays if trying to regrid non-contiguous memory
+    src_temp :: V      # Dense vectors used as work-arrays if trying to regrid non-contiguous memory
 end
 
-function Base.show(io::IO, regridder::Regridder{W, A}) where {W, A}
+function Base.show(io::IO, regridder::Regridder{W, A, V}) where {W, A, V}
     n2, n1 = size(regridder)
-    println(io, "$n2×$n1 Regridder{$W, $A}")
+    println(io, "$n2×$n1 Regridder{$W, $A, $V}")
     Base.print_array(io, regridder.intersections)
     println(io, "\n\nSource areas: ", regridder.src_areas)
     print(io, "Dest.  areas: ", regridder.dst_areas)
@@ -26,7 +28,7 @@ end
 Return a Regridder for the backwards regridding, i.e. from destination to source grid.
 Does not copy any data, i.e. regridder for forward and backward share the same underlying arrays."""
 LinearAlgebra.transpose(regridder::Regridder) =
-    Regridder(transpose(regridder.intersections), regridder.src_areas, regridder.dst_areas)
+    Regridder(transpose(regridder.intersections), regridder.src_areas, regridder.dst_areas, regridder.src_temp, regridder.dst_temp)
 
 Base.size(regridder::Regridder, args...) = size(regridder.intersections, args...)
 
@@ -134,7 +136,11 @@ function Regridder(
     dst_areas = GeometryOps.area.(dst_polys)
     src_areas = GeometryOps.area.(src_polys)
 
-    regridder = Regridder(intersections, dst_areas, src_areas)
+    # TODO: make this GPU-compatible?
+    dst_temp = zeros(length(dst_areas))
+    src_temp = zeros(length(src_areas))
+
+    regridder = Regridder(intersections, dst_areas, src_areas, dst_temp, src_temp)
     normalize && LinearAlgebra.normalize!(regridder)
     return regridder
 end
