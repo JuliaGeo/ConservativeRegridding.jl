@@ -88,13 +88,13 @@ Base.@propagate_inbounds function getcell(quadtree::CellBasedQuadtree, i::Int, j
             error("Invalid index for cell based quadtree; got ($i, $j), but the matrix has $(size(quadtree.points) .- 1) polygons (for that .+1 points).")
         end
     end
-    return GI.Polygon([GI.LinearRing([
+    return GI.Polygon([GI.LinearRing(reverse([
         quadtree.points[i, j], 
         quadtree.points[i, j+1],
         quadtree.points[i+1, j+1],
         quadtree.points[i+1, j],
         quadtree.points[i, j]
-    ])])
+    ]))])
 end
 ncells(quadtree::CellBasedQuadtree, dim::Int) = size(quadtree.points, dim) - 1
 
