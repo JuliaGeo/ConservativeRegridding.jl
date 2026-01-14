@@ -40,6 +40,8 @@ struct ExplicitPolygonGrid{M <: GOCore.Manifold, PolyMatrixType <: AbstractMatri
 end
 GOCore.manifold(grid::ExplicitPolygonGrid) = grid.manifold
 
+ExplicitPolygonGrid(polygons::AbstractMatrix) = ExplicitPolygonGrid(GO.Planar(), polygons)
+
 getcell(grid::ExplicitPolygonGrid, i::Int, j::Int) = grid.polygons[i, j]
 ncells(grid::ExplicitPolygonGrid, dim::Int) = size(grid.polygons, dim)
 

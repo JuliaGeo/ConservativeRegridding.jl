@@ -102,7 +102,7 @@ function STI.child_indices_extents(q::QuadtreeCursor)
     idxs = CartesianIndices((irange, jrange))
     # Create an extent for each cell in the leaf range
     extents = [cell_range_extent(q.grid, i:i, j:j) for i in irange, j in jrange]
-    return zip(idxs, extents)
+    return zip((cartesian_to_linear_idx(q.grid, idx) for idx in idxs), extents)
 end
 
 function STI.getchild(q::QuadtreeCursor, child_idx::Int)
@@ -174,32 +174,15 @@ function _corner_and_other_points_for_circle_from_corners(q::QuadtreeCursor{<: C
     end
 end
 
-function STI.node_extent(q::QuadtreeCursor{<: CellBasedGrid})
-    return circle_from_four_corners(_corner_and_other_points_for_circle_from_corners(q)...)
+function STI.node_extent(q::QuadtreeCursor)
+    return cell_range_extent(q.grid, leaf_idxs(q)...)
 end
 
-function STI.node_extent(q::QuadtreeCursor{<: RegularGrid})
-    max_level = ceil(Int, log2(max(ncells(q.grid, 1), ncells(q.grid, 2)))) + 1
-    if q.level == max_level
-        qt = q.grid
-        if qt.x[1] == -180 && qt.x[end] == 180 && qt.y[1] == -90 && qt.y[end] == 90
-            return GO.UnitSpherical.SphericalCap(GO.UnitSphericalPoint((0.,0.,1.)), pi)
-        end
-    end
-    # Compute and clamp all indices to polygon matrix bounds
-    irange, jrange = leaf_idxs(q)
-    imin, imax = extrema(irange)
-    jmin, jmax = extrema(jrange)
+#=
+## TopDownQuadtreeCursor
 
-    x, y = q.grid.x, q.grid.y
-
-    return circle_from_four_corners(
-        ((x[imin], y[jmin]), (x[imin], y[jmax]), (x[imax], y[jmin]), (x[imax], y[jmax])),
-        ()
-    )
-end
-
-
+The idea here is to divide the grid into four quadrants instead of assembling it from 2x2 squares.
+=#
 
 struct TopDownQuadtreeCursor{GridType <: AbstractCurvilinearGrid} <: AbstractQuadtreeCursor
     grid::GridType
@@ -223,7 +206,7 @@ function STI.isleaf(q::TopDownQuadtreeCursor)
 end
 
 function STI.child_indices_extents(q::TopDownQuadtreeCursor)
-    idxs = ((i, j) for i in q.leafranges[1], j in q.leafranges[2])
+    idxs = (cartesian_to_linear_idx(q.grid, CartesianIndex((i, j))) for i in q.leafranges[1], j in q.leafranges[2])
     extents = (cell_range_extent(q.grid, i:i, j:j) for i in q.leafranges[1], j in q.leafranges[2])
     return zip(idxs, extents)
 end

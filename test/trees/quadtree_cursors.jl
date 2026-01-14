@@ -10,6 +10,12 @@ function make_lonlat_point_matrix(nx, ny)
     return [(lon, lat) for lon in lons, lat in lats]
 end
 
+function make_unitspherical_point_matrix(nx, ny)
+    lons = range(-180, 180, length=nx+1)
+    lats = range(-90, 90, length=ny+1)
+    return [GO.UnitSpherical.UnitSphereFromGeographic()((lon, lat)) for lon in lons, lat in lats]
+end
+
 # Helper to count all leaf cells reachable from a cursor
 function count_leaves(cursor)
     if STI.isleaf(cursor)
@@ -37,13 +43,13 @@ end
 
 # Create test grids
 function make_cellbased_grid(nx, ny)
-    CellBasedGrid(make_lonlat_point_matrix(nx, ny))
+    CellBasedGrid(GO.Spherical(), make_unitspherical_point_matrix(nx, ny))
 end
 
 function make_regular_grid(nx, ny)
     lons = collect(range(-180.0, 180.0, length=nx+1))
     lats = collect(range(-90.0, 90.0, length=ny+1))
-    RegularGrid(lons, lats)
+    RegularGrid(GO.Spherical(), lons, lats)
 end
 
 @testset "STI dual_depth_first_search - self intersection" begin
@@ -58,9 +64,7 @@ end
             # Collect all intersecting pairs found by dual tree search
             # Note: Use GO.UnitSpherical._intersects for SphericalCap intersection
             found_pairs = Set{Tuple{Int,Int}}()
-            STI.dual_depth_first_search(GO.UnitSpherical._intersects, cursor1, cursor2) do idx1, idx2
-                i1 = Trees.cartesian_to_linear_idx(grid, idx1)
-                i2 = Trees.cartesian_to_linear_idx(grid, idx2)
+            STI.dual_depth_first_search(GO.UnitSpherical._intersects, cursor1, cursor2) do i1, i2
                 push!(found_pairs, (i1, i2))
             end
 
@@ -185,9 +189,7 @@ end
             # Note: TopDownQuadtreeCursor returns (i, j) tuples, not CartesianIndex
             found_pairs = Set{Tuple{Int,Int}}()
             STI.dual_depth_first_search(GO.UnitSpherical._intersects, cursor1, cursor2) do idx1, idx2
-                i1 = Trees.cartesian_to_linear_idx(grid, CartesianIndex(idx1...))
-                i2 = Trees.cartesian_to_linear_idx(grid, CartesianIndex(idx2...))
-                push!(found_pairs, (i1, i2))
+                push!(found_pairs, (idx1, idx2))
             end
 
             # Every cell should intersect itself (diagonal entries)
