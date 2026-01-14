@@ -7,6 +7,8 @@ using Test, SafeTestsets
     # This test is erroring so it's commented out for now
     # It needs proper spherical `intersection_operator` to work.
     # @safetestset "Integration: SpeedyWeather" begin include("usecases/speedyweather.jl") end
-    
+
     @safetestset "Unit tests: Regridding" begin include("regridding.jl") end
+    @safetestset "Unit tests: Grids" begin include("trees/grids.jl") end
+    @safetestset "Unit tests: QuadtreeCursors" begin include("trees/quadtree_cursors.jl") end
 end
