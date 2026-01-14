@@ -17,6 +17,8 @@ julia --project -e 'using Pkg; Pkg.test(; julia_args = ["--check-bounds=auto",])
 
 # Run a specific test file
 julia --project=test -e 'include("test/usecases/simple.jl")'
+julia --project=test -e 'include("test/trees/grids.jl")'
+julia --project=test -e 'include("test/trees/quadtree_cursors.jl")'
 
 # Start Julia REPL with the package loaded
 julia --project -e 'using ConservativeRegridding'
