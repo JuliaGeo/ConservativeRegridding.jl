@@ -1,8 +1,11 @@
 name = "ConservativeRegridding"
 uuid = "8e50ac2c-eb48-49bc-a402-07c87b949343"
-authors = ["Anshul Singhvi <anshulsinghvi@gmail.com>", "Milan Kloewer <milankloewer@gmx.de>", "and contributors"]
 license = "MIT"
 version = "0.1.0"
+authors = ["Anshul Singhvi <anshulsinghvi@gmail.com>", "Milan Kloewer <milankloewer@gmx.de>", "and contributors"]
+
+[workspace]
+projects = ["test", "docs"]
 
 [deps]
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
@@ -14,6 +17,7 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 SortTileRecursiveTree = "746ee33f-1797-42c2-866d-db2fce69d14d"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
 ClimaCore = "0.14"
@@ -26,6 +30,7 @@ LinearAlgebra = "1"
 ProgressMeter = "1"
 SortTileRecursiveTree = "0.1"
 SparseArrays = "1"
+StaticArrays = "1.9"
 julia = "1.10"
 
 [extras]
@@ -39,6 +44,3 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["SafeTestsets", "SpeedyWeather", "Oceananigans", "KernelAbstractions", "Statistics", "ClimaCore", "Test"]
-
-[workspace]
-projects = ["test", "docs"]
