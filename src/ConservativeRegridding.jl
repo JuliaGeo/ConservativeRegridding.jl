@@ -14,9 +14,9 @@ import ProgressMeter
 include("trees/Trees.jl")
 using .Trees
 
-export AbstractQuadtree, ncells, getcell
-export ExplicitPolygonQuadtree, CellBasedQuadtree
-export QuadtreeCursor
+export AbstractCurvilinearGrid, ncells, getcell
+export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
+export QuadtreeCursor, TopDownQuadtreeCursor
 
 include("regridder/regridder.jl")
 include("regridder/regrid.jl")

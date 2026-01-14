@@ -1,4 +1,25 @@
+#=
+# Wrappers
+
+For trees, wrappers are used to selectively override certain SpatialTreeInterface methods.
+
+This is useful if e.g. you know that a tree covers the entire sphere, 
+and you want to avoid extent calculations there by substituting a full sphere extent.
+
+Wrappers are also generally good for other things -- like caching, or adding additional metadata.
+=#
+
 import GeometryOps: SpatialTreeInterface as STI
+
+abstract type AbstractTreeWrapper end
+Base.parent(wrapper::AbstractTreeWrapper) = error("Base.parent not implemented for $(typeof(wrapper))\nThis must be implemented as it is a core part of the STI interface.")
+# In general, everything will forward back to the parent tree - except what you override.
+STI.isspatialtree(::Type{<: AbstractTreeWrapper}) = true
+STI.nchild(wrapper::AbstractTreeWrapper) = STI.nchild(parent(wrapper))
+STI.getchild(wrapper::AbstractTreeWrapper, i::Int) = STI.getchild(parent(wrapper), i)
+STI.isleaf(wrapper::AbstractTreeWrapper) = STI.isleaf(parent(wrapper))
+STI.child_indices_extents(wrapper::AbstractTreeWrapper) = STI.child_indices_extents(parent(wrapper))
+STI.node_extent(wrapper::AbstractTreeWrapper) = STI.node_extent(parent(wrapper))
 
 #=
 ## KnownFullSphereExtentWrapper
@@ -16,13 +37,12 @@ So instead of doing that we can just intelligently wrap in this.
 A wrapper around a SpatialTreeInterface-compliant spatial tree that
 will always return a `node_extent` that is a spherical cap covering the entire sphere.
 
-All other STI methods are forwarded to `tree`.
+All other STI methods are forwarded to the wrapped tree.
 
 This is useful for trees that are known to cover the entire sphere, since the user
 does not have to compute large extents.
-
 """
-struct KnownFullSphereExtentWrapper{T}
+struct KnownFullSphereExtentWrapper{T} <: AbstractTreeWrapper
     tree::T
     function KnownFullSphereExtentWrapper(tree::T) where T
         if !STI.isspatialtree(tree)
@@ -31,13 +51,12 @@ struct KnownFullSphereExtentWrapper{T}
         return new{T}(tree)
     end
 end
+Base.parent(w::KnownFullSphereExtentWrapper) = w.tree
 
-STI.isspatialtree(::Type{<: KnownFullSphereExtentWrapper}) = true
-STI.nchild(w::KnownFullSphereExtentWrapper) = STI.nchild(w.tree)
-STI.getchild(w::KnownFullSphereExtentWrapper, i::Int) = STI.getchild(w.tree, i)
-STI.isleaf(w::KnownFullSphereExtentWrapper) = STI.isleaf(w.tree)
-STI.child_indices_extents(w::KnownFullSphereExtentWrapper) = STI.child_indices_extents(w.tree)
 # This is the only specialization - you want a full sphere extent
-# This is actually larger than a full sphere but it's fine
+# This is actually larger than a full sphere but it's fine for "extent check" style things.  
+# 
+# If anyone tries to make the cap a polygon then we'll have a problem, but we would have had one anyway,
+# since we don't have a great way to represent a `POLYGON FULL` (in WKT parlance).
 STI.node_extent(w::KnownFullSphereExtentWrapper) = GO.UnitSpherical.SphericalCap(GO.UnitSphericalPoint((0.,0.,1.)), Float64(pi) |> nextfloat, 1.2)
 

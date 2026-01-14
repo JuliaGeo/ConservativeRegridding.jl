@@ -6,12 +6,13 @@ import GeoInterface as GI
 import GeometryOps as GO
 import GeometryOps: UnitSpherical as US, SpatialTreeInterface as STI
 
+include("interfaces.jl")
 include("wrappers.jl")
 include("quadtrees.jl")
-include("quadtree_cursor.jl")
+include("quadtree_cursors.jl")
 
-export AbstractQuadtree, ncells, getcell
-export ExplicitPolygonQuadtree, CellBasedQuadtree
-export QuadtreeCursor
+export AbstractCurvilinearGrid, ncells, getcell
+export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
+export QuadtreeCursor, TopDownQuadtreeCursor
 
 end
