@@ -24,10 +24,10 @@ treeify(grid) = treeify(GOCore.best_manifold(grid), grid)
 
 # Some example implementations
 GOCore.best_manifold(grid::AbstractMatrix{<: GO.UnitSpherical.UnitSphericalPoint}) = GO.Spherical()
-treeify(manifold::GO.Spherical, grid::AbstractMatrix{<: GO.UnitSpherical.UnitSphericalPoint}) = CellBasedGrid(manifold, grid)
+treeify(manifold::GO.Spherical, grid::AbstractMatrix{<: GO.UnitSpherical.UnitSphericalPoint}) = TopDownQuadtreeCursor(CellBasedGrid(manifold, grid))
 
 GOCore.best_manifold(grid::NTuple{2, <: AbstractVector{<: Real}}) = GO.Planar()
-treeify(manifold::GOCore.Manifold, grid::NTuple{2, <: AbstractVector{<: Real}}) = RegularGrid(manifold, grid...)
+treeify(manifold::GOCore.Manifold, grid::NTuple{2, <: AbstractVector{<: Real}}) = TopDownQuadtreeCursor(RegularGrid(manifold, grid...))
 
 #=
 ## AbstractCurvilinearGrid
@@ -156,4 +156,3 @@ STI.getchild(cursor::AbstractQuadtreeCursor, i::Int) = error("GO.STI.getchild no
 STI.isleaf(cursor::AbstractQuadtreeCursor) = error("GO.STI.isleaf not implemented for $(typeof(cursor))")
 STI.child_indices_extents(cursor::AbstractQuadtreeCursor) = error("GO.STI.child_indices_extents not implemented for $(typeof(cursor))")
 STI.node_extent(cursor::AbstractQuadtreeCursor) = error("GO.STI.node_extent not implemented for $(typeof(cursor))")
-

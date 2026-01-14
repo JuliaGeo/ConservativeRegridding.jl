@@ -1,4 +1,7 @@
 using SortTileRecursiveTree
+import GeometryOps as GO
+import GeometryOpsCore as GOCore
+import GeoInterface as GI
 
 const DEFAULT_NODECAPACITY = 10
 const DEFAULT_MANIFOLD = GeometryOps.Planar()
@@ -6,14 +9,30 @@ const DEFAULT_FLOATTYPE = Float64
 const DEFAULT_MATRIX = SparseArrays.SparseMatrixCSC{DEFAULT_FLOATTYPE}
 const DEFAULT_MATRIX_CONSTRUCTOR = SparseArrays.spzeros # SparseCSC for regridder
 
+"""
+    abstract type AbstractRegridder
+
+Defines an interface for regridding operators.
+
+Any subtype must implement the following methods:
+- ` regrid!(dst_field::AbstractVector, regridder::AbstractRegridder, src_field::AbstractVector)`
+
+See also: [`Regridder`](@ref).
+"""
 abstract type AbstractRegridder end
 
+# Primary `Regridder` struct.
 struct Regridder{W, A, V} <: AbstractRegridder
-    intersections :: W # Matrix of area intersections between cells on the source and destination grid
-    dst_areas :: A     # Vector of areas on the destination grid
-    src_areas :: A     # Vector of areas on the source grid
-    dst_temp :: V      # Dense vectors used as work-arrays if trying to regrid non-contiguous memory
-    src_temp :: V      # Dense vectors used as work-arrays if trying to regrid non-contiguous memory
+    "Matrix of area intersections between cells on the source and destination grid"
+    intersections :: W 
+    "Vector of areas on the destination grid"
+    dst_areas :: A
+    "Vector of areas on the source grid"
+    src_areas :: A
+    "Dense vectors used as work-arrays if trying to regrid non-contiguous memory"
+    dst_temp :: V
+    "Dense vectors used as work-arrays if trying to regrid non-contiguous memory"
+    src_temp :: V
 end
 
 function Base.show(io::IO, regridder::Regridder{W, A, V}) where {W, A, V}
@@ -48,6 +67,7 @@ function intersection_areas(
     src_field; # array of polygons of the source grid
     T::Type{<:Number} = DEFAULT_FLOATTYPE,              # float type used for the areas matrix = regridder
     matrix_constructor = DEFAULT_MATRIX_CONSTRUCTOR,    # type of the areas matrix = regridder
+    manifold::GeometryOps.Manifold = DEFAULT_MANIFOLD,
     kwargs...
 )
     # unless `areas::AbstractMatrix` is provided (see in-place method ! below), create a SparseCSC matrix
@@ -66,14 +86,34 @@ function Base.showerror(io::IO, e::DefaultIntersectionFailureError)
     Base.showerror(io, e.e)
 end
 
+"""
+    DefaultIntersectionOperator(manifold::GeometryOps.Manifold)
 
-function _default_intersection_operator(p1, p2)
+Default intersection operator for the given manifold.
+
+Implemented for `Planar` and `Spherical` manifolds at the moment.
+Will dispatch to the appropriate intersection operator / algorithm based on the manifold.
+"""
+struct DefaultIntersectionOperator{M}
+    manifold::M
+end
+
+function (op::DefaultIntersectionOperator{<: GeometryOps.Planar})(p1, p2)
     intersection_polys = try
         GeometryOps.intersection(p1, p2; target = GeoInterface.PolygonTrait())
     catch
         throw(DefaultIntersectionFailureError(p1, p2, e))
     end
     return GeometryOps.area(intersection_polys)
+end
+
+function (op::DefaultIntersectionOperator{M})(p1, p2) where {M <: GeometryOps.Spherical}
+    intersection_polys = try
+        GeometryOps.intersection(GeometryOps.ConvexConvexSutherlandHodgman(op.manifold), p1, p2; target = GeoInterface.PolygonTrait())
+    catch
+        throw(DefaultIntersectionFailureError(p1, p2, e))
+    end
+    return GeometryOps.area(op.manifold, intersection_polys)
 end
 
 function compute_intersection_areas!(
@@ -83,7 +123,7 @@ function compute_intersection_areas!(
     manifold::GeometryOps.Manifold = DEFAULT_MANIFOLD,      # TODO currently not used
     dst_nodecapacity = DEFAULT_NODECAPACITY,
     src_nodecapacity = DEFAULT_NODECAPACITY,
-    intersection_operator::F = _default_intersection_operator
+    intersection_operator::F = DefaultIntersectionOperator(manifold)
 ) where {F}
     # Prepare STRtrees for the two grids, to speed up intersection queries
     # we may want to separately tune nodecapacity if one is much larger than the other.
@@ -128,7 +168,7 @@ function Regridder(
     dst_polys = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(dst_vertices))) .|> GeometryOps.fix
     src_polys = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(src_vertices))) .|> GeometryOps.fix
 
-    intersections = intersection_areas(dst_polys, src_polys; kwargs...)
+    intersections = intersection_areas(manifold, dst_polys, src_polys; kwargs...)
 
     # If the two grids completely overlap, then the areas should be equivalent
     # to the sum of the intersection areas along the second and fisrt dimensions,
@@ -143,4 +183,65 @@ function Regridder(
     regridder = Regridder(intersections, dst_areas, src_areas, dst_temp, src_temp)
     normalize && LinearAlgebra.normalize!(regridder)
     return regridder
+end
+
+function Regridder(dst, src; kwargs...)
+    dst_manifold = GOCore.best_manifold(dst)
+    src_manifold = GOCore.best_manifold(src)
+
+    manifold = if dst_manifold != src_manifold
+        # Implicitly promote to spherical
+        if dst_manifold == GO.Planar() && src_manifold == GO.Spherical()
+            GO.Spherical()
+        elseif dst_manifold == GO.Spherical() && src_manifold == GO.Planar()
+            GO.Spherical()
+        else
+            error("Destination and source manifolds must be the same.  Got $dst_manifold and $src_manifold.")
+        end
+    else
+        dst_manifold
+    end
+
+    return Regridder(manifold, dst, src; kwargs...)
+end
+
+function Regridder(manifold::GOCore.Manifold, dst, src; normalize = true, intersection_operator::F = DefaultIntersectionOperator(manifold), kwargs...) where {F}
+    # "Normalize" the destination and source grids into trees.
+    dst_tree = Trees.treeify(manifold, dst)
+    src_tree = Trees.treeify(manifold, src)
+
+    # Compute the intersection areas.
+    intersections = intersection_areas(manifold, dst_tree, src_tree; intersection_operator, kwargs...)
+
+    # Compute the areas of each cell
+    # of the destination and source grids.
+    dst_areas = areas(manifold, dst, dst_tree)
+    src_areas = areas(manifold, src, src_tree)
+
+    # TODO: make this GPU-compatible?
+    # Allocate temporary arrays for the regridding operation - 
+    # in case the destination and source fields are not contiguous in memory.
+    dst_temp = zeros(length(dst_areas))
+    src_temp = zeros(length(src_areas))
+
+    # Construct the regridder.  Normalize if requested.
+    regridder = Regridder(intersections, dst_areas, src_areas, dst_temp, src_temp)
+    normalize && LinearAlgebra.normalize!(regridder)
+
+    return regridder
+end
+
+function areas(manifold::GOCore.Manifold, item, tree)
+    areas(manifold, tree)
+end
+
+areas(manifold::GOCore.Manifold, tree::Trees.AbstractTreeWrapper) = areas(manifold, Trees.parent(tree))
+
+function areas(manifold::GOCore.Manifold, tree::Trees.AbstractQuadtreeCursor)
+    @assert Trees.istoplevel(tree) "Areas are only valid for the top level of the quadtree."
+    grid = Trees.getgrid(tree)
+    return vec([GO.area(manifold, cell) for cell in Trees.getcell(tree)])
+end
+
+function intersection_areas(manifold::GOCore.Manifold, dst_tree, src_tree, )
 end

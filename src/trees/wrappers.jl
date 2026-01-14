@@ -21,6 +21,10 @@ STI.isleaf(wrapper::AbstractTreeWrapper) = STI.isleaf(parent(wrapper))
 STI.child_indices_extents(wrapper::AbstractTreeWrapper) = STI.child_indices_extents(parent(wrapper))
 STI.node_extent(wrapper::AbstractTreeWrapper) = STI.node_extent(parent(wrapper))
 
+getcell(wrapper::AbstractTreeWrapper, args...) = getcell(parent(wrapper), args...)
+ncells(wrapper::AbstractTreeWrapper, args...) = ncells(parent(wrapper), args...)
+cell_range_extent(wrapper::AbstractTreeWrapper, args...) = cell_range_extent(parent(wrapper), args...)
+
 #=
 ## KnownFullSphereExtentWrapper
 
@@ -60,3 +64,20 @@ Base.parent(w::KnownFullSphereExtentWrapper) = w.tree
 # since we don't have a great way to represent a `POLYGON FULL` (in WKT parlance).
 STI.node_extent(w::KnownFullSphereExtentWrapper) = GO.UnitSpherical.SphericalCap(GO.UnitSphericalPoint((0.,0.,1.)), Float64(pi) |> nextfloat, 1.2)
 
+struct GeometryMaintainingTreeWrapper{Geoms, Tree}
+    geoms::Geoms
+    tree::Tree
+end
+
+Base.parent(wrapper::GeometryMaintainingTreeWrapper) = error("Base.parent not implemented for $(typeof(wrapper))\nThis must be implemented as it is a core part of the STI interface.")
+# In general, everything will forward back to the parent tree - except what you override.
+STI.isspatialtree(::Type{<: GeometryMaintainingTreeWrapper}) = true
+STI.nchild(wrapper::GeometryMaintainingTreeWrapper) = STI.nchild(parent(wrapper))
+STI.getchild(wrapper::GeometryMaintainingTreeWrapper, i::Int) = GeometryMaintainingTreeWrapper(wrapper.geoms, STI.getchild(parent(wrapper), i))
+STI.isleaf(wrapper::GeometryMaintainingTreeWrapper) = STI.isleaf(parent(wrapper))
+STI.child_indices_extents(wrapper::GeometryMaintainingTreeWrapper) = STI.child_indices_extents(parent(wrapper))
+STI.node_extent(wrapper::GeometryMaintainingTreeWrapper) = STI.node_extent(parent(wrapper))
+
+getcell(wrapper::GeometryMaintainingTreeWrapper, args...) = getcell(wrapper.geoms, args...)
+ncells(wrapper::GeometryMaintainingTreeWrapper, args...) = ncells(wrapper.geoms, args...)
+cell_range_extent(wrapper::GeometryMaintainingTreeWrapper, args...) = cell_range_extent(wrapper.geoms, args...)

@@ -178,6 +178,11 @@ function STI.node_extent(q::QuadtreeCursor)
     return cell_range_extent(q.grid, leaf_idxs(q)...)
 end
 
+function istoplevel(q::QuadtreeCursor)
+    max_level = ceil(Int, log2(max(ncells(q.grid, 1), ncells(q.grid, 2)))) + 1
+    return q.level == max_level && q.idx == CartesianIndex(1, 1)
+end
+
 #=
 ## TopDownQuadtreeCursor
 
@@ -191,6 +196,8 @@ end
 function TopDownQuadtreeCursor(grid::AbstractCurvilinearGrid)
     return TopDownQuadtreeCursor(grid, (1:ncells(grid, 1), 1:ncells(grid, 2)))
 end
+
+getgrid(q::TopDownQuadtreeCursor) = q.grid
 
 function Base.show(io::IO, q::TopDownQuadtreeCursor)
     print(io, "TopDownQuadtreeCursor(($(q.leafranges[1])), ($(q.leafranges[2])))")
@@ -267,4 +274,8 @@ end
 
 function getcell(q::TopDownQuadtreeCursor)
     return (getcell(q.grid, i, j) for i in q.leafranges[1], j in q.leafranges[2])
+end
+
+function istoplevel(q::TopDownQuadtreeCursor)
+    return length(q.leafranges[1]) == ncells(q.grid, 1) && length(q.leafranges[2]) == ncells(q.grid, 2)
 end
