@@ -3,6 +3,33 @@
 
 This file contains interfaces for tree types, mainly quadtrees for now. 
 
+## Treeify
+
+[`Trees.treeify`](@ref) is a function that should take a manifold and a grid specification (that can be any struct from anywhere)
+and return a `SpatialTreeInterface`-compliant tree.
+
+This could mean that you take the vertices of a grid, put them in an `AbstractCurvilinearGrid`,
+and then wrap those in a `QuadtreeCursor`.  But you could do anything you want - so long as the 
+thing that is returned implements the `SpatialTreeInterface` methods.
+=#
+import GeometryOpsCore as GOCore
+import GeometryOps as GO
+import GeometryOps: SpatialTreeInterface as STI
+
+function treeify(manifold, grid)
+    error("treeify not implemented for $(typeof(grid))")
+end
+
+treeify(grid) = treeify(GOCore.best_manifold(grid), grid)
+
+# Some example implementations
+GOCore.best_manifold(grid::AbstractMatrix{<: GO.UnitSpherical.UnitSphericalPoint}) = GO.Spherical()
+treeify(manifold::GO.Spherical, grid::AbstractMatrix{<: GO.UnitSpherical.UnitSphericalPoint}) = CellBasedGrid(manifold, grid)
+
+GOCore.best_manifold(grid::NTuple{2, <: AbstractVector{<: Real}}) = GO.Planar()
+treeify(manifold::GOCore.Manifold, grid::NTuple{2, <: AbstractVector{<: Real}}) = RegularGrid(manifold, grid...)
+
+#=
 ## AbstractCurvilinearGrid
 
 AbstractCurvilinearGrid is the abstract supertype for all quadtree bases.
@@ -17,7 +44,7 @@ Implementations of `AbstractCurvilinearGrid` are [`Trees.RegularGrid`](@ref), [`
 """
     abstract type AbstractCurvilinearGrid
 
-Abstract supertype for all quadtree types.
+Abstract supertype for all curvilinear grid types.
 The type itself should store the representation of the "base" of the quadtree,
 which should fit into the `QuadtreeCursor` type.
 
@@ -28,9 +55,9 @@ get the child nodes of the current node.
 Since the quadtree structure is the same, you would broadly need to provide:
 
 ```julia
-getcell(quadtree, i, j) -> GI.Polygon
-ncells(quadtree, dim::Int) -> Int
-cell_range_extent(quadtree, irange::UnitRange{Int}, jrange::UnitRange{Int})
+getcell(grid, i, j) -> GI.Polygon
+ncells(grid, dim::Int) -> Int
+cell_range_extent(grid, irange::UnitRange{Int}, jrange::UnitRange{Int})
 ```
 , i.e., provide an implementation for [`Trees.getcell`](@ref), [`Trees.ncells`](@ref), and [`Trees.cell_range_extent`](@ref).
 
@@ -39,62 +66,62 @@ and then you may also want to specialize on `STI.node_extent(::QuadtreeCursor{<:
 abstract type AbstractCurvilinearGrid end
 
 """
-    getcell(quadtree::AbstractCurvilinearGrid, i::Int, j::Int) -> GI.Polygon
-    getcell(quadtree::AbstractCurvilinearGrid, idx::Integer) -> GI.Polygon
-    getcell(quadtree::AbstractCurvilinearGrid, idx::CartesianIndex{2}) -> GI.Polygon
+    getcell(grid::AbstractCurvilinearGrid, i::Int, j::Int) -> GI.Polygon
+    getcell(grid::AbstractCurvilinearGrid, idx::Integer) -> GI.Polygon
+    getcell(grid::AbstractCurvilinearGrid, idx::CartesianIndex{2}) -> GI.Polygon
 
-Get the cell at the given indices from the underlying quadtree object.  
+Get the cell at the given indices from the underlying grid object.  
 
-If implementing a [`Trees.AbstractCurvilinearGrid`](@ref), you should implement `getcell(quadtree, i, j)`.
+If implementing a [`Trees.AbstractCurvilinearGrid`](@ref), you should implement `getcell(grid, i, j)`.
 Other implementations are built on top of this and [`Trees.ncells`](@ref).
 """
-function getcell(quadtree::AbstractCurvilinearGrid, i::Int, j::Int)
-    error("getcell not implemented for $(typeof(quadtree))")
+function getcell(grid::AbstractCurvilinearGrid, i::Int, j::Int)
+    error("getcell not implemented for $(typeof(grid))")
 end
 
 """
-    ncells(quadtree::AbstractCurvilinearGrid, dim::Int) -> Int
-    ncells(quadtree::AbstractCurvilinearGrid) -> (Int, Int)
+    ncells(grid::AbstractCurvilinearGrid, dim::Int) -> Int
+    ncells(grid::AbstractCurvilinearGrid) -> (Int, Int)
 
-Get the number of cells in the given dimension of the underlying quadtree object.
-This is used to determine the size of the quadtree in the given dimension.
+Get the number of cells in the given dimension of the underlying grid object.
+This is used to determine the size of the grid in the given dimension.
 
-If implementing a [`Trees.AbstractCurvilinearGrid`](@ref), you should implement `ncells(quadtree, dim)`.
+If implementing a [`Trees.AbstractCurvilinearGrid`](@ref), you should implement `ncells(grid, dim)`.
 Other implementations are built on top of this basic method.
 """
-function ncells(quadtree::AbstractCurvilinearGrid, dim::Int)
-    error("ncells not implemented for $(typeof(quadtree))")
+function ncells(grid::AbstractCurvilinearGrid, dim::Int)
+    error("ncells not implemented for $(typeof(grid))")
 end
 
 """
-    cell_range_extent(quadtree::AbstractCurvilinearGrid, irange::UnitRange{Int}, jrange::UnitRange{Int}) -> GO.UnitSpherical.SphericalCap{Float64}
+    cell_range_extent(grid::AbstractCurvilinearGrid, irange::UnitRange{Int}, jrange::UnitRange{Int}) -> GO.UnitSpherical.SphericalCap{Float64}
 
 Get the extent of the cells in the given range of indices.
 """
-function cell_range_extent(quadtree::AbstractCurvilinearGrid, irange::UnitRange{Int}, jrange::UnitRange{Int})
-    error("cell_range_extent not implemented for $(typeof(quadtree))")
+function cell_range_extent(grid::AbstractCurvilinearGrid, irange::UnitRange{Int}, jrange::UnitRange{Int})
+    error("cell_range_extent not implemented for $(typeof(grid))")
 end
 
 # ### Generic higher-level implementations
 
 # Toplevel generic method to get all cells
-function getcell(quadtree::AbstractCurvilinearGrid)
-    return (getcell(quadtree, i, j) for i in 1:ncells(quadtree, 1), j in 1:ncells(quadtree, 2))
+function getcell(grid::AbstractCurvilinearGrid)
+    return (getcell(grid, i, j) for i in 1:ncells(grid, 1), j in 1:ncells(grid, 2))
 end
-getcell(quadtree::AbstractCurvilinearGrid, idx::CartesianIndex{2}) = getcell(quadtree, idx[1], idx[2])
+getcell(grid::AbstractCurvilinearGrid, idx::CartesianIndex{2}) = getcell(grid, idx[1], idx[2])
 # Method to get cell from linear index
-function getcell(quadtree::AbstractCurvilinearGrid, idx::Integer)
-    ij = linear_to_cartesian_idx(quadtree, idx)
-    return getcell(quadtree, ij.I...)
+function getcell(grid::AbstractCurvilinearGrid, idx::Integer)
+    ij = linear_to_cartesian_idx(grid, idx)
+    return getcell(grid, ij.I...)
 end
 
-function linear_to_cartesian_idx(quadtree::AbstractCurvilinearGrid, idx::Integer)
-    j, i = fldmod1(idx, ncells(quadtree, 1))
+function linear_to_cartesian_idx(grid::AbstractCurvilinearGrid, idx::Integer)
+    j, i = fldmod1(idx, ncells(grid, 1))
     return CartesianIndex(i, j)
 end
 
-function cartesian_to_linear_idx(quadtree::AbstractCurvilinearGrid, idx::CartesianIndex{2})
-    return idx[1] + (idx[2] - 1) * ncells(quadtree, 1)
+function cartesian_to_linear_idx(grid::AbstractCurvilinearGrid, idx::CartesianIndex{2})
+    return idx[1] + (idx[2] - 1) * ncells(grid, 1)
 end
 
 #=
