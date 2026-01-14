@@ -8,7 +8,8 @@ import GeometryOps: UnitSpherical as US, SpatialTreeInterface as STI
 
 include("interfaces.jl")
 include("wrappers.jl")
-include("quadtrees.jl")
+include("grids.jl")
+
 include("quadtree_cursors.jl")
 
 export AbstractCurvilinearGrid, ncells, getcell
