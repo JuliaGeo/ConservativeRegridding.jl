@@ -31,15 +31,15 @@ function compute_intersection_areas(
     return ret_i1, ret_i2, ret_area
 end
 
+_area_criterion(cap::GO.UnitSpherical.SphericalCap) = (2pi * (1-cos(cap.radius))) < pi # 60 degree cap - easy enough.  generates quite a few threads anyway.
+_area_criterion(cap::Extents.Extent) = error("Area criterion for multithreading has to be customizable, for 2D planar extents - this needs to be implemented!")
+
 function get_all_candidate_pairs(threaded::True, predicate_f::F, src_tree::T1, dst_tree::T2) where {F, T1, T2}
     # TODO: Threaded dual dfs via chunking.
     # For now this is just serial, and is the big bottleneck for larger grids.
     # First, run the dual depth first search to get all candidate pairs of 
     # cells that may intersect.
-    candidate_idxs = Tuple{Int, Int}[]
-    STI.dual_depth_first_search(predicate_f, src_tree, dst_tree) do i1, i2
-        push!(candidate_idxs, (i1, i2))
-    end
+    candidate_idxs = multithreaded_dual_query(predicate_f, _area_criterion, src_tree, dst_tree) # from utils/MultithreadedDualDepthFirstSearch.jl
     return candidate_idxs
 end
 

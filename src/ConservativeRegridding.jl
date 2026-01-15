@@ -14,6 +14,9 @@ import ProgressMeter
 using GeometryOpsCore: booltype, BoolsAsTypes, True, False, istrue
 using GeometryOpsCore: Manifold, Planar, Spherical
 
+include("utils/MultithreadedDualDepthFirstSearch.jl")
+using .MultithreadedDualDepthFirstSearch
+
 include("trees/Trees.jl")
 using .Trees
 
