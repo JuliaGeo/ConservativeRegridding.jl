@@ -66,7 +66,7 @@ Base.@kwdef struct SinusoidField <: ExampleFieldFunction
     coefmult::Float64 = 1
 end
 function (f::SinusoidField)(lon, lat, z)
-    return f.coefmult * (f.coef - cos(pi * (acos(cos(deg2rad(lon))) * cos(deg2rad(lat))) / f.dp_length))
+    return f.coefmult * (f.coef - cos(pi * acos(cos(deg2rad(lon)) * cos(deg2rad(lat))) / f.dp_length))
 end
 
 struct HarmonicField <: ExampleFieldFunction end
@@ -127,32 +127,32 @@ function (f::GulfStreamField)(lon, lat, z)
 end
 
 Base.@kwdef struct VortexField <: ExampleFieldFunction
-    lon0::Float64 = 5.5
-    lat0::Float64 = 0.2
+    lon0_rad::Float64 = 5.5
+    lat0_rad::Float64 = 0.2
     r0::Float64 = 3.0
     d::Float64 = 5.0
     t::Float64 = 6.0
 end
 function (f::VortexField)(lon, lat, z)
     # Find the rotated long and lat of the point on (long, lat) on the sphere
-    # with the pole at (f.lon0, f.lat0)
-    sin_c, cos_c = sincosd(f.lat0)
+    # with the pole at (f.lon0_rad, f.lat0_rad).
+    sin_c, cos_c = sincos(f.lat0_rad)
     sin_lat, cos_lat = sincosd(lat)
-    Trm = cos_lat * cos(deg2rad(lon) - f.lon0)
+    Trm = cos_lat * cos(deg2rad(lon) - f.lon0_rad)
     X = sin_c * Trm - cos_c * sin_lat
-    Y = cos_lat * sin(deg2rad(lon) - f.lon0)
+    Y = cos_lat * sin(deg2rad(lon) - f.lon0_rad)
     Z = sin_c * sin_lat + cos_c * Trm
 
     # Recover lat/long
     dlon = atan(Y, X)
     if dlon < 0
-        dlon = dlon + 2pi
+        dlon = dlon + 2π
     end
     dlat = asin(Z)
 
     Rho = f.r0 * cos(dlat)
-    Vt = 3 * sqrt(3)/2/cosh(Rho)/cosh(Rho)*tanh(Rho)
-    Omega = Rho == 0 ? 0 : Vt/Rho
+    Vt = 3 * sqrt(3) / 2 / cosh(Rho)^2 * tanh(Rho)
+    Omega = Rho == 0 ? 0.0 : Vt / Rho
 
-    return 2 * (1 + tanh(Rho/f.d * sin(dlon - Omega * f.t)))
+    return 2 * (1 + tanh(Rho / f.d * sin(dlon - Omega * f.t)))
 end
