@@ -67,6 +67,7 @@ dst_longlat_cells = compute_cell_matrix(dst_field)
 src_cells = GO.UnitSphereFromGeographic().(src_longlat_cells)
 dst_cells = GO.UnitSphereFromGeographic().(dst_longlat_cells)
 
+ConservativeRegridding.Regridder(dst_cells, src_cells; threaded = false)
 
 src_qt = Trees.CellBasedGrid(src_cells) 
 dst_qt = Trees.CellBasedGrid(dst_cells) 

@@ -6,7 +6,7 @@ import GeometryOps: SpatialTreeInterface as STI
 import GeometryOps as GO, GeoInterface as GI
 
 # qt = CellBasedQuadtree(dst_cells)
-qt = Trees.RegularGridQuadtree(LinRange(-180, 180, 500), LinRange(-90, 90, 500))
+qt = Trees.RegularGrid(GO.Spherical(), LinRange(-180, 180, 500), LinRange(-90, 90, 500))
 qtc = Trees.QuadtreeCursor(qt) |> Trees.KnownFullSphereExtentWrapper
 
 qtc = STI.getchild(qtc, 1)
