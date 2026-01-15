@@ -29,6 +29,4 @@ YAXArrayBase = "90b8fcef-0c2d-428d-9c56-5f86629e9d14"
 ConservativeRegridding = {path = ".."}
 Oceananigans = {rev = "patch-2", url = "https://github.com/asinghvi17/Oceananigans.jl"}
 SphericalSpatialTrees = {rev = "main", url = "https://github.com/meggart/SphericalSpatialTrees.jl"}
-# GeoMakie = {path = "../../GeoMakie.jl"}
-# GeometryOps = {path = "/Users/anshul/temp/GeometryOps.jl"}
 GeometryOps = {rev = "as/simple_spherical_intersection", url = "https://github.com/JuliaGeo/GeometryOps.jl"}
