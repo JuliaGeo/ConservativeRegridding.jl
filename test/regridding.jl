@@ -7,18 +7,21 @@ using SparseArrays
 @testset "Custom intersection_operator" begin
     make_square() = GI.Polygon([GI.LinearRing([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)])])
 
-    dst = [make_square() for _ in 1:2]
-    src = [make_square() for _ in 1:3]
+    dst_polys = [make_square() for _ in 1:2]
+    src_polys = [make_square() for _ in 1:3]
+
+    dst_tree = GO.SpatialTreeInterface.FlatNoTree(dst_polys)
+    src_tree = GO.SpatialTreeInterface.FlatNoTree(src_polys)
 
     @testset "operator is called + writes positive areas" begin
         calls = Ref(0)
         op = (p1, p2) -> (calls[] += 1; 2.5)
 
-        Aop = ConservativeRegridding.intersection_areas(dst, src; intersection_operator = op)
-
-        @test calls[] == length(dst) * length(src)
-        @test size(Aop) == (length(dst), length(src))
-        @test nnz(Aop) == length(dst) * length(src)
+        R = ConservativeRegridding.Regridder(GO.Planar(), dst_tree, src_tree; intersection_operator = op, normalize = false)
+        Aop = R.intersections
+        @test calls[] == length(dst_polys) * length(src_polys)
+        @test size(Aop) == (length(dst_polys), length(src_polys))
+        @test nnz(Aop) == length(dst_polys) * length(src_polys)
         @test all(nonzeros(Aop) .== 2.5)
     end
 
@@ -26,9 +29,10 @@ using SparseArrays
         calls = Ref(0)
         op = (p1, p2) -> (calls[] += 1; -1.0)
 
-        Aop = ConservativeRegridding.intersection_areas(dst, src; intersection_operator = op)
+        R = ConservativeRegridding.Regridder(GO.Planar(), dst_tree, src_tree; intersection_operator = op, normalize = false)
 
-        @test calls[] == length(dst) * length(src)
+        Aop = R.intersections
+        @test calls[] == length(dst_polys) * length(src_polys)
         @test nnz(Aop) == 0
         @test Aop == spzeros(eltype(Aop), size(Aop)...)
     end
