@@ -17,7 +17,7 @@ using SparseArrays
         calls = Ref(0)
         op = (p1, p2) -> (calls[] += 1; 2.5)
 
-        R = ConservativeRegridding.Regridder(GO.Planar(), dst_tree, src_tree; intersection_operator = op, normalize = false)
+        R = ConservativeRegridding.Regridder(GO.Planar(), dst_tree, src_tree; intersection_operator = op, normalize = false, threaded = false)
         Aop = R.intersections
         @test calls[] == length(dst_polys) * length(src_polys)
         @test size(Aop) == (length(dst_polys), length(src_polys))
@@ -29,7 +29,7 @@ using SparseArrays
         calls = Ref(0)
         op = (p1, p2) -> (calls[] += 1; -1.0)
 
-        R = ConservativeRegridding.Regridder(GO.Planar(), dst_tree, src_tree; intersection_operator = op, normalize = false)
+        R = ConservativeRegridding.Regridder(GO.Planar(), dst_tree, src_tree; intersection_operator = op, normalize = false, threaded = false)
 
         Aop = R.intersections
         @test calls[] == length(dst_polys) * length(src_polys)
