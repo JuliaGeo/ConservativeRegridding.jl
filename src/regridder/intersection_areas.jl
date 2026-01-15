@@ -100,11 +100,11 @@ function intersection_areas(
     areas = reduce(vcat, getindex.(all_results, 3))
     # Assemble a sparse matrix from the results.
     return SparseArrays.sparse(
-        i1s, 
         i2s, 
+        i1s, 
         areas, 
-        Trees.ncells(src_tree, 1) * Trees.ncells(src_tree, 2),
         Trees.ncells(dst_tree, 1) * Trees.ncells(dst_tree, 2), 
+        Trees.ncells(src_tree, 1) * Trees.ncells(src_tree, 2),
     )
 end
 
@@ -136,10 +136,10 @@ function intersection_areas(
     ) 
     # Assemble a sparse matrix from the results.
     return SparseArrays.sparse(
-        i1s, 
         i2s, 
+        i1s, 
         areas, 
-        Trees.ncells(src_tree, 1) * Trees.ncells(src_tree, 2),
         Trees.ncells(dst_tree, 1) * Trees.ncells(dst_tree, 2), 
+        Trees.ncells(src_tree, 1) * Trees.ncells(src_tree, 2),
     )
 end
