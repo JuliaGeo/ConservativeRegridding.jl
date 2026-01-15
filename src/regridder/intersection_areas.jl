@@ -103,8 +103,8 @@ function intersection_areas(
         i2s, 
         i1s, 
         areas, 
-        Trees.ncells(dst_tree, 1) * Trees.ncells(dst_tree, 2), 
-        Trees.ncells(src_tree, 1) * Trees.ncells(src_tree, 2),
+        prod(Trees.ncells(dst_tree)), 
+        prod(Trees.ncells(src_tree)),
     )
 end
 
@@ -139,7 +139,7 @@ function intersection_areas(
         i2s, 
         i1s, 
         areas, 
-        Trees.ncells(dst_tree, 1) * Trees.ncells(dst_tree, 2), 
-        Trees.ncells(src_tree, 1) * Trees.ncells(src_tree, 2),
+        prod(Trees.ncells(dst_tree)), 
+        prod(Trees.ncells(src_tree)),
     )
 end
