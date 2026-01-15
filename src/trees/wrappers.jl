@@ -62,7 +62,7 @@ Base.parent(w::KnownFullSphereExtentWrapper) = w.tree
 # 
 # If anyone tries to make the cap a polygon then we'll have a problem, but we would have had one anyway,
 # since we don't have a great way to represent a `POLYGON FULL` (in WKT parlance).
-STI.node_extent(w::KnownFullSphereExtentWrapper) = GO.UnitSpherical.SphericalCap(GO.UnitSphericalPoint((0.,0.,1.)), Float64(pi) |> nextfloat, 1.2)
+STI.node_extent(w::KnownFullSphereExtentWrapper) = GO.UnitSpherical.SphericalCap(GO.UnitSphericalPoint((0.,0.,1.)), Float64(pi) |> nextfloat)
 
 struct GeometryMaintainingTreeWrapper{Geoms, Tree}
     geoms::Geoms
