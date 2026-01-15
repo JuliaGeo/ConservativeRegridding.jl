@@ -23,9 +23,12 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [weakdeps]
 Interfaces = "85a1e053-f937-4924-92a5-1367d23b7b87"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 
 [extensions]
 ConservativeRegriddingInterfacesExt = "Interfaces"
+ConservativeRegriddingOceananigansExt = ["Oceananigans", "KernelAbstractions"]
 
 [compat]
 ChunkSplitters = "3.1.2"
