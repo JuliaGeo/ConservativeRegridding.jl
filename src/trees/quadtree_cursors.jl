@@ -276,6 +276,11 @@ function getcell(q::TopDownQuadtreeCursor)
     return (getcell(q.grid, i, j) for i in q.leafranges[1], j in q.leafranges[2])
 end
 
+function getcell(q::TopDownQuadtreeCursor, i::Int)
+    leaf_ij = linear_to_cartesian_idx(q.grid, i)
+    return getcell(q.grid, leaf_ij)
+end
+
 function ncells(q::TopDownQuadtreeCursor, dim::Int)
     return length(q.leafranges[dim])
 end

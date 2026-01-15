@@ -79,5 +79,5 @@ STI.child_indices_extents(wrapper::GeometryMaintainingTreeWrapper) = STI.child_i
 STI.node_extent(wrapper::GeometryMaintainingTreeWrapper) = STI.node_extent(parent(wrapper))
 
 getcell(wrapper::GeometryMaintainingTreeWrapper, args...) = getcell(wrapper.geoms, args...)
-ncells(wrapper::GeometryMaintainingTreeWrapper, args...) = ncells(wrapper.geoms, args...)
+ncells(wrapper::GeometryMaintainingTreeWrapper, args...) = ncells(wrapper.tree, args...)
 cell_range_extent(wrapper::GeometryMaintainingTreeWrapper, args...) = cell_range_extent(wrapper.geoms, args...)
