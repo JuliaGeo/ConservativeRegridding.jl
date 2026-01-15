@@ -46,3 +46,61 @@ flip(::Center) = Face()
 
     @inbounds cell_matrix[i, j] = (xl, yl)
 end
+
+# Field value functions taken from the regridding benchmarks paper
+# https://www.mdpi.com/2297-8747/27/2/31
+# Adapted from original Fortran implementations in appendix to Julia.
+# May not be exactly correct?  There are slight inconsistencies in the 
+# vortex field implementation that I saw.
+abstract type ExampleFieldFunction end
+Oceananigans.set!(field::Oceananigans.Field, f::ExampleFieldFunction) = set!(field, (lon, lat, z) -> f(lon, lat, z))
+
+struct LongitudeField <: ExampleFieldFunction end
+function (::LongitudeField)(lon, lat, z)
+    return lon
+end
+
+Base.@kwdef struct SinusoidField <: ExampleFieldFunction 
+    dp_length::Float64 = 1.2pi
+    coef::Float64 = 2
+    coefmult::Float64 = 1
+end
+function (f::SinusoidField)(lon, lat, z)
+    return f.coefmult * (f.coef - cos(pi * (acos(cos(deg2rad(lon))) * cos(deg2rad(lat))) / f.dp_length))
+end
+
+struct HarmonicField <: ExampleFieldFunction end
+function (::HarmonicField)(lon, lat, z)
+    return 2 + (sin(2 * deg2rad(lat))^16) * cos(16 * deg2rad(lon))
+end
+
+Base.@kwdef struct VortexField <: ExampleFieldFunction
+    lon0::Float64 = 5.5
+    lat0::Float64 = 0.2
+    r0::Float64 = 3.0
+    d::Float64 = 5.0
+    t::Float64 = 6.0
+end
+function (f::VortexField)(lon, lat, z)
+    # Find the rotated long and lat of the point on (long, lat) on the sphere
+    # with the pole at (f.lon0, f.lat0)
+    sin_c, cos_c = sincosd(f.lat0)
+    sin_lat, cos_lat = sincosd(lat)
+    Trm = cos_lat * cos(deg2rad(lon) - f.lon0)
+    X = sin_c * Trm - cos_c * sin_lat
+    Y = cos_lat * sin(deg2rad(lon) - f.lon0)
+    Z = sin_c * sin_lat + cos_c * Trm
+
+    # Recover lat/long
+    dlon = atan(Y, X)
+    if dlon < 0
+        dlon = dlon + 2pi
+    end
+    dlat = asin(Z)
+
+    Rho = f.r0 * cos(dlat)
+    Vt = 3 * sqrt(3)/2/cosh(Rho)/cosh(Rho)*tanh(Rho)
+    Omega = Rho == 0 ? 0 : Vt/Rho
+
+    return 2 * (1 + tanh(Rho/f.d * sin(dlon - Omega * f.t)))
+end
