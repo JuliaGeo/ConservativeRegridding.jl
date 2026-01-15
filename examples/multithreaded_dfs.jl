@@ -9,7 +9,7 @@ using Test
 # Walk through both trees and kick off a task whenever you hit a node that satisfies the area criterion.
 function multithreaded_dfs(inner_dfs_f::IF, predicate::P, area_criterion::A, tasks::V, node1::N1, node2::N2) where {P, IF, A, V <: Vector{<: StableTasks.StableTask}, N1, N2}
     if STI.isleaf(node1) || STI.isleaf(node2)
-        # both nodes are leaves, so we can just iterate over the indices and extents
+        # both nodes are leaves, so we want to run the inner dfs function on the nodes themselves.
         push!(tasks, StableTasks.@spawn $inner_dfs_f($predicate, node1, node2))
     else
         # neither node is a leaf, recurse into both children
@@ -35,6 +35,10 @@ using ConservativeRegridding.Trees
 src_grid = LatitudeLongitudeGrid(size=(100, 100, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
 dst_grid = LatitudeLongitudeGrid(size=(100, 100, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
 
+
+src_grid = LatitudeLongitudeGrid(size=(2880, 1440, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+dst_grid = TripolarGrid(size=(2880, 1440, 1), fold_topology = RightFaceFolded)
+
 src_field = CenterField(src_grid)
 dst_field = CenterField(dst_grid)
 set!(src_field, (lon, lat, z) -> lon)
@@ -46,7 +50,7 @@ function area_of_spherical_cap(cap)
     return 2pi * (1-cos(cap.radius))
 end
 function area_c(cap)
-    area_of_spherical_cap(cap) <= 0.5892243899248773
+    area_of_spherical_cap(cap) <= 3.1415926535897922
 end
 
 
@@ -71,9 +75,11 @@ function do_multithreaded_dfs(inner_dfs_f::IF, predicate::P, area_criterion::A, 
     return reduce(vcat, map(fetch, tasks))
 end
 
-@time result = do_multithreaded_dfs(inner_f, GO.UnitSpherical._intersects, area_c, src_tree, dst_tree)
-@time result = inner_f(GO.UnitSpherical._intersects, src_tree, dst_tree)
+@time result_multithreaded = do_multithreaded_dfs(inner_f, GO.UnitSpherical._intersects, area_c, src_tree, dst_tree)
+@time result_singlethreaded = inner_f(GO.UnitSpherical._intersects, src_tree, dst_tree)
+
+
+@be do_multithreaded_dfs($inner_f, $(GO.UnitSpherical._intersects), $area_c, $src_tree, $dst_tree) seconds=5
+@be inner_f($(GO.UnitSpherical._intersects), $src_tree, $dst_tree) seconds=5
 
 @test isempty(setdiff(result, inner_f(GO.UnitSpherical._intersects, src_tree, dst_tree)))
-
-inner_f(GO.UnitSpherical._intersects, src_tree, dst_tree)
