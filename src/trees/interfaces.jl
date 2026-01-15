@@ -195,3 +195,10 @@ function getcell(tree::STI.FlatNoTree)
     return tree.geometries
 end
 
+function ncells(tree::SortTileRecursiveTree.STRtree)
+    n = 0
+    STI.depth_first_search(e -> true, tree) do i
+        n += 1
+    end
+    return n
+end

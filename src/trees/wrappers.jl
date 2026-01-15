@@ -69,7 +69,7 @@ struct GeometryMaintainingTreeWrapper{Geoms, Tree}
     tree::Tree
 end
 
-Base.parent(wrapper::GeometryMaintainingTreeWrapper) = error("Base.parent not implemented for $(typeof(wrapper))\nThis must be implemented as it is a core part of the STI interface.")
+Base.parent(wrapper::GeometryMaintainingTreeWrapper) = wrapper.tree
 # In general, everything will forward back to the parent tree - except what you override.
 STI.isspatialtree(::Type{<: GeometryMaintainingTreeWrapper}) = true
 STI.nchild(wrapper::GeometryMaintainingTreeWrapper) = STI.nchild(parent(wrapper))
@@ -81,3 +81,6 @@ STI.node_extent(wrapper::GeometryMaintainingTreeWrapper) = STI.node_extent(paren
 getcell(wrapper::GeometryMaintainingTreeWrapper, args...) = getcell(wrapper.geoms, args...)
 ncells(wrapper::GeometryMaintainingTreeWrapper, args...) = ncells(wrapper.tree, args...)
 cell_range_extent(wrapper::GeometryMaintainingTreeWrapper, args...) = cell_range_extent(wrapper.geoms, args...)
+
+getcell(wrapper::GeometryMaintainingTreeWrapper{G, T}) where {G <: AbstractVector, T} = wrapper.geoms
+getcell(wrapper::GeometryMaintainingTreeWrapper{G, T}, i::Integer) where {G <: AbstractVector, T} = wrapper.geoms[i]
