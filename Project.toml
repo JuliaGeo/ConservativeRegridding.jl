@@ -8,6 +8,7 @@ authors = ["Anshul Singhvi <anshulsinghvi@gmail.com>", "Milan Kloewer <milankloe
 projects = ["test", "docs"]
 
 [deps]
+ChunkSplitters = "ae650224-84b6-46f8-82ea-d812ca08434e"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 Extents = "411431e0-e8b7-467b-b5e0-f676ba4f2910"
 GeoInterface = "cf35fbd7-0cd7-5166-be24-54bfbe79505f"
@@ -17,9 +18,17 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 SortTileRecursiveTree = "746ee33f-1797-42c2-866d-db2fce69d14d"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+StableTasks = "91464d47-22a1-43fe-8b7f-2d57ee82463f"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
+[weakdeps]
+Interfaces = "85a1e053-f937-4924-92a5-1367d23b7b87"
+
+[extensions]
+ConservativeRegriddingInterfacesExt = "Interfaces"
+
 [compat]
+ChunkSplitters = "3.1.2"
 ClimaCore = "0.14"
 DocStringExtensions = "0.8, 0.9"
 Extents = "0.1"
@@ -30,6 +39,7 @@ LinearAlgebra = "1"
 ProgressMeter = "1"
 SortTileRecursiveTree = "0.1"
 SparseArrays = "1"
+StableTasks = "0.1.7"
 StaticArrays = "1.9"
 julia = "1.10"
 
