@@ -61,20 +61,6 @@ function LinearAlgebra.normalize!(regridder::Regridder)
     return regridder
 end
 
-# allocate the areas matrix as SparseCSC if not provided
-function intersection_areas(
-    dst_field, # array of polygons of the target grid
-    src_field; # array of polygons of the source grid
-    T::Type{<:Number} = DEFAULT_FLOATTYPE,              # float type used for the areas matrix = regridder
-    matrix_constructor = DEFAULT_MATRIX_CONSTRUCTOR,    # type of the areas matrix = regridder
-    manifold::GeometryOps.Manifold = DEFAULT_MANIFOLD,
-    kwargs...
-)
-    # unless `areas::AbstractMatrix` is provided (see in-place method ! below), create a SparseCSC matrix
-    areas = matrix_constructor(T, length(dst_field), length(src_field))
-    return compute_intersection_areas!(areas, dst_field, src_field; kwargs...)
-end
-
 struct DefaultIntersectionFailureError{T1, T2, E} <: Base.Exception
     p1::T1
     p2::T2
@@ -99,90 +85,21 @@ struct DefaultIntersectionOperator{M}
 end
 
 function (op::DefaultIntersectionOperator{<: GeometryOps.Planar})(p1, p2)
-    intersection_polys = try
-        GeometryOps.intersection(p1, p2; target = GeoInterface.PolygonTrait())
-    catch
-        throw(DefaultIntersectionFailureError(p1, p2, e))
-    end
-    return GeometryOps.area(intersection_polys)
+    intersection_polys = #=try; =#
+        GeometryOps.intersection(GO.FosterHormannClipping(GO.Planar()), p1, p2; target = GeoInterface.PolygonTrait())
+    # catch
+    #     throw(DefaultIntersectionFailureError(p1, p2, e))
+    # end
+    return GeometryOps.area(GO.Planar(), intersection_polys)
 end
 
 function (op::DefaultIntersectionOperator{M})(p1, p2) where {M <: GeometryOps.Spherical}
-    intersection_polys = try
+    intersection_polys = #=try; =#
         GeometryOps.intersection(GeometryOps.ConvexConvexSutherlandHodgman(op.manifold), p1, p2; target = GeoInterface.PolygonTrait())
-    catch
-        throw(DefaultIntersectionFailureError(p1, p2, e))
-    end
+    # catch
+    #     throw(DefaultIntersectionFailureError(p1, p2, e))
+    # end
     return GeometryOps.area(op.manifold, intersection_polys)
-end
-
-function compute_intersection_areas!(
-    areas::AbstractMatrix,  # intersection areas for all combinatations of grid cells in field1, field2
-    dst_grid,               # array of polygons
-    src_grid;               # array of polygons
-    manifold::GeometryOps.Manifold = DEFAULT_MANIFOLD,      # TODO currently not used
-    dst_nodecapacity = DEFAULT_NODECAPACITY,
-    src_nodecapacity = DEFAULT_NODECAPACITY,
-    intersection_operator::F = DefaultIntersectionOperator(manifold)
-) where {F}
-    # Prepare STRtrees for the two grids, to speed up intersection queries
-    # we may want to separately tune nodecapacity if one is much larger than the other.
-    # specifically we may want to tune leaf node capacity via Hilbert packing while still
-    # constraining inner node capacity.  But that can come later.
-    tree1 = SortTileRecursiveTree.STRtree(src_grid; nodecapacity = src_nodecapacity)
-    tree2 = SortTileRecursiveTree.STRtree(dst_grid; nodecapacity = dst_nodecapacity)
-    # Do the dual query, which is the most efficient way to do this,
-    # by iterating down both trees simultaneously, rejecting pairs of nodes that do not intersect.
-    # when we find an intersection, we calculate the area of the intersection and add it to the result matrix.
-    GeometryOps.SpatialTreeInterface.dual_depth_first_search(Extents.intersects, tree1, tree2) do i1, i2
-        p1, p2 = src_grid[i1], dst_grid[i2]
-        # may want to check if the polygons intersect first,
-        # to avoid antimeridian-crossing multipolygons viewing a scanline.
-        area_of_intersection = intersection_operator(p1, p2)
-        if area_of_intersection > 0
-            areas[i2, i1] += area_of_intersection
-        end
-    end
-
-    return areas
-end
-
-get_vertices(polygons) = polygons       # normally vector of polygons, which are vectors of points
-get_vertices(polygons::AbstractMatrix) = eachcol(polygons)
-
-"""$(TYPEDSIGNATURES)
-Return a Regridder that transfers data from `src_field` to `dst_field`.
-
-Regridder stores the intersection areas between
-The areas are computed by summing the regridder along the first and second dimensions
-as the regridder is a matrix of the intersection areas between each grid cell between the
-two grids. Additional `kwargs` are passed to the `intersection_areas` function.
-"""
-function Regridder(
-    dst_vertices, # assumes something like this ::AbstractVector{<:AbstractVector{Tuple}},
-    src_vertices;
-    normalize::Bool = true,
-    kwargs...
-)
-    # wrap into GeoInterface.Polygon, apply antimeridian cuttng via fix
-    dst_polys = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(dst_vertices))) .|> GeometryOps.fix
-    src_polys = GeoInterface.Polygon.(GeoInterface.LinearRing.(get_vertices(src_vertices))) .|> GeometryOps.fix
-
-    intersections = intersection_areas(manifold, dst_polys, src_polys; kwargs...)
-
-    # If the two grids completely overlap, then the areas should be equivalent
-    # to the sum of the intersection areas along the second and fisrt dimensions,
-    # for src and dst, respectively. This is not the case if the two grids do not cover the same area.
-    dst_areas = GeometryOps.area.(dst_polys)
-    src_areas = GeometryOps.area.(src_polys)
-
-    # TODO: make this GPU-compatible?
-    dst_temp = zeros(length(dst_areas))
-    src_temp = zeros(length(src_areas))
-
-    regridder = Regridder(intersections, dst_areas, src_areas, dst_temp, src_temp)
-    normalize && LinearAlgebra.normalize!(regridder)
-    return regridder
 end
 
 function Regridder(dst, src; kwargs...)
@@ -205,13 +122,27 @@ function Regridder(dst, src; kwargs...)
     return Regridder(manifold, dst, src; kwargs...)
 end
 
-function Regridder(manifold::GOCore.Manifold, dst, src; normalize = true, intersection_operator::F = DefaultIntersectionOperator(manifold), kwargs...) where {F}
+function Regridder(
+        manifold::M, dst, src; 
+        normalize = true, 
+        intersection_operator::F = DefaultIntersectionOperator(manifold), 
+        threaded = True(),
+        kwargs...
+    ) where {M <: Manifold, F}
     # "Normalize" the destination and source grids into trees.
     dst_tree = Trees.treeify(manifold, dst)
     src_tree = Trees.treeify(manifold, src)
 
+    _threaded = booltype(threaded)
+
     # Compute the intersection areas.
-    intersections = intersection_areas(manifold, dst_tree, src_tree; intersection_operator, kwargs...)
+    intersections = intersection_areas(
+        manifold,
+        _threaded, 
+        dst_tree, src_tree; 
+        intersection_operator, 
+        kwargs...
+    )
 
     # Compute the areas of each cell
     # of the destination and source grids.
@@ -241,7 +172,4 @@ function areas(manifold::GOCore.Manifold, tree::Trees.AbstractQuadtreeCursor)
     @assert Trees.istoplevel(tree) "Areas are only valid for the top level of the quadtree."
     grid = Trees.getgrid(tree)
     return vec([GO.area(manifold, cell) for cell in Trees.getcell(tree)])
-end
-
-function intersection_areas(manifold::GOCore.Manifold, dst_tree, src_tree, )
 end

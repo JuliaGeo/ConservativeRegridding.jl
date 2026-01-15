@@ -7,9 +7,12 @@ import GeometryOps
 import SortTileRecursiveTree
 import Extents
 import SparseArrays
+import ChunkSplitters
+import StableTasks
 import ProgressMeter
-# piracy, remove when GeometryOps is fixed
-# GeometryOps.area(::GeometryOps.Planar, x) = GeometryOps.area(x)
+
+using GeometryOpsCore: booltype, BoolsAsTypes, True, False, istrue
+using GeometryOpsCore: Manifold, Planar, Spherical
 
 include("trees/Trees.jl")
 using .Trees
@@ -20,7 +23,9 @@ export QuadtreeCursor, TopDownQuadtreeCursor
 
 include("regridder/regridder.jl")
 include("regridder/regrid.jl")
+include("regridder/intersection_areas.jl")
 
-public Regridder
+public Regridder, regrid, regrid!
+public areas
 
 end
