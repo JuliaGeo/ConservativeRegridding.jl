@@ -17,3 +17,5 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 ConservativeRegridding = {path = ".."}
+Oceananigans = {rev = "patch-2", url = "https://github.com/asinghvi17/Oceananigans.jl"}
+GeometryOps = {rev = "as/simple_spherical_intersection", url = "https://github.com/JuliaGeo/GeometryOps.jl"}
