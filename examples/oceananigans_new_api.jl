@@ -78,6 +78,26 @@ f, a, p = poly(dst_polys; color = vec(interior(dst_field)), axis = (; type = Glo
 
 lines!(a, GeoMakie.coastlines(); zlevel = 100_000, color = :orange)
 
+# ## Metrics
+# First, set up the analytical destination field.
+analytical_dst_field = CenterField(dst_grid)
+set!(analytical_dst_field, VortexField(; lat0 = 80))
+areas_dst = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(dst_field))
+# Then, compute metrics.  The global misfit field is nice to show:
+misfit = abs.((interior(analytical_dst_field) .- interior(dst_field)) ./ interior(analytical_dst_field))
+# and these are the numerical metrics:
+mean_misfit = mean(misfit)
+max_misfit = maximum(misfit)
+rms_misfit = sqrt(mean(misfit.^2))
+L_min = (minimum(interior(analytical_dst_field)) - minimum(interior(dst_field))) / maximum(abs, interior(analytical_dst_field))
+L_max = (maximum(interior(analytical_dst_field)) - maximum(interior(dst_field))) / maximum(abs, interior(analytical_dst_field))
+target_global_conservation = abs(sum(areas_dst .* vec(interior(dst_field))) - sum(areas_dst .* vec(interior(analytical_dst_field)))) / sum(areas_dst .* vec(interior(analytical_dst_field)))
+
+
+f, a, p = poly(dst_polys; color = vec(misfit), axis = (; type = GlobeAxis))
+lines!(a, GeoMakie.coastlines(); zlevel = 100_000, color = :orange, transparency = true, alpha = 0.5)
+cb = Colorbar(f[1, 2], p; label = "Misfit")
+f
 # TODO: how to enforce conservative regridding on a tripolar grid,
 # that has an open hole at the south pole??
 
