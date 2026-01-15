@@ -1,7 +1,4 @@
 using Oceananigans
-using Oceananigans.Grids: ξnode, ηnode
-using Oceananigans.Fields: AbstractField
-using KernelAbstractions: @index, @kernel
 using ConservativeRegridding
 using ConservativeRegridding.Trees
 import GeoInterface as GI
@@ -9,53 +6,14 @@ import GeometryOps as GO
 import GeometryOps: SpatialTreeInterface as STI
 using Statistics
 
-instantiate(L) = L()
+include("oceananigans_common.jl")
 
-function compute_cell_matrix(field::AbstractField)
-    Nx, Ny, _ = size(field.grid)
-    ℓx, ℓy    = Center(), Center()
+longlat_coarse_grid = LatitudeLongitudeGrid(size=(100, 100, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+longlat_fine_grid = LatitudeLongitudeGrid(size=(200, 200, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+tripolar_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
 
-    if isnothing(ℓx) || isnothing(ℓy)
-        error("cell_matrix can only be computed for fields with non-nothing horizontal location.")
-    end
-
-    grid = field.grid
-    arch = grid.architecture
-    FT = eltype(grid)
-
-    ArrayType = Oceananigans.Architectures.array_type(arch)
-    cell_matrix = ArrayType{Tuple{FT, FT}}(undef, Nx+1, Ny+1)
-
-    arch = grid.architecture
-    Oceananigans.Utils.launch!(arch, grid, (Nx+1, Ny+1), _compute_cell_matrix!, cell_matrix, Nx, ℓx, ℓy, grid)
-
-    return cell_matrix
-end
-
-flip(::Face) = Center()
-flip(::Center) = Face()
-
-@kernel function _compute_cell_matrix!(cell_matrix, Nx, ℓx, ℓy, grid)
-    i, j = @index(Global, NTuple)
-
-    vx = flip(ℓx)
-    vy = flip(ℓy)
-
-    xl = ξnode(i, j, 1, grid, vx, vy, nothing)
-    yl = ηnode(i, j, 1, grid, vx, vy, nothing)
-
-    @inbounds cell_matrix[i, j] = (xl, yl)
-end
-# coarse_grid = LatitudeLongitudeGrid(size=(90, 45, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-# fine_grid   = LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-
-# dst = CenterField(coarse_grid)
-# src = CenterField(fine_grid)
-
-src_grid = LatitudeLongitudeGrid(size=(100, 100, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-dst_grid = LatitudeLongitudeGrid(size=(200, 200, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-# dst_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
-
+src_grid = longlat_coarse_grid
+dst_grid = longlat_fine_grid
 
 src_field = CenterField(src_grid)
 dst_field = CenterField(dst_grid)
@@ -104,7 +62,7 @@ is_fine = [
 ]
 @test all(is_fine)
 
-[
+all_dst_polys = [
     begin
         src_i = src_idx[1]
         src_j = src_idx[2]
@@ -119,7 +77,11 @@ is_fine = [
     for src_idx in CartesianIndices(src_to_dst_map)
 ]
 
-src_idx = CartesianIndex(50, 50)
+multipolys = reduce(vcat, [[GI.MultiPolygon([Trees.getcell(src_qt, idx), p]) for p in polys] for (idx, polys) in enumerate(all_dst_polys)])
+multipolys_longlat = GO.transform(GO.GeographicFromUnitSphere(), multipolys)
+GeoJSON.write("multipolys.geojson", [(; geometry = mp) for mp in multipolys_longlat])
+
+src_idx = CartesianIndex(1, 1)
 
 src_i = src_idx[1]
 src_j = src_idx[2]
@@ -145,7 +107,13 @@ dst_polys_longlat = GO.transform(GO.GeographicFromUnitSphere(), dst_polys; threa
 
 fig, ax, plt = poly(GI.convert(LibGEOS, src_poly_longlat); transparency = true, strokewidth = 1)
 plt2 = poly!(ax, GI.convert(LibGEOS, dst_polys_longlat[1]); transparency = true, strokewidth = 1)
+poly!(ax, GI.convert(LibGEOS, polygon_of_intersection_longlat); color = :red, transparency = true, strokewidth = 1)
+polygon_of_intersection = GO.intersection(GO.ConvexConvexSutherlandHodgman(GO.Spherical()), src_poly, dst_polys[1]; target = GO.PolygonTrait())
 
+polygon_of_intersection_longlat = GO.transform(GO.GeographicFromUnitSphere(), polygon_of_intersection)
+
+using GeoJSON
+GeoJSON.write("bad_longlat_polys.geojson", [(; geometry = src_poly_longlat, name = "p1"), (geometry = dst_polys_longlat[1], name = "p2")])
 
 # idxs = [Tuple{Int, Int}[] for _ in CartesianIndices(size(src_cells).-1)]
 # @time STI.dual_depth_first_search(GO.UnitSpherical._intersects, src_tree, dst_tree) do i1, i2
@@ -166,20 +134,21 @@ using SparseArrays, ProgressMeter
 
 mat = spzeros(Float64, prod(size(src_cells).-1), prod(size(dst_cells).-1))
 
+failing_pairs = Tuple{Int, Int}[]
 @time @showprogress for (i1, i2) in idxs
     p1 = Trees.getcell(src_qt, i1)
     p2 = Trees.getcell(dst_qt, i2)
-    polygon_of_intersection = #=try; =#
+    polygon_of_intersection = try;
         GO.intersection(GO.ConvexConvexSutherlandHodgman(GO.Spherical()), p1, p2; target = GO.PolygonTrait()) 
-    # catch e; 
-    #     # @show "Error during intersection" i1 i2; 
-    #     push!(failing_pairs, (i1, i2))
-    #     continue
-    # end
+    catch e; 
+        # @show "Error during intersection" i1 i2; 
+        push!(failing_pairs, (i1, i2))
+        continue
+    end
     area_of_intersection = GO.area(GO.Spherical(), polygon_of_intersection)
     mat[i1, i2] += area_of_intersection
 end
-
+failing_pairs
 mat
 
 regridder = ConservativeRegridding.Regridder(
@@ -200,6 +169,9 @@ areas_src = ConservativeRegridding.areas(GO.Spherical(), src_tree)
 sum(areas_dst)
 sum(areas_src)
 sum(mat)
+
+vec(sum(mat; dims = 1)) |> sum
+vec(sum(mat; dims = 2)) |> sum
 
 @test all(sum((dst_field * Oceananigans.Operators.Az)) ≈ sum((src_field * Oceananigans.Operators.Az)))
 
