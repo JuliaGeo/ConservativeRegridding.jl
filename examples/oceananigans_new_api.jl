@@ -6,10 +6,12 @@ import GeometryOps as GO
 import GeometryOpsCore as GOCore
 import GeometryOps: SpatialTreeInterface as STI
 using Statistics
-using GLMakie
+using GLMakie, GeoMakie
+import LibGEOS
 
 include("oceananigans_common.jl")
 
+# Define the ConservativeRegridding interface for Oceananigans grids.
 function Trees.treeify(
         manifold::GOCore.Spherical,
         field::Oceananigans.Field{T1, T2, T3, T4, GridT}
@@ -33,19 +35,29 @@ function Trees.treeify(
     # for long-lat grids that don't cover the whole sphere - TODO.
     return Trees.KnownFullSphereExtentWrapper(tree)
 end
-
+# Also define which manifold the grid lives on.  This gives us accurate area as well for any simulation
+# (e.g. on Mars?!)
 GOCore.best_manifold(grid::Oceananigans.LatitudeLongitudeGrid) = GO.Spherical(; radius = grid.radius)
 GOCore.best_manifold(grid::Oceananigans.TripolarGrid) = GO.Spherical(; radius = grid.radius)
 GOCore.best_manifold(field::Oceananigans.Field) = GOCore.best_manifold(field.grid)
 
-src_grid = LatitudeLongitudeGrid(size=(100, 100, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-dst_grid = LatitudeLongitudeGrid(size=(200, 200, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-dst_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
+# Instantiate some grids
+lonlat_test_grid = LatitudeLongitudeGrid(size=(36, 18, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+lonlat_coarse_grid = LatitudeLongitudeGrid(size=(100, 100, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+lonlat_fine_grid = LatitudeLongitudeGrid(size=(200, 200, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
 
+tripolar_test_grid = TripolarGrid(size=(36, 18, 1), fold_topology = RightFaceFolded)
+tripolar_fine_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
 
+# Select which grid you want to use
+src_grid = lonlat_fine_grid
+dst_grid = tripolar_fine_grid
+# Construct fields from those grids
 src_field = CenterField(src_grid)
 dst_field = CenterField(dst_grid)
-set!(src_field, (lon, lat, z) -> lon)
+# Set the field to some test data
+# In this case, we set it to the longitude of the cell
+set!(src_field, VortexField(; lat0 = 80))
 
 @time regridder = ConservativeRegridding.Regridder(
     dst_field,
@@ -55,22 +67,34 @@ set!(src_field, (lon, lat, z) -> lon)
 
 ConservativeRegridding.regrid!(vec(interior(dst_field)), regridder, vec(interior(src_field)))
 
-heatmap(interior(dst_field, :, :, 1))
+f, a, p = heatmap(interior(src_field, :, :, 1); colorrange = extrema(interior(src_field)), highclip = :red)
+cb = Colorbar(f[1, 2], p)
 
-areas_dst = ConservativeRegridding.areas(GO.Spherical(), dst_tree)
-areas_src = ConservativeRegridding.areas(GO.Spherical(), src_tree)
+src_polys = collect(Trees.getcell(Trees.treeify(src_field))) |>  x-> GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), x) .|> GI.convert(LibGEOS) |> vec
+dst_polys = collect(Trees.getcell(Trees.treeify(dst_field))) |>  x-> GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), x) .|> GI.convert(LibGEOS) |> vec
 
-sum(areas_dst)
-sum(areas_src)
-sum(mat)
+f, a, p = poly(src_polys; color = vec(interior(src_field)), axis = (; type = GlobeAxis), colorrange = extrema(interior(src_field)), highclip = :red)
+f, a, p = poly(dst_polys; color = vec(interior(dst_field)), axis = (; type = GlobeAxis), colorrange = extrema(interior(src_field)), highclip = :red)
 
-vec(sum(mat; dims = 1)) |> sum
-vec(sum(mat; dims = 2)) |> sum
+lines!(a, GeoMakie.coastlines(); zlevel = 100_000, color = :orange)
 
-@test all(sum((dst_field * Oceananigans.Operators.Az)) ≈ sum((src_field * Oceananigans.Operators.Az)))
+# TODO: how to enforce conservative regridding on a tripolar grid,
+# that has an open hole at the south pole??
 
-sum(dst_field * Oceananigans.Operators.Az)
-sum(src_field * Oceananigans.Operators.Az)
+# areas_dst = ConservativeRegridding.areas(GO.Spherical(), dst_tree)
+# areas_src = ConservativeRegridding.areas(GO.Spherical(), src_tree)
 
-@test all(vec(sum(mat; dims = 1)) .≈ areas_dst)
-@test all(vec(sum(mat; dims = 2)) .≈ areas_src)
+# sum(areas_dst)
+# sum(areas_src)
+# sum(mat)
+
+# vec(sum(mat; dims = 1)) |> sum
+# vec(sum(mat; dims = 2)) |> sum
+
+# @test all(sum((dst_field * Oceananigans.Operators.Az)) ≈ sum((src_field * Oceananigans.Operators.Az)))
+
+# sum(dst_field * Oceananigans.Operators.Az)
+# sum(src_field * Oceananigans.Operators.Az)
+
+# @test all(vec(sum(mat; dims = 1)) .≈ areas_dst)
+# @test all(vec(sum(mat; dims = 2)) .≈ areas_src)
