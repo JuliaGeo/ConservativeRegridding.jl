@@ -285,6 +285,10 @@ function ncells(q::TopDownQuadtreeCursor, dim::Int)
     return length(q.leafranges[dim])
 end
 
+function ncells(q::TopDownQuadtreeCursor)
+    return length.(q.leafranges)
+end
+
 function istoplevel(q::TopDownQuadtreeCursor)
     return length(q.leafranges[1]) == ncells(q.grid, 1) && length(q.leafranges[2]) == ncells(q.grid, 2)
 end

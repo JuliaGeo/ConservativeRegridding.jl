@@ -15,9 +15,35 @@ thing that is returned implements the `SpatialTreeInterface` methods.
 import GeometryOpsCore as GOCore
 import GeometryOps as GO
 import GeometryOps: SpatialTreeInterface as STI
+import SortTileRecursiveTree # in order to implement the `getcell/ncell` interface
 
+# Generic method to treeify "anything"
 function treeify(manifold, grid)
-    error("treeify not implemented for $(typeof(grid))")
+    if STI.isspatialtree(grid)
+        if applicable(getcell, grid, 1)
+            return grid
+        else
+            error("grid is a SpatialTreeInterface-compliant tree, but does not implement `ConservativeRegridding.Trees.getcell` - please implement this method!")
+        end
+    elseif grid isa AbstractMatrix
+        if GI.trait(first(grid)) isa GI.AbstractPolygonTrait
+            return TopDownQuadtreeCursor(ExplicitPolygonGrid(manifold, grid))
+        elseif GI.trait(first(grid)) isa GI.AbstractPointTrait
+            return TopDownQuadtreeCursor(CellBasedGrid(manifold, grid))
+        else
+            error("grid is a matrix, but no element is a polygon or point - please implement `ConservativeRegridding.Trees.treeify` for this type!")
+        end
+    elseif isiterable(grid)
+        if all(g -> GI.trait(g) isa GI.AbstractPolygonTrait, grid)
+            return STI.FlatNoTree(grid)
+        else
+            if GI.isgeometry(first(grid))
+                error("grid is a iterable of geometries, but not all geometries are polygons - please implement `ConservativeRegridding.Trees.treeify` for this type!")
+            else
+                error("grid is a iterable, but no GeoInterface-compatible geometries were detected - please implement `ConservativeRegridding.Trees.treeify` for this type!")
+            end
+        end
+    end
 end
 
 treeify(grid) = treeify(GOCore.best_manifold(grid), grid)
@@ -156,3 +182,16 @@ STI.getchild(cursor::AbstractQuadtreeCursor, i::Int) = error("GO.STI.getchild no
 STI.isleaf(cursor::AbstractQuadtreeCursor) = error("GO.STI.isleaf not implemented for $(typeof(cursor))")
 STI.child_indices_extents(cursor::AbstractQuadtreeCursor) = error("GO.STI.child_indices_extents not implemented for $(typeof(cursor))")
 STI.node_extent(cursor::AbstractQuadtreeCursor) = error("GO.STI.node_extent not implemented for $(typeof(cursor))")
+
+
+# ## Implementations for external types
+function ncells(tree::STI.FlatNoTree)
+    return length(tree.geometries)
+end
+function getcell(tree::STI.FlatNoTree, idx::Integer)
+    return tree.geometries[idx]
+end
+function getcell(tree::STI.FlatNoTree)
+    return tree.geometries
+end
+

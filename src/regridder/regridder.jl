@@ -170,6 +170,9 @@ areas(manifold::GOCore.Manifold, tree::Trees.AbstractTreeWrapper) = areas(manifo
 
 function areas(manifold::GOCore.Manifold, tree::Trees.AbstractQuadtreeCursor)
     @assert Trees.istoplevel(tree) "Areas are only valid for the top level of the quadtree."
-    grid = Trees.getgrid(tree)
+    return vec([GO.area(manifold, cell) for cell in Trees.getcell(tree)])
+end
+
+function areas(manifold::GOCore.Manifold, tree)
     return vec([GO.area(manifold, cell) for cell in Trees.getcell(tree)])
 end
