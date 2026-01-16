@@ -41,7 +41,7 @@ end
 
     set!(src, 1)
 
-    regridder = ConservativeRegridding.Regridder(dst, src)
+    regridder = ConservativeRegridding.Regridder(dst, src; threaded = false)
 
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
 
