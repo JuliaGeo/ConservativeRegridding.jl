@@ -22,8 +22,8 @@ tripolar_fine_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceF
 tripolar_huge_grid = TripolarGrid(size=(2880, 1440, 1), fold_topology = RightFaceFolded)
 
 # Select which grid you want to use
-dst_grid = lonlat_fine_grid
-src_grid = tripolar_fine_grid
+dst_grid = tripolar_fine_grid
+src_grid = lonlat_fine_grid
 # Construct fields from those grids
 src_field = CenterField(src_grid)
 dst_field = CenterField(dst_grid)
