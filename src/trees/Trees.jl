@@ -11,6 +11,9 @@ include("wrappers.jl")
 include("grids.jl")
 
 include("quadtree_cursors.jl")
+include("specialized_quadtree_cursors.jl")
+
+# private FaceAwareQuadtreeCursor, CubedSphereToplevelTree
 
 export AbstractCurvilinearGrid, ncells, getcell
 export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
