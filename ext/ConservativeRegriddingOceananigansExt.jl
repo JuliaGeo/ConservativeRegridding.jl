@@ -96,15 +96,12 @@ Trees.treeify(field::Oceananigans.AbstractField) = Trees.treeify(field.grid)
 Trees.treeify(manifold::GOCore.Manifold, field::Oceananigans.Field) = Trees.treeify(manifold, field.grid)
 Trees.treeify(manifold::GOCore.Manifold, field::Oceananigans.AbstractField) = Trees.treeify(manifold, field.grid)
 
-
 # Also define which manifold the grid lives on.  This gives us accurate area as well for any simulation
 # (e.g. on Mars?!)
 GOCore.best_manifold(grid::Oceananigans.RectilinearGrid) = GO.Planar()
 GOCore.best_manifold(grid::Oceananigans.LatitudeLongitudeGrid) = GO.Spherical(; radius = grid.radius)
-GOCore.best_manifold(grid::Oceananigans.TripolarGrid) = GO.Spherical(; radius = grid.radius)
-GOCore.best_manifold(grid::Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid) = GO.Spherical(; radius = grid.radius)
+GOCore.best_manifold(grid::Oceananigans.OrthogonalSphericalShellGrid) = GO.Spherical(; radius = grid.radius)
 
 GOCore.best_manifold(field::Oceananigans.Field) = GOCore.best_manifold(field.grid)
-
 
 end
