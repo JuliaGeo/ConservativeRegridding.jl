@@ -22,12 +22,14 @@ StableTasks = "91464d47-22a1-43fe-8b7f-2d57ee82463f"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [weakdeps]
+ClimaCore = "d414da3d-4745-48bb-8d80-42e94e092884"
 Interfaces = "85a1e053-f937-4924-92a5-1367d23b7b87"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 
 [extensions]
 ConservativeRegriddingInterfacesExt = "Interfaces"
 ConservativeRegriddingOceananigansExt = "Oceananigans"
+ConservativeRegriddingClimaCoreExt = "ClimaCore"
 
 [compat]
 ChunkSplitters = "3.1.2"
