@@ -22,7 +22,6 @@ for (regridder, dst) in zip(regridders, (dst_field[i] for i in 1:6))
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src_field)))
 end
 
-
 using GeoMakie, GLMakie
 fig = Figure()
 ax = GlobeAxis(fig[1, 1])

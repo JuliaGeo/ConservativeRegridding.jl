@@ -3,7 +3,7 @@ module ConservativeRegriddingOceananigansExt
 using Oceananigans
 using Oceananigans.Grids: ξnode, ηnode
 using Oceananigans.Fields: AbstractField
-using KernelAbstractions: @index, @kernel
+using Oceananigans.Architectures: on_architecture, CPU
 
 using ConservativeRegridding
 using ConservativeRegridding.Trees
@@ -18,6 +18,7 @@ instantiate(L) = L()
 function compute_cell_matrix(field::AbstractField)
     compute_cell_matrix(field.grid)
 end
+
 function compute_cell_matrix(grid::Oceananigans.Grids.AbstractGrid)
     Nx, Ny, _ = size(grid)
     ℓx, ℓy    = Center(), Center()
@@ -29,28 +30,28 @@ function compute_cell_matrix(grid::Oceananigans.Grids.AbstractGrid)
     arch = grid.architecture
     FT = eltype(grid)
 
-    ArrayType = Oceananigans.Architectures.array_type(arch)
-    cell_matrix = ArrayType{Tuple{FT, FT}}(undef, Nx+1, Ny+1)
+    cell_matrix = Array{Tuple{FT, FT}}(undef, Nx+1, Ny+1)
 
-    arch = grid.architecture
-    Oceananigans.Utils.launch!(arch, grid, (Nx+1, Ny+1), _compute_cell_matrix!, cell_matrix, Nx, ℓx, ℓy, grid)
+    # Not GPU compatible so we need to move the grid on the CPU
+    cpu_grid = on_architecture(CPU(), grid)
+    _compute_cell_matrix!(cell_matrix, Nx, Ny, ℓx, ℓy, cpu_grid)
 
-    return cell_matrix
+    return on_architecture(arch, cell_matrix)
 end
 
 flip(::Face) = Center()
 flip(::Center) = Face()
 
-@kernel function _compute_cell_matrix!(cell_matrix, Nx, ℓx, ℓy, grid)
-    i, j = @index(Global, NTuple)
+function _compute_cell_matrix!(cell_matrix, Nx, Ny, ℓx, ℓy, grid)
+    for i in 1:Nx+1, j in 1:Ny+1
+        vx = flip(ℓx)
+        vy = flip(ℓy)
 
-    vx = flip(ℓx)
-    vy = flip(ℓy)
+        xl = ξnode(i, j, 1, grid, vx, vy, nothing)
+        yl = ηnode(i, j, 1, grid, vx, vy, nothing)
 
-    xl = ξnode(i, j, 1, grid, vx, vy, nothing)
-    yl = ηnode(i, j, 1, grid, vx, vy, nothing)
-
-    @inbounds cell_matrix[i, j] = (xl, yl)
+        @inbounds cell_matrix[i, j] = (xl, yl)
+    end
 end
 
 
