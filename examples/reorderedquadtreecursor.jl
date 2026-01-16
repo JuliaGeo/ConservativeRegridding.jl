@@ -126,3 +126,4 @@ end
 function istoplevel(q::ReorderedTopDownQuadtreeCursor)
     return length(q.leafranges[1]) == Trees.ncells(q.grid, 1) && length(q.leafranges[2]) == Trees.ncells(q.grid, 2)
 end
+
