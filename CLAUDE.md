@@ -33,6 +33,7 @@ The project uses a workspace layout with separate Project.toml files in `test/`,
 **`Regridder`** (`src/regridder/regridder.jl`): The main type storing:
 - `intersections`: Sparse matrix of intersection areas between source and destination grid cells
 - `dst_areas` / `src_areas`: Vectors of grid cell areas
+- `dst_temp` / `src_temp`: Work arrays for non-contiguous memory regridding
 
 Key behaviors:
 - `transpose(regridder)` returns a regridder for reverse direction (shares underlying data)
@@ -40,30 +41,68 @@ Key behaviors:
 
 ### Core Functions
 
-**`Regridder(dst_vertices, src_vertices; normalize=true, ...)`**: Constructor that:
-1. Wraps vertex arrays into `GeoInterface.Polygon` objects
-2. Builds STRtrees for spatial indexing via SortTileRecursiveTree
-3. Performs dual depth-first search to find intersecting polygon pairs
-4. Computes intersection areas via `GeometryOps.intersection` by default, user-overridable by `intersection_operator` kwarg
+**`Regridder(dst, src; normalize=true, intersection_operator=..., threaded=True())`**: Constructor that:
+1. Determines manifold (Planar or Spherical) from input grids
+2. Converts grids to spatial trees via `Trees.treeify`
+3. Performs dual depth-first search to find intersecting polygon pairs (multithreaded by default)
+4. Computes intersection areas via `DefaultIntersectionOperator`, user-overridable by `intersection_operator` kwarg
 
 **`regrid!(dst_field, regridder, src_field)`** (`src/regridder/regrid.jl`): Performs the regridding operation: `dst = (A * src) / dst_areas`
 
-**`intersection_operator`**: The `Regridder` constructor accepts a custom `intersection_operator` function to compute the "intersection area" between two polygons, enabling non-standard intersection semantics.
+**`DefaultIntersectionOperator(manifold)`**: Default intersection operator that dispatches to appropriate algorithm based on manifold:
+- Planar: Uses `FosterHormannClipping`
+- Spherical: Uses `ConvexConvexSutherlandHodgman`
 
 ### Trees Submodule (`src/trees/`)
 
-The `Trees` submodule provides quadtree-based spatial indexing for matrix-shaped grids:
+The `Trees` submodule provides quadtree-based spatial indexing for matrix-shaped grids.
 
-**`AbstractQuadtree`**: Abstract type for quadtree representations. Implement `getcell(quadtree, i, j)` and `ncells(quadtree, dim)`.
+**`treeify(manifold, grid)`** (`src/trees/interfaces.jl`): Main entry point that converts any grid representation into a `SpatialTreeInterface`-compliant tree. Handles:
+- Matrices of polygons → `ExplicitPolygonGrid` + `TopDownQuadtreeCursor`
+- Matrices of points → `CellBasedGrid` + `TopDownQuadtreeCursor`
+- Iterables of polygons → `FlatNoTree`
+- Existing spatial trees (pass-through)
 
-**Concrete implementations:**
-- `ExplicitPolygonQuadtree`: Wraps a matrix of pre-computed polygons
-- `CellBasedQuadtree`: Builds polygons on-the-fly from a matrix of corner points
-- `RegularGridQuadtree`: For regular lon/lat grids defined by 1D x and y vectors
+**`AbstractCurvilinearGrid`** (`src/trees/interfaces.jl`): Abstract type for grid representations. Implement:
+- `getcell(grid, i, j)` → returns polygon at grid position
+- `ncells(grid, dim)` → number of cells in dimension
+- `cell_range_extent(grid, irange, jrange)` → bounding extent for cell range
 
-**`QuadtreeCursor`**: A cursor for traversing quadtrees, implementing GeometryOps' `SpatialTreeInterface` for dual depth-first search operations.
+**Concrete grid implementations** (`src/trees/grids.jl`):
+- `ExplicitPolygonGrid{M}`: Wraps a matrix of pre-computed polygons
+- `CellBasedGrid{M}`: Builds polygons on-the-fly from a matrix of corner points
+- `RegularGrid{M}`: For regular lon/lat grids defined by 1D x and y vectors
 
-**`KnownFullSphereExtentWrapper`**: Wrapper for trees known to cover the entire sphere, avoiding expensive extent computation.
+All grid types are parameterized by manifold `M` (Planar or Spherical).
+
+**`AbstractQuadtreeCursor`** (`src/trees/interfaces.jl`): Abstract type for quadtree traversal. Implements GeometryOps' `SpatialTreeInterface`.
+
+**Cursor implementations** (`src/trees/quadtree_cursors.jl`):
+- `QuadtreeCursor`: Cursor with explicit index ranges
+- `TopDownQuadtreeCursor`: Top-level cursor wrapping a grid
+
+**Tree wrappers** (`src/trees/wrappers.jl`):
+- `KnownFullSphereExtentWrapper`: For trees known to cover the entire sphere, avoiding expensive extent computation
+
+### Manifold Support
+
+Grids can operate on different manifolds (from GeometryOps):
+- `Planar()`: Cartesian 2D coordinates, uses `Extents.Extent` for bounding boxes
+- `Spherical()`: Unit sphere coordinates (lon/lat), uses `SphericalCap` for bounding regions
+
+The manifold affects:
+- `cell_range_extent` computation (rectangular extents vs spherical caps)
+- Intersection algorithm selection
+- Area calculations
+
+### Multithreading (`src/utils/MultithreadedDualDepthFirstSearch.jl`)
+
+Provides `multithreaded_dual_depth_first_search` for parallel tree traversal. Spawns tasks when nodes satisfy an area criterion, enabling efficient parallel intersection computation.
+
+### Package Extensions
+
+- **ConservativeRegriddingOceananigansExt**: Integration with Oceananigans.jl grids
+- **ConservativeRegriddingInterfacesExt**: Interfaces.jl contract definitions
 
 ### Key Dependencies
 
@@ -71,6 +110,7 @@ The `Trees` submodule provides quadtree-based spatial indexing for matrix-shaped
 - **GeoInterface**: Geometry type wrappers
 - **SortTileRecursiveTree**: STRtree spatial indexing for efficient intersection queries
 - **SparseArrays**: Sparse matrix storage for intersection weights
+- **StableTasks/ChunkSplitters**: Multithreaded computation
 
 ### Mathematical Model
 
