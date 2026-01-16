@@ -122,11 +122,16 @@ function Regridder(dst, src; kwargs...)
     return Regridder(manifold, dst, src; kwargs...)
 end
 
+# Default threading behavior based on manifold.
+# Planar manifolds don't yet have _area_criterion implemented for multithreading.
+_default_threaded(::Spherical) = True()
+_default_threaded(::Planar) = False()
+
 function Regridder(
-        manifold::M, dst, src; 
-        normalize = true, 
-        intersection_operator::F = DefaultIntersectionOperator(manifold), 
-        threaded = True(),
+        manifold::M, dst, src;
+        normalize = true,
+        intersection_operator::F = DefaultIntersectionOperator(manifold),
+        threaded = _default_threaded(manifold),
         kwargs...
     ) where {M <: Manifold, F}
     # "Normalize" the destination and source grids into trees.
