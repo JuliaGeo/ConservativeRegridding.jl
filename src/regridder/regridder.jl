@@ -141,7 +141,7 @@ function (op::DefaultIntersectionOperator{M})(p1, p2) where {M <: GeometryOps.Sp
     return GeometryOps.area(op.manifold, intersection_polys)
 end
 
-function Regridder(dst, src; kwargs...)
+function Regridder(dst, src; method::AbstractRegridMethod = Conservative1stOrder(), kwargs...)
     dst_manifold = GOCore.best_manifold(dst)
     src_manifold = GOCore.best_manifold(src)
 
@@ -158,7 +158,7 @@ function Regridder(dst, src; kwargs...)
         dst_manifold
     end
 
-    return Regridder(manifold, dst, src; kwargs...)
+    return Regridder(manifold, method, dst, src; kwargs...)
 end
 
 # Default threading behavior based on manifold.
@@ -166,8 +166,17 @@ end
 _default_threaded(::Spherical) = True()
 _default_threaded(::Planar) = False()
 
+# Convenience constructor that accepts method as keyword argument
 function Regridder(
         manifold::M, dst, src;
+        method::AbstractRegridMethod = Conservative1stOrder(),
+        kwargs...
+    ) where {M <: Manifold}
+    return Regridder(manifold, method, dst, src; kwargs...)
+end
+
+function Regridder(
+        manifold::M, method::Conservative1stOrder, dst, src;
         normalize = true,
         intersection_operator::F = DefaultIntersectionOperator(manifold),
         threaded = _default_threaded(manifold),
@@ -182,9 +191,9 @@ function Regridder(
     # Compute the intersection areas.
     intersections = intersection_areas(
         manifold,
-        _threaded, 
-        dst_tree, src_tree; 
-        intersection_operator, 
+        _threaded,
+        dst_tree, src_tree;
+        intersection_operator,
         kwargs...
     )
 
@@ -194,13 +203,13 @@ function Regridder(
     src_areas = areas(manifold, src, src_tree)
 
     # TODO: make this GPU-compatible?
-    # Allocate temporary arrays for the regridding operation - 
+    # Allocate temporary arrays for the regridding operation -
     # in case the destination and source fields are not contiguous in memory.
     dst_temp = zeros(length(dst_areas))
     src_temp = zeros(length(src_areas))
 
     # Construct the regridder.  Normalize if requested.
-    regridder = Regridder(Conservative1stOrder(), intersections, dst_areas, src_areas, dst_temp, src_temp)
+    regridder = Regridder(method, intersections, dst_areas, src_areas, dst_temp, src_temp)
     normalize && LinearAlgebra.normalize!(regridder)
 
     return regridder
