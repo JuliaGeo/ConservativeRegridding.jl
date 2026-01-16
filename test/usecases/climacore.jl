@@ -219,17 +219,16 @@ function coords_for_face(mesh, face_idx)
 end
 
 
+
+include("reorderedquadtreecursor.jl")
+include("CubedSphereToplevelTree.jl")
+
 # Get a space
 space = CommonSpaces.CubedSphereSpace(;
     radius = 10,
     n_quad_points = 2,
     h_elem = 64,
 )
-
-# Define a field on the first space, to use as our source field
-field = Fields.coordinate_field(space).long
-ones_field = Fields.ones(space)
-
 
 # Extract the underlying mesh
 cubed_sphere_mesh = space.grid.topology.mesh
@@ -240,7 +239,10 @@ element_order = Topologies.spacefillingcurve(mesh)
 @assert length(element_order) ÷ (mesh.ne^2) == 6 "There must be mesh.ne^2 elements per face"
 face_order = 1:6
 # element_order_per_face = coll
-lin2carts = map.(i -> CartesianIndex((i[1], i[2])), Iterators.partition(element_order, length(element_order) ÷ 6))
+lin2carts = map.(
+    i -> CartesianIndex((i[1], i[2])), 
+    Iterators.partition(element_order, length(element_order) ÷ 6)
+)
 
 cart2lins = map(enumerate(lin2carts)) do (face_idx, face_indices)
     mat = Matrix{Int}(undef, ne, ne)
@@ -250,11 +252,10 @@ cart2lins = map(enumerate(lin2carts)) do (face_idx, face_indices)
     mat
 end
 
-all_coords = map(i -> coords_for_face(mesh, i), 1:6)
-# TODO: maybe stitch these together
+# Make sure that we cover all cells in the grid
+@test isempty(setdiff(reduce(vcat, cart2lins), 1:mesh.ne^2 * 6))
 
-include("reorderedquadtreecursor.jl")
-include("CubedSphereToplevelTree.jl")
+all_coords = map(i -> coords_for_face(mesh, i), 1:6)
 
 quadtrees = map(lin2carts, cart2lins, all_coords) do lin2cart, cart2lin, coords
     ReorderedTopDownQuadtreeCursor(Trees.CellBasedGrid(GO.Spherical(; radius = mesh.domain.radius), coords), Reorderer2D(cart2lin, lin2cart))
@@ -264,11 +265,17 @@ final_tree = CubedSphereToplevelTree(quadtrees)
 
 latlon_grid = LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z = (0, 1), radius = mesh.domain.radius)
 
+# Define a field on the first space, to use as our source field
+field = Fields.coordinate_field(space).long
+ones_field = Fields.ones(space)
 cubed_sphere_vals = zeros(6*64^2)
 get_value_per_element!(cubed_sphere_vals, field, ones_field)
 
 latlon_field = Oceananigans.CenterField(latlon_grid)
 latlon_vals = vec(interior(latlon_field))
+set!(latlon_field, (x, y, z) -> x)
+heatmap(interior(latlon_field, :, :, 1))
+set!(latlon_field, (x, y, z) -> 0)
 
 # regridder = ConservativeRegridding.Regridder(final_tree, final_tree; threaded = false)
 regridder = ConservativeRegridding.Regridder(latlon_grid, final_tree; threaded = false)
@@ -277,8 +284,11 @@ ConservativeRegridding.regrid!(latlon_vals, regridder, cubed_sphere_vals)
 
 heatmap(interior(latlon_field, :, :, 1))
 
-sum(latlon_vals .* ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(latlon_grid)))
-sum(cubed_sphere_vals .* ConservativeRegridding.areas(GO.Spherical(), final_tree))
+@test isapprox(
+    sum(latlon_vals .* ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(latlon_grid))),
+    sum(cubed_sphere_vals .* ConservativeRegridding.areas(GO.Spherical(), final_tree)),
+    rtol = 1e-13
+)
 
 
 qt1 = quadtrees[1]
