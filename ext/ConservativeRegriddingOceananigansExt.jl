@@ -16,14 +16,16 @@ import GeometryOps: SpatialTreeInterface as STI
 instantiate(L) = L()
 
 function compute_cell_matrix(field::AbstractField)
-    Nx, Ny, _ = size(field.grid)
+    compute_cell_matrix(field.grid)
+end
+function compute_cell_matrix(grid::Oceananigans.Grids.AbstractGrid)
+    Nx, Ny, _ = size(grid)
     ℓx, ℓy    = Center(), Center()
 
     if isnothing(ℓx) || isnothing(ℓy)
         error("cell_matrix can only be computed for fields with non-nothing horizontal location.")
     end
 
-    grid = field.grid
     arch = grid.architecture
     FT = eltype(grid)
 
@@ -55,10 +57,10 @@ end
 # Define the ConservativeRegridding interface for Oceananigans grids.
 function Trees.treeify(
     manifold::GOCore.Spherical,
-    field::Oceananigans.Field{T1, T2, T3, T4, GridT}
-) where {T1, T2, T3, T4, GridT}
+    grid::Oceananigans.Grids.AbstractGrid
+)
     # Compute the matrix of vertices - for an n×m grid, this is an (n+1)×(m+1) matrix of vertices.
-    cells_longlat = compute_cell_matrix(field) # from oceananigans_common.jl
+    cells_longlat = compute_cell_matrix(grid) # from oceananigans_common.jl
     # Cells come in long-lat coords - convert to unit spherical.
     # This makes things substantially more efficient at query and intersection time.
     cells_unitspherical = GO.UnitSphereFromGeographic().(cells_longlat)
@@ -76,15 +78,17 @@ function Trees.treeify(
     # for long-lat grids that don't cover the whole sphere - TODO.
     return Trees.KnownFullSphereExtentWrapper(tree)
 end
-function Trees.treeify(manifold::GOCore.Planar, field::Oceananigans.Field{T1, T2, T3, T4, GridT}) where {T1, T2, T3, T4, GridT <: Oceananigans.RectilinearGrid}
+function Trees.treeify(manifold::GOCore.Planar, grid::Oceananigans.RectilinearGrid)
     # Compute the matrix of verti|ces - for an n×m grid, this is an (n+1)×(m+1) matrix of vertices.
-    cells = compute_cell_matrix(field) # from oceananigans_common.jl
+    cells = compute_cell_matrix(grid) # from oceananigans_common.jl
     # Define the grid, which is the base of the quadtree we will construct
     # on top of it.
     grid = Trees.CellBasedGrid(manifold, cells)
     tree = Trees.TopDownQuadtreeCursor(grid)
     return tree
 end
+
+Trees.treeify(field::Oceananigans.Field) = Trees.treeify(field.grid)
 
 # Also define which manifold the grid lives on.  This gives us accurate area as well for any simulation
 # (e.g. on Mars?!)
