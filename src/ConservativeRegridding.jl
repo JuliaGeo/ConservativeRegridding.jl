@@ -29,6 +29,7 @@ include("regridder/regrid.jl")
 include("regridder/intersection_areas.jl")
 
 public Regridder, regrid, regrid!
+export AbstractRegridMethod, Conservative1stOrder, Conservative2ndOrder
 public areas
 
 end

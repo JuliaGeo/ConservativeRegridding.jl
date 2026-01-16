@@ -10,6 +10,32 @@ const DEFAULT_MATRIX = SparseArrays.SparseMatrixCSC{DEFAULT_FLOATTYPE}
 const DEFAULT_MATRIX_CONSTRUCTOR = SparseArrays.spzeros # SparseCSC for regridder
 
 """
+    AbstractRegridMethod
+
+Abstract supertype for regridding methods.
+Subtypes control how weights are computed during Regridder construction.
+"""
+abstract type AbstractRegridMethod end
+
+"""
+    Conservative1stOrder()
+
+First-order conservative regridding. Weights are pure area ratios.
+This is the default method and matches the original behavior.
+"""
+struct Conservative1stOrder <: AbstractRegridMethod end
+
+"""
+    Conservative2ndOrder()
+
+Second-order conservative regridding. Weights incorporate gradient
+information from neighboring cells for improved accuracy on smooth fields.
+
+Note: Cannot be transposed. Build separate regridders for each direction.
+"""
+struct Conservative2ndOrder <: AbstractRegridMethod end
+
+"""
     abstract type AbstractRegridder
 
 Defines an interface for regridding operators.
