@@ -48,22 +48,24 @@ See also: [`Regridder`](@ref).
 abstract type AbstractRegridder end
 
 # Primary `Regridder` struct.
-struct Regridder{W, A, V} <: AbstractRegridder
+struct Regridder{M <: AbstractRegridMethod, W, A, V} <: AbstractRegridder
+    "The regridding method used"
+    method::M
     "Matrix of area intersections between cells on the source and destination grid"
-    intersections :: W 
+    intersections::W
     "Vector of areas on the destination grid"
-    dst_areas :: A
+    dst_areas::A
     "Vector of areas on the source grid"
-    src_areas :: A
+    src_areas::A
     "Dense vectors used as work-arrays if trying to regrid non-contiguous memory"
-    dst_temp :: V
+    dst_temp::V
     "Dense vectors used as work-arrays if trying to regrid non-contiguous memory"
-    src_temp :: V
+    src_temp::V
 end
 
-function Base.show(io::IO, regridder::Regridder{W, A, V}) where {W, A, V}
+function Base.show(io::IO, regridder::Regridder{M, W, A, V}) where {M, W, A, V}
     n2, n1 = size(regridder)
-    println(io, "$n2×$n1 Regridder{$W, $A, $V}")
+    println(io, "$n2×$n1 Regridder{$M, $W, $A, $V}")
     Base.print_array(io, regridder.intersections)
     println(io, "\n\nSource areas: ", regridder.src_areas)
     print(io, "Dest.  areas: ", regridder.dst_areas)
@@ -71,9 +73,20 @@ end
 
 """$(TYPEDSIGNATURES)
 Return a Regridder for the backwards regridding, i.e. from destination to source grid.
-Does not copy any data, i.e. regridder for forward and backward share the same underlying arrays."""
-LinearAlgebra.transpose(regridder::Regridder) =
-    Regridder(transpose(regridder.intersections), regridder.src_areas, regridder.dst_areas, regridder.src_temp, regridder.dst_temp)
+Does not copy any data, i.e. regridder for forward and backward share the same underlying arrays.
+
+Note: Throws an error for Conservative2ndOrder since 2nd order weights are asymmetric.
+"""
+function LinearAlgebra.transpose(regridder::Regridder{<:Conservative2ndOrder})
+    error("Cannot transpose a 2nd order regridder. " *
+          "Build a separate Regridder(src, dst; method=Conservative2ndOrder()) for reverse direction.")
+end
+
+function LinearAlgebra.transpose(regridder::Regridder{M}) where M <: AbstractRegridMethod
+    Regridder(regridder.method, transpose(regridder.intersections),
+              regridder.src_areas, regridder.dst_areas,
+              regridder.src_temp, regridder.dst_temp)
+end
 
 Base.size(regridder::Regridder, args...) = size(regridder.intersections, args...)
 
@@ -187,7 +200,7 @@ function Regridder(
     src_temp = zeros(length(src_areas))
 
     # Construct the regridder.  Normalize if requested.
-    regridder = Regridder(intersections, dst_areas, src_areas, dst_temp, src_temp)
+    regridder = Regridder(Conservative1stOrder(), intersections, dst_areas, src_areas, dst_temp, src_temp)
     normalize && LinearAlgebra.normalize!(regridder)
 
     return regridder
