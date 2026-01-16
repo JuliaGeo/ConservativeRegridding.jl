@@ -106,7 +106,7 @@ function STI.node_extent(q::ReorderedTopDownQuadtreeCursor)
 end
 
 function Trees.getcell(q::ReorderedTopDownQuadtreeCursor)
-    order = sortperm(vec(view(q.ordering.cart2lin, q.leafranges[1], q.leafranges[2])))
+    order = sortperm(vec(q.ordering.cart2lin[q.leafranges[1], q.leafranges[2]]))
     return (Trees.getcell(q.grid, CartesianIndices(q.leafranges)[i]) for i in order)
 end
 
