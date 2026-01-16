@@ -1,6 +1,8 @@
 
 abstract type AbstractQuadtreeCursor end
 
+GOCore.best_manifold(c::AbstractQuadtreeCursor) = GOCore.manifold(getgrid(c))
+
 """
     QuadtreeCursor(grid::AbstractCurvilinearGrid)
 
