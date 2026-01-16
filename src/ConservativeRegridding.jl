@@ -28,6 +28,7 @@ include("regridder/regridder.jl")
 include("regridder/regrid.jl")
 include("regridder/intersection_areas.jl")
 include("regridder/adjacency.jl")
+include("regridder/gradients.jl")
 
 public Regridder, regrid, regrid!
 export AbstractRegridMethod, Conservative1stOrder, Conservative2ndOrder
