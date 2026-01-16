@@ -229,3 +229,140 @@ end
 function areas(manifold::GOCore.Manifold, tree)
     return vec([GO.area(manifold, cell) for cell in Trees.getcell(tree)])
 end
+
+"""
+Second-order conservative regridder constructor.
+
+Computes weights that incorporate gradient information from neighboring cells.
+"""
+function Regridder(
+        manifold::M, method::Conservative2ndOrder, dst, src;
+        normalize = true,
+        intersection_operator::F = DefaultIntersectionOperator(manifold),
+        threaded = _default_threaded(manifold),
+        kwargs...
+    ) where {M <: Manifold, F}
+
+    # Treeify grids
+    dst_tree = Trees.treeify(manifold, dst)
+    src_tree = Trees.treeify(manifold, src)
+
+    _threaded = booltype(threaded)
+
+    # Compute gradient coefficients for source grid
+    grad_info = compute_gradient_coefficients(manifold, src_tree)
+
+    # Compute source centroids (already in grad_info, extract for convenience)
+    src_centroids = [gi.centroid for gi in grad_info]
+
+    # Get candidate pairs via dual DFS
+    predicate_f = if M <: Spherical
+        GO.UnitSpherical._intersects
+    else
+        Extents.intersects
+    end
+    candidate_idxs = get_all_candidate_pairs(_threaded, predicate_f, src_tree, dst_tree)
+
+    # Compute 2nd order weights
+    n_dst = prod(Trees.ncells(dst_tree))
+    n_src = prod(Trees.ncells(src_tree))
+
+    i_dst = Int[]
+    i_src = Int[]
+    weights = Float64[]
+
+    # Pre-allocate with estimate
+    sizehint!(i_dst, length(candidate_idxs) * 5)  # ~5x for neighbor contributions
+    sizehint!(i_src, length(candidate_idxs) * 5)
+    sizehint!(weights, length(candidate_idxs) * 5)
+
+    for (src_idx, dst_idx) in candidate_idxs
+        src_poly = Trees.getcell(src_tree, src_idx)
+        dst_poly = Trees.getcell(dst_tree, dst_idx)
+
+        # Compute intersection
+        intersection_polys = GO.intersection(
+            GO.FosterHormannClipping(manifold), src_poly, dst_poly;
+            target = GI.PolygonTrait()
+        )
+
+        overlap_area = GO.area(manifold, intersection_polys)
+        if overlap_area <= 0
+            continue
+        end
+
+        # Compute overlap centroid (area-weighted if multiple polygons)
+        overlap_centroid = if length(intersection_polys) == 1
+            c = GO.centroid(first(intersection_polys))
+            (GI.x(c), GI.y(c))
+        elseif length(intersection_polys) > 1
+            # Area-weighted centroid
+            cx, cy = 0.0, 0.0
+            total_area = 0.0
+            for poly in intersection_polys
+                a = GO.area(manifold, poly)
+                c = GO.centroid(poly)
+                cx += GI.x(c) * a
+                cy += GI.y(c) * a
+                total_area += a
+            end
+            if total_area > 0
+                (cx / total_area, cy / total_area)
+            else
+                continue
+            end
+        else
+            continue
+        end
+
+        gi = grad_info[src_idx]
+        src_centroid = gi.centroid
+
+        # diff_cntr = overlap_centroid - src_centroid
+        diff_cntr = (overlap_centroid[1] - src_centroid[1],
+                     overlap_centroid[2] - src_centroid[2])
+
+        if gi.valid
+            # 2nd order: source weight with gradient correction
+            src_grad = gi.src_grad
+            grad_term = diff_cntr[1] * src_grad[1] + diff_cntr[2] * src_grad[2]
+            src_weight = overlap_area - grad_term * overlap_area
+
+            push!(i_dst, dst_idx)
+            push!(i_src, src_idx)
+            push!(weights, src_weight)
+
+            # Neighbor contributions
+            for (nbr_idx, nbr_grad) in zip(gi.neighbor_indices, gi.neighbor_grads)
+                nbr_weight = (diff_cntr[1] * nbr_grad[1] + diff_cntr[2] * nbr_grad[2]) * overlap_area
+                if abs(nbr_weight) > eps(Float64) * overlap_area
+                    push!(i_dst, dst_idx)
+                    push!(i_src, nbr_idx)
+                    push!(weights, nbr_weight)
+                end
+            end
+        else
+            # Fallback to 1st order for this cell
+            push!(i_dst, dst_idx)
+            push!(i_src, src_idx)
+            push!(weights, overlap_area)
+        end
+    end
+
+    # Assemble sparse matrix
+    intersections = SparseArrays.sparse(i_dst, i_src, weights, n_dst, n_src)
+
+    # Compute areas
+    dst_areas = areas(manifold, dst, dst_tree)
+    src_areas = areas(manifold, src, src_tree)
+
+    # Allocate temp arrays
+    dst_temp = zeros(length(dst_areas))
+    src_temp = zeros(length(src_areas))
+
+    # Construct regridder
+    regridder = Regridder(method, intersections, dst_areas, src_areas, dst_temp, src_temp)
+    normalize && LinearAlgebra.normalize!(regridder)
+
+    return regridder
+end
