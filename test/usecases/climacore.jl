@@ -112,6 +112,18 @@ end
 
 
 @testset "Test helper functions in extension" begin
+    cubedsphere_space = CommonSpaces.CubedSphereSpace(;
+        radius = latlon_grid.radius,
+        n_quad_points = 2,
+        h_elem = 64,
+    )
+
+    # Define a field on the first space, to use as our source field
+    field = Fields.coordinate_field(cubedsphere_space).long
+    ones_field = Fields.ones(cubedsphere_space)
+    cubed_sphere_vals = zeros(6*cubedsphere_space.grid.topology.mesh.ne^2)
+    ClimaCoreExt.get_value_per_element!(cubed_sphere_vals, field, ones_field)
+
     @testset "integrate_each_element" begin
         @test isapprox(
             sum(ClimaCoreExt.integrate_each_element(field)), 
