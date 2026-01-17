@@ -1,4 +1,3 @@
-using Oceananigans
 using ConservativeRegridding
 using ConservativeRegridding.Trees
 
@@ -9,6 +8,9 @@ import GeometryOps: SpatialTreeInterface as STI
 
 using Statistics
 using Test
+
+using Oceananigans
+
 
 @testset "Lat-long upscaling" begin
     coarse_grid = LatitudeLongitudeGrid(size=(90, 45, 1),   longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
@@ -30,6 +32,27 @@ using Test
     ConservativeRegridding.regrid!(vec(interior(src)), transpose(regridder), vec(interior(dst)))
 
     @test mean(dst) ≈ mean(src) rtol=1e-5
+end
+
+@testset "Tripolar to lat-long" begin
+    dst_grid = LatitudeLongitudeGrid(size=(360, 180, 1),   longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+    src_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
+
+    dst = CenterField(dst_grid)
+    src = CenterField(src_grid)
+
+    regridder = ConservativeRegridding.Regridder(dst, src)
+
+    set!(src, (x, y, z) -> abs(x))
+    set!(dst, (x, y, z) -> 0)
+
+    ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+
+    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-10
+
+    set!(src, (x, y, z) -> rand())
+    ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-5
 end
 
 @testset "Rectilinear (planar) upscaling" begin
