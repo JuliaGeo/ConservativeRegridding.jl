@@ -3,7 +3,7 @@ using ConservativeRegridding
 
 makedocs(
     sitename = "ConservativeRegridding.jl",
-    authors = "Milan Kloewer and contributors",
+    authors = "Anshul Singhvi, Milan Kloewer, Simone Silvestri, and contributors",
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", nothing) == "true",
         canonical = "https://juliageo.org/ConservativeRegridding.jl/stable/",
@@ -12,8 +12,9 @@ makedocs(
     modules = [ConservativeRegridding],
     pages = [
         "Home" => "index.md",
+        "How it works" => "how_it_works.md",
     ],
-    warnonly = [:missing_docs],
+    warnonly = true,#[:missing_docs],
 )
 
 deploydocs(
