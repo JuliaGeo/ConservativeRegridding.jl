@@ -1,0 +1,6 @@
+module ConservativeRegriddingSpeedyWeatherExt
+
+using ConservativeRegridding
+using SpeedyWeather
+
+end
