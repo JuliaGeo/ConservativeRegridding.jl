@@ -10,7 +10,7 @@ using GeometryOps.UnitSpherical: UnitSphericalPoint
 using LinearAlgebra: normalize
 
 using ClimaCore:
-    CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies
+    CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies, ClimaComms
 import ClimaCore
 
 """
@@ -32,7 +32,8 @@ function coords_for_face(mesh::Meshes.AbstractCubedSphere, face_idx)
     return coords
 end
 
-function Trees.treeify(manifold::GOCore.Spherical, mesh::Meshes.AbstractCubedSphere)
+function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology2D{<: ClimaComms.AbstractCommsContext, <: Meshes.AbstractCubedSphere})
+    mesh = topology.mesh
     ne = mesh.ne
     # There are always 6 faces of a cubed sphere - 
     # see the ClimaCore docs on AbstractCubedSphere
@@ -41,24 +42,54 @@ function Trees.treeify(manifold::GOCore.Spherical, mesh::Meshes.AbstractCubedSph
     # explicitly equal to each other, so that there are no numerical 
     # inaccuracies.
     face_idxs = 1:6
-
-    # all_coords = map(i -> coords_for_face(mesh, i), face_idxs)
-    # Create a quadtree for each face.
-    quadtrees = map(face_idxs) do face_idx
-        coords = coords_for_face(mesh, face_idx)
-        Trees.FaceAwareQuadtreeCursor(
-            Trees.CellBasedGrid(manifold, coords), 
-            face_idx
+    face_coords = map(i -> coords_for_face(mesh, i), face_idxs)
+    # Determine whether the elements are ordered in a space-filling curve
+    # or a regular grid.
+    quadtrees = if topology.elemorder isa CartesianIndices # Matrix order filling
+        # Create a quadtree for each face.
+        map(face_idxs, face_coords) do face_idx, coords
+            Trees.FaceAwareQuadtreeCursor(
+                Trees.CellBasedGrid(manifold, coords), 
+                face_idx
+            )
+        end
+    elseif topology.elemorder isa Vector{CartesianIndex{3}} # Some sort of space filling curve
+        lin2carts = map.(
+            i -> CartesianIndex((i[1], i[2])), 
+            Iterators.partition(topology.elemorder, length(topology.elemorder) ÷ 6)
         )
+        cart2lins = map(enumerate(lin2carts)) do (face_idx, face_indices)
+            mat = Matrix{Int}(undef, ne, ne)
+            for (i, elem) in enumerate(face_indices)
+                mat[elem] = i + (face_idx - 1) * ne^2  # Global index for child_indices_extents
+            end
+            mat
+        end
+
+        map(face_idxs, lin2carts, cart2lins, face_coords) do face_idx, lin2cart, cart2lin, coords
+            Trees.IndexLocalizerRewrapperTree(
+                Trees.ReorderedTopDownQuadtreeCursor(
+                    Trees.CellBasedGrid(
+                        GO.Spherical(; radius = mesh.domain.radius), 
+                        coords
+                    ), 
+                    Trees.Reorderer2D(cart2lin, lin2cart)
+                ),
+                (face_idx - 1) * ne^2
+            )
+        end
+    else
+        error("Unknown spacefillingcurve type: $(typeof(topology.spacefillingcurve))\nExpected a CartesianIndices or a Vector{CartesianIndex{3}}")
     end
 
     return Trees.CubedSphereToplevelTree(quadtrees)
 end
 
-Trees.treeify(manifold::GOCore.Spherical, space::ClimaCore.Spaces.AbstractSpectralElementSpace) = Trees.treeify(manifold, space.grid.topology.mesh)
+Trees.treeify(manifold::GOCore.Spherical, space::ClimaCore.Spaces.AbstractSpectralElementSpace) = Trees.treeify(manifold, space.grid.topology)
 
 GOCore.best_manifold(mesh::Meshes.AbstractCubedSphere) = GOCore.Spherical(; radius = mesh.domain.radius)
-GOCore.best_manifold(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = GOCore.best_manifold(space.grid.topology.mesh)
+GOCore.best_manifold(topology::Topologies.Topology2D) = GOCore.best_manifold(topology.mesh)
+GOCore.best_manifold(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = GOCore.best_manifold(space.grid.topology)
 
 
 
