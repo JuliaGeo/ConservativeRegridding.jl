@@ -8,7 +8,6 @@ Uses Green's theorem on the "neighbor polygon" formed by neighbor centroids.
 import GeometryOps as GO
 import GeoInterface as GI
 import GeometryOpsCore as GOCore
-import LinearAlgebra
 
 """
     GradientInfo
@@ -119,28 +118,26 @@ Returns (src_grad, neighbor_grads, valid).
 function _compute_greens_theorem_gradients(src_centroid::NTuple{2, T},
                                             neighbor_centroids::Vector{NTuple{2, T}}) where T
     n = length(neighbor_centroids)
-
-    # Initialize gradients
-    src_grad = (zero(T), zero(T))
-    neighbor_grads = Vector{NTuple{2, T}}(undef, n)
+    zero_grad = (zero(T), zero(T))
 
     # Compute area of neighbor polygon (for validation and normalization)
     area = _polygon_area(neighbor_centroids)
 
     if abs(area) < eps(T) * 100
         # Degenerate polygon
-        return src_grad, [src_grad for _ in 1:n], false
+        return zero_grad, fill(zero_grad, n), false
     end
 
     # Check if source centroid is inside neighbor polygon
     if !_point_in_polygon(src_centroid, neighbor_centroids)
-        return src_grad, [src_grad for _ in 1:n], false
+        return zero_grad, fill(zero_grad, n), false
     end
 
-    # Apply Green's theorem
-    # For each edge of the neighbor polygon, compute contribution to gradient
+    # Initialize neighbor gradients to zero for accumulation
+    neighbor_grads = fill(zero_grad, n)
     inv_area = one(T) / area
 
+    # Apply Green's theorem: each edge contributes to its two endpoint vertices
     for i in 1:n
         j = mod1(i + 1, n)  # next vertex (wrapping)
 
@@ -151,41 +148,22 @@ function _compute_greens_theorem_gradients(src_centroid::NTuple{2, T},
         dx = p2[1] - p1[1]
         dy = p2[2] - p1[2]
 
-        # Outward normal (perpendicular to edge, pointing outward for CCW polygon)
-        # For a CCW polygon, outward normal is (dy, -dx)
-        nx = dy
-        ny = -dx
-
         # Edge length
         edge_len = sqrt(dx^2 + dy^2)
         if edge_len < eps(T)
             continue
         end
 
-        # Normalize and scale by edge length / (2 * area)
-        # This is the Green's theorem coefficient
+        # Outward normal for CCW polygon is (dy, -dx)
+        # Scale by edge_length / (2 * area) for Green's theorem
         scale = edge_len * inv_area / 2
+        grad_contrib = (dy * scale, -dx * scale)
 
-        # Gradient contribution for vertex i and j
-        grad_contrib = (nx * scale, ny * scale)
-
-        # Add to neighbor gradients (each edge contributes to both endpoints)
-        if i == 1
-            neighbor_grads[i] = grad_contrib
-        else
-            neighbor_grads[i] = (neighbor_grads[i][1] + grad_contrib[1],
-                                 neighbor_grads[i][2] + grad_contrib[2])
-        end
-
-        if j == 1
-            neighbor_grads[j] = (neighbor_grads[j][1] + grad_contrib[1],
-                                 neighbor_grads[j][2] + grad_contrib[2])
-        elseif j > i  # Only initialize if not already set
-            neighbor_grads[j] = grad_contrib
-        else
-            neighbor_grads[j] = (neighbor_grads[j][1] + grad_contrib[1],
-                                 neighbor_grads[j][2] + grad_contrib[2])
-        end
+        # Each edge contributes to both its endpoint vertices
+        neighbor_grads[i] = (neighbor_grads[i][1] + grad_contrib[1],
+                             neighbor_grads[i][2] + grad_contrib[2])
+        neighbor_grads[j] = (neighbor_grads[j][1] + grad_contrib[1],
+                             neighbor_grads[j][2] + grad_contrib[2])
     end
 
     # Source gradient is negative sum of neighbor gradients (conservation)
@@ -195,9 +173,8 @@ function _compute_greens_theorem_gradients(src_centroid::NTuple{2, T},
         src_grad_x -= ng[1]
         src_grad_y -= ng[2]
     end
-    src_grad = (src_grad_x, src_grad_y)
 
-    return src_grad, neighbor_grads, true
+    return (src_grad_x, src_grad_y), neighbor_grads, true
 end
 
 """

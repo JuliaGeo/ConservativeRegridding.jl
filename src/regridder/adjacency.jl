@@ -15,25 +15,13 @@ import GeometryOpsCore as GOCore
 Compute adjacency list for all cells in the tree.
 Returns a vector where `adjacency[i]` contains the linear indices of all neighbors of cell `i`.
 
-For structured grids (CellBasedGrid, RegularGrid), uses fast index arithmetic.
+For structured grids (CellBasedGrid, RegularGrid, ExplicitPolygonGrid), uses fast index arithmetic.
 For unstructured grids, falls back to spatial queries.
 """
 function compute_adjacency end
 
-# Fast path for structured grids: CellBasedGrid
-function compute_adjacency(manifold::GOCore.Manifold, tree::Trees.TopDownQuadtreeCursor{<:Trees.CellBasedGrid})
-    grid = Trees.getgrid(tree)
-    return _compute_structured_adjacency(grid)
-end
-
-# Fast path for structured grids: RegularGrid
-function compute_adjacency(manifold::GOCore.Manifold, tree::Trees.TopDownQuadtreeCursor{<:Trees.RegularGrid})
-    grid = Trees.getgrid(tree)
-    return _compute_structured_adjacency(grid)
-end
-
-# Fast path for structured grids: ExplicitPolygonGrid
-function compute_adjacency(manifold::GOCore.Manifold, tree::Trees.TopDownQuadtreeCursor{<:Trees.ExplicitPolygonGrid})
+# Fast path for structured grids (CellBasedGrid, RegularGrid, ExplicitPolygonGrid)
+function compute_adjacency(manifold::GOCore.Manifold, tree::Trees.TopDownQuadtreeCursor{<:Trees.AbstractCurvilinearGrid})
     grid = Trees.getgrid(tree)
     return _compute_structured_adjacency(grid)
 end
