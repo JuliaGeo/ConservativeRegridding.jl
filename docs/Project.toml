@@ -27,12 +27,13 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 SpeedyWeather = "9e226e20-d153-4fed-8a5b-493def4f21a9"
 SphericalSpatialTrees = "86b7679e-e8c0-4ea9-ad3d-baef5c69eb57"
 StableTasks = "91464d47-22a1-43fe-8b7f-2d57ee82463f"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 WellKnownGeometry = "0f680547-7be7-4555-8820-bb198eeb646b"
 YAXArrayBase = "90b8fcef-0c2d-428d-9c56-5f86629e9d14"
 
 [sources]
 ConservativeRegridding = {path = ".."}
+GeometryBasics = {rev = "as/fix-gi-convert-staticarray", url = "https://github.com/JuliaGeometry/GeometryBasics.jl"}
 Oceananigans = {rev = "FPivot", url = "https://github.com/briochemc/Oceananigans.jl"}
 SphericalSpatialTrees = {rev = "main", url = "https://github.com/meggart/SphericalSpatialTrees.jl"}
-GeometryBasics = {rev = "as/fix-gi-convert-staticarray", url = "https://github.com/JuliaGeometry/GeometryBasics.jl"}
