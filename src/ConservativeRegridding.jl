@@ -14,6 +14,8 @@ import ProgressMeter
 using GeometryOpsCore: booltype, BoolsAsTypes, True, False, istrue
 using GeometryOpsCore: Manifold, Planar, Spherical
 
+using SciMLPublic: @public
+
 include("utils/MultithreadedDualDepthFirstSearch.jl")
 using .MultithreadedDualDepthFirstSearch
 
@@ -28,7 +30,7 @@ include("regridder/regridder.jl")
 include("regridder/regrid.jl")
 include("regridder/intersection_areas.jl")
 
-public Regridder, regrid, regrid!
-public areas
+@public Regridder, regrid, regrid!
+@public areas
 
 end
