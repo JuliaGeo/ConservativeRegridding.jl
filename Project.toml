@@ -1,7 +1,7 @@
 name = "ConservativeRegridding"
 uuid = "8e50ac2c-eb48-49bc-a402-07c87b949343"
 license = "MIT"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Anshul Singhvi <anshulsinghvi@gmail.com>", "Milan Kloewer <milankloewer@gmx.de>", "and contributors"]
 
 [workspace]
@@ -37,8 +37,8 @@ ClimaCore = "0.14"
 DocStringExtensions = "0.8, 0.9"
 Extents = "0.1"
 GeoInterface = "1"
-GeometryOps = "0.1.19"
-GeometryOpsCore = "0.1"
+GeometryOps = "0.1.34"
+GeometryOpsCore = "0.1.9"
 LinearAlgebra = "1"
 ProgressMeter = "1"
 SortTileRecursiveTree = "0.1"
