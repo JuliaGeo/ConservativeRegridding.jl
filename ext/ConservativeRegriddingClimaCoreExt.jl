@@ -1,21 +1,107 @@
-########################################################
-# This test uses ConservativeRegridding.jl to regrid between two ClimaCore spaces.
-#
-# Note that ClimaCore.jl uses spectral element spaces, which are not yet supported
-# in ConservativeRegridding.jl. To use the existing functionality, we store a single
-# value per element on the field, rather than one value per node. In this way the
-# spectral element space can be regridded as a finite volume space would be.
-#
-# This is an inaccurate approximation that we'll want to improve in the future,
-# but it's okay to get things started.
-########################################################
+module ConservativeRegriddingClimaCoreExt
 
+import ConservativeRegridding
+using ConservativeRegridding: Trees
+
+import GeometryOpsCore as GOCore
+import GeometryOps as GO
+
+using GeometryOps.UnitSpherical: UnitSphericalPoint
+using LinearAlgebra: normalize
 
 using ClimaCore:
-    CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures
-using ConservativeRegridding
-using Statistics
-using Test
+    CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies, ClimaComms
+import ClimaCore
+
+"""
+    coords_for_face(mesh::CubedSphereMesh, face_idx)::Matrix{UnitSphericalPoint}
+
+Get the right coordinates for a face of a cubed sphere.
+"""
+function coords_for_face(mesh::Meshes.AbstractCubedSphere, face_idx)
+    ne = mesh.ne
+    coords = [
+        begin
+            coord = Meshes._coordinates(mesh, ϕx, ϕy, face_idx)
+            usp = normalize(UnitSphericalPoint(coord.x1, coord.x2, coord.x3))
+            usp
+        end
+        for ϕx in LinRange(-1, 1, ne+1), ϕy in LinRange(-1, 1, ne+1)
+    ]
+
+    return coords
+end
+
+function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology2D{<: ClimaComms.AbstractCommsContext, <: Meshes.AbstractCubedSphere})
+    mesh = topology.mesh
+    ne = mesh.ne
+    # There are always 6 faces of a cubed sphere - 
+    # see the ClimaCore docs on AbstractCubedSphere
+    # for an explanation on how they are connected.
+    # TODO: set the border elements of each cubed sphere face
+    # explicitly equal to each other, so that there are no numerical 
+    # inaccuracies.
+    face_idxs = 1:6
+    face_coords = map(i -> coords_for_face(mesh, i), face_idxs)
+    # Determine whether the elements are ordered in a space-filling curve
+    # or a regular grid.
+    quadtrees = if topology.elemorder isa CartesianIndices # Matrix order filling
+        # Create a quadtree for each face.
+        map(face_idxs, face_coords) do face_idx, coords
+            Trees.FaceAwareQuadtreeCursor(
+                Trees.CellBasedGrid(manifold, coords), 
+                face_idx
+            )
+        end
+    elseif topology.elemorder isa Vector{CartesianIndex{3}} # Some sort of space filling curve
+        lin2carts = map.(
+            i -> CartesianIndex((i[1], i[2])), 
+            Iterators.partition(topology.elemorder, length(topology.elemorder) ÷ 6)
+        )
+        cart2lins = map(enumerate(lin2carts)) do (face_idx, face_indices)
+            mat = Matrix{Int}(undef, ne, ne)
+            for (i, elem) in enumerate(face_indices)
+                mat[elem] = i + (face_idx - 1) * ne^2  # Global index for child_indices_extents
+            end
+            mat
+        end
+
+        map(face_idxs, lin2carts, cart2lins, face_coords) do face_idx, lin2cart, cart2lin, coords
+            Trees.IndexLocalizerRewrapperTree(
+                Trees.ReorderedTopDownQuadtreeCursor(
+                    Trees.CellBasedGrid(
+                        GO.Spherical(; radius = mesh.domain.radius), 
+                        coords
+                    ), 
+                    Trees.Reorderer2D(cart2lin, lin2cart)
+                ),
+                (face_idx - 1) * ne^2
+            )
+        end
+    else
+        error("Unknown spacefillingcurve type: $(typeof(topology.spacefillingcurve))\nExpected a CartesianIndices or a Vector{CartesianIndex{3}}")
+    end
+
+    return Trees.CubedSphereToplevelTree(quadtrees)
+end
+
+Trees.treeify(manifold::GOCore.Spherical, space::ClimaCore.Spaces.AbstractSpectralElementSpace) = Trees.treeify(manifold, space.grid.topology)
+
+GOCore.best_manifold(mesh::Meshes.AbstractCubedSphere) = GOCore.Spherical(; radius = mesh.domain.radius)
+GOCore.best_manifold(topology::Topologies.Topology2D) = GOCore.best_manifold(topology.mesh)
+GOCore.best_manifold(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = GOCore.best_manifold(space.grid.topology)
+
+
+
+
+
+
+
+
+
+
+## Utility functions for getting values from ClimaCore fields
+## Might be useful for when we implement regrid!
 
 ### Helper functions to interface with ClimaCore.jl
 """
@@ -136,66 +222,5 @@ function set_value_per_element!(field, value_per_element)
 end
 
 
-### Test regridding between two ClimaCore grids
-space1 = CommonSpaces.CubedSphereSpace(;
-    radius = 10,
-    n_quad_points = 3,
-    h_elem = 8,
-)
-space2 = CommonSpaces.CubedSphereSpace(;
-    radius = 10,
-    n_quad_points = 4,
-    h_elem = 6,
-)
 
-vertices1 = get_element_vertices(space1)
-vertices2 = get_element_vertices(space2)
-
-# Pass in destination vertices first, source vertices second
-regridder_1_to_2 = ConservativeRegridding.Regridder(vertices2, vertices1)
-regridder_2_to_1 = ConservativeRegridding.Regridder(vertices1, vertices2)
-
-# Define a field on the first space, to use as our source field
-field1 = Fields.coordinate_field(space1).lat
-ones_field1 = Fields.ones(space1)
-
-# Get one value per element in the source field, equal to the quadrature-weighted average of the
-# values at nodes of the element
-value_per_element1 = zeros(Float64, Meshes.nelements(space1.grid.topology.mesh))
-get_value_per_element!(value_per_element1, field1, ones_field1)
-
-# Allocate a vector with length equal to the number of elements in the target space
-value_per_element2 = zeros(Float64, Meshes.nelements(space2.grid.topology.mesh))
-ConservativeRegridding.regrid!(value_per_element2, regridder_1_to_2, value_per_element1)
-
-# Now that we have our regridded vector, put it onto a field on the second space
-field2 = Fields.zeros(space2)
-set_value_per_element!(field2, value_per_element2)
-field1_one_value_per_element = Fields.zeros(space1)
-set_value_per_element!(field1_one_value_per_element, value_per_element1)
-
-# Test our helper functions
-# Check that integrating over each element and summing gives the same result as integrating over the whole domain
-@test isapprox(sum(integrate_each_element(field1)), sum(field1), atol = 1e-11)
-# Check that integrating 1 over each element and summing gives the same result as integrating 1 over the whole domain
-@test sum(integrate_each_element(ones_field1)) ≈ sum(ones_field1)
-
-# Check the error of converting to one value per element
-abs_error_one_value_per_element = abs(sum(field1_one_value_per_element) - sum(field1))
-@test abs_error_one_value_per_element < 2e-11
-@test isapprox(mean(field1), mean(field1_one_value_per_element), atol=1e-14)
-
-# Check the global conservation error of the overall regridding
-abs_error = abs(sum(field1) - sum(field2))
-@test abs_error < 1e-11
-@test isapprox(mean(field1), mean(field2), atol=1e-14)
-
-# # Plot the fields for visual comparison
-# using ClimaCoreMakie
-# using GLMakie
-# fig = ClimaCoreMakie.fieldheatmap(field1)
-# save("field1.png", fig)
-# fig = ClimaCoreMakie.fieldheatmap(field1_one_value_per_element)
-# save("field1_one_value_per_element.png", fig)
-# fig = ClimaCoreMakie.fieldheatmap(field2)
-# save("field2.png", fig)
+end

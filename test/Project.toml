@@ -1,0 +1,20 @@
+[deps]
+ClimaCore = "d414da3d-4745-48bb-8d80-42e94e092884"
+ConservativeRegridding = "8e50ac2c-eb48-49bc-a402-07c87b949343"
+Extents = "411431e0-e8b7-467b-b5e0-f676ba4f2910"
+GeoInterface = "cf35fbd7-0cd7-5166-be24-54bfbe79505f"
+GeometryOps = "3251bfac-6a57-4b6d-aa61-ac1fef2975ab"
+GeometryOpsCore = "05efe853-fabf-41c8-927e-7063c8b9f013"
+LibGEOS = "a90b1aa1-3769-5649-ba7e-abc5a9d163eb"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
+SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
+SortTileRecursiveTree = "746ee33f-1797-42c2-866d-db2fce69d14d"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+SpeedyWeather = "9e226e20-d153-4fed-8a5b-493def4f21a9"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[sources]
+ConservativeRegridding = {path = ".."}
+Oceananigans = {rev = "FPivot", url = "https://github.com/briochemc/Oceananigans.jl"}

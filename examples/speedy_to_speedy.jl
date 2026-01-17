@@ -1,3 +1,7 @@
+# WARNING This will not work 
+# We need to hook up the speedy weather grids
+# to some sort of tree structure
+# Stay tuned!
 using SpeedyWeather, GeoMakie
 using ConservativeRegridding
 import GeoInterface as GI, GeometryOps as GO
