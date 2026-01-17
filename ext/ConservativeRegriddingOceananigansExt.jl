@@ -104,4 +104,7 @@ GOCore.best_manifold(grid::Oceananigans.OrthogonalSphericalShellGrid) = GO.Spher
 
 GOCore.best_manifold(field::Oceananigans.Field) = GOCore.best_manifold(field.grid)
 
+# Allow to set example data on the field
+Oceananigans.set!(field::Oceananigans.Field, f::ExampleFieldFunction) = Oceananigans.set!(field, (lon, lat, z) -> f(lon, lat))
+
 end
