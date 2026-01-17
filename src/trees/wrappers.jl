@@ -94,8 +94,8 @@ A wrapper around a vector of quadtree cursors that represents a cubed sphere.
 This is effectively the prototype of a tree node that contains a vector of potentially many different kinds of trees directly.
 It might be replaced by something more general later.
 =#
-struct CubedSphereToplevelTree{QuadtreeCursorType <: Trees.AbstractQuadtreeCursor}
-    quadtrees::Vector{QuadtreeCursorType}
+struct CubedSphereToplevelTree{V <: AbstractVector{<: Union{<: AbstractTreeWrapper, <: AbstractQuadtreeCursor}}}
+    quadtrees::V
 end
 
 STI.isspatialtree(::Type{<: CubedSphereToplevelTree}) = true
@@ -114,3 +114,12 @@ function Trees.getcell(c::CubedSphereToplevelTree, i::Int)
 end
 
 Trees.ncells(c::CubedSphereToplevelTree) = prod(Trees.ncells(first(c.quadtrees))) * 6
+
+struct IndexLocalizerRewrapperTree{T} <: AbstractTreeWrapper
+    tree::T
+    index_offset::Int
+end
+
+Base.parent(wrapper::IndexLocalizerRewrapperTree) = wrapper.tree
+Trees.getcell(wrapper::IndexLocalizerRewrapperTree, i::Int) = Trees.getcell(parent(wrapper), i - wrapper.index_offset)
+Trees.getcell(wrapper::IndexLocalizerRewrapperTree) = Trees.getcell(parent(wrapper))
