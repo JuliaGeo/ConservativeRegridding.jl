@@ -18,14 +18,31 @@ Note that by construction,
     aˢ = sum(A, 1)
 ```
 """
-function regrid!(
-    dst_field,
-    regridder::Regridder,
-    src_field,
-)
+function regrid!(dst_field::DenseVector, regridder::Regridder, src_field::DenseVector)
     areas = regridder.dst_areas # area of each grid cell
     LinearAlgebra.mul!(dst_field, regridder.intersections, src_field) # units of src_field times area of grid cell
     dst_field ./= areas # normalize by area of each grid cell
+    return dst_field
+end
+
+# For vectors non-continuous in memory we use the temporary dense arrays provided by the `Regridder`
+# This ensures the sparse matrix-vector multiplication uses the correct (optimal) methods
+function regrid!(dst_field::AbstractVector, regridder::Regridder, src_field::AbstractVector)
+    regridder.src_temp .= src_field
+    regrid!(regridder.dst_temp, regridder, regridder.src_temp)
+    dst_field .= regridder.dst_temp
+    return dst_field
+end
+
+function regrid!(dst_field::DenseVector, regridder::Regridder, src_field::AbstractVector)
+    regridder.src_temp .= src_field
+    regrid!(dst_field, regridder, regridder.src_temp)
+    return dst_field
+end
+
+function regrid!(dst_field::AbstractVector, regridder::Regridder, src_field::DenseVector)
+    regrid!(regridder.dst_temp, regridder, src_field)
+    dst_field .= regridder.dst_temp
     return dst_field
 end
 

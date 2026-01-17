@@ -12,7 +12,7 @@
 
 
 using ClimaCore:
-    CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures
+    CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies
 using ConservativeRegridding
 using Statistics
 using Test
@@ -199,3 +199,106 @@ abs_error = abs(sum(field1) - sum(field2))
 # save("field1_one_value_per_element.png", fig)
 # fig = ClimaCoreMakie.fieldheatmap(field2)
 # save("field2.png", fig)
+
+
+using GeometryOps.UnitSpherical: UnitSphericalPoint
+using LinearAlgebra: normalize
+
+function coords_for_face(mesh, face_idx)
+    ne = mesh.ne
+    coords = [
+        begin
+            coord = Meshes._coordinates(mesh, ϕx, ϕy, face_idx)
+            usp = LinearAlgebra.normalize(UnitSphericalPoint(coord.x1, coord.x2, coord.x3))
+            usp
+        end
+        for ϕx in LinRange(-1, 1, ne+1), ϕy in LinRange(-1, 1, ne+1)
+    ]
+
+    return coords
+end
+
+
+
+include("reorderedquadtreecursor.jl")
+include("CubedSphereToplevelTree.jl")
+
+# Get a space
+space = CommonSpaces.CubedSphereSpace(;
+    radius = 10,
+    n_quad_points = 2,
+    h_elem = 64,
+)
+
+# Extract the underlying mesh
+cubed_sphere_mesh = space.grid.topology.mesh
+mesh = cubed_sphere_mesh
+ne = mesh.ne
+# Get the element order, in order
+element_order = Topologies.spacefillingcurve(mesh)
+@assert length(element_order) ÷ (mesh.ne^2) == 6 "There must be mesh.ne^2 elements per face"
+face_order = 1:6
+# element_order_per_face = coll
+lin2carts = map.(
+    i -> CartesianIndex((i[1], i[2])), 
+    Iterators.partition(element_order, length(element_order) ÷ 6)
+)
+
+cart2lins = map(enumerate(lin2carts)) do (face_idx, face_indices)
+    mat = Matrix{Int}(undef, ne, ne)
+    for (i, elem) in enumerate(face_indices)
+        mat[elem] = i + (face_idx-1) * ne^2
+    end
+    mat
+end
+
+# Make sure that we cover all cells in the grid
+@test isempty(setdiff(reduce(vcat, cart2lins), 1:mesh.ne^2 * 6))
+
+all_coords = map(i -> coords_for_face(mesh, i), 1:6)
+
+quadtrees = map(lin2carts, cart2lins, all_coords) do lin2cart, cart2lin, coords
+    ReorderedTopDownQuadtreeCursor(Trees.CellBasedGrid(GO.Spherical(; radius = mesh.domain.radius), coords), Reorderer2D(cart2lin, lin2cart))
+end
+
+final_tree = CubedSphereToplevelTree(quadtrees)
+
+latlon_grid = LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z = (0, 1), radius = mesh.domain.radius)
+
+# Define a field on the first space, to use as our source field
+field = Fields.coordinate_field(space).long
+ones_field = Fields.ones(space)
+cubed_sphere_vals = zeros(6*64^2)
+get_value_per_element!(cubed_sphere_vals, field, ones_field)
+
+latlon_field = Oceananigans.CenterField(latlon_grid)
+latlon_vals = vec(interior(latlon_field))
+set!(latlon_field, (x, y, z) -> x)
+heatmap(interior(latlon_field, :, :, 1))
+set!(latlon_field, (x, y, z) -> 0)
+
+# regridder = ConservativeRegridding.Regridder(final_tree, final_tree; threaded = false)
+regridder = ConservativeRegridding.Regridder(latlon_grid, final_tree; threaded = false)
+
+ConservativeRegridding.regrid!(latlon_vals, regridder, cubed_sphere_vals)
+
+heatmap(interior(latlon_field, :, :, 1))
+
+@test isapprox(
+    sum(latlon_vals .* ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(latlon_grid))),
+    sum(cubed_sphere_vals .* ConservativeRegridding.areas(GO.Spherical(), final_tree)),
+    rtol = 1e-13
+)
+
+
+qt1 = quadtrees[1]
+cells = collect(Trees.getcell(qt1)) |> x -> GO.transform(GO.GeographicFromUnitSphere(), x) .|> GI.convert(LibGEOS)
+
+fig, ax, plt = poly(cells; strokewidth = 1,axis = (; type = GlobeAxis, dest = Geodesy.Ellipsoid(; a = "1", b = "1")))
+
+using GLMakie, GeoMakie
+using Geodesy
+# all_coords_mat = (cat(all_coords...; dims = 3))
+fig, ax, plt = scatter(vec(Point3f.(all_coords_mat)); color = vec((x -> x[3]).(CartesianIndices(all_coords_mat))), axis = (; type = GlobeAxis, dest = Geodesy.Ellipsoid(; a = "1", b = "1")), source="+proj=cart +R=1 +type=crs")
+meshimage!(ax, -180..180, -90..90, reshape([colorant"white"], 1, 1); zlevel = -0.1)
+
