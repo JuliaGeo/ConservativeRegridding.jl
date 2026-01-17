@@ -40,8 +40,12 @@ for dst in (dst_field[i] for i in 1:6)
     )
 end
 
+@apply_regionally dst_trees = Trees.treeify(dst_field)
+@apply_regionally areas_dst = ConservativeRegridding.areas(GO.Spherical(), dst_trees)
+areas_src = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(src_field))
+dst_sum   = sum(sum(areas_dst[i] .* dst[i]) for i in 1:6)
+src_sum   = sum(areas_src .* vec(interior(src_field)))
+
 # Test conservation!
-sum_dst = sum([sum(dst_field[i] * Oceananigans.Operators.Az) for i in 1:6])
-sum_src = sum(src_field * Oceananigans.Operators.Az)
 
 @show (sum_src - sum_dst) / sum_src
