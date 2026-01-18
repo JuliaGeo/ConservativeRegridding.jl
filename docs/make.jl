@@ -13,6 +13,10 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "How it works" => "how_it_works.md",
+        "Interfaces" => [
+            "interfaces/trees.md",
+            "interfaces/regrid.md",
+        ],
     ],
     warnonly = true,#[:missing_docs],
 )
