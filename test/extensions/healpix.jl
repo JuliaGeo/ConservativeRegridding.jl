@@ -16,12 +16,12 @@ const HealpixExt = Base.get_extension(ConservativeRegridding, :ConservativeRegri
 @testset "HealpixTree basic functionality" begin
     @testset "Core types and constructors" begin
         tree = HealpixExt.HealpixTree(4)
-        @test tree isa HealpixRootNode{Healpix.NestedOrder}
+        @test tree isa HealpixExt.HealpixRootNode{Healpix.NestedOrder}
         @test tree.nside_max == 4
         @test Trees.ncells(tree) == 12 * 4^2  # 192 pixels
 
         tree_ring = HealpixExt.HealpixTree(Healpix.RingOrder, 8)
-        @test tree_ring isa HealpixRootNode{Healpix.RingOrder}
+        @test tree_ring isa HealpixExt.HealpixRootNode{Healpix.RingOrder}
         @test tree_ring.nside_max == 8
     end
 
@@ -33,7 +33,7 @@ const HealpixExt = Base.get_extension(ConservativeRegridding, :ConservativeRegri
 
         # Check children are HealpixTreeNodes at level 0
         child = STI.getchild(tree, 1)
-        @test child isa HealpixTreeNode{Healpix.NestedOrder}
+        @test child isa HealpixExt.HealpixTreeNode{Healpix.NestedOrder}
         @test child.level == 0
         @test child.pixel == 0
 
@@ -94,10 +94,10 @@ const HealpixExt = Base.get_extension(ConservativeRegridding, :ConservativeRegri
 
     @testset "Manifold" begin
         tree = HealpixExt.HealpixTree(4)
-        @test GOCore.manifold(tree) == GO.Spherical()
+        @test GOCore.best_manifold(tree) == GO.Spherical()
 
         node = STI.getchild(tree, 1)
-        @test GOCore.manifold(node) == GO.Spherical()
+        @test GOCore.best_manifold(node) == GO.Spherical()
     end
 
     @testset "treeify passthrough" begin
