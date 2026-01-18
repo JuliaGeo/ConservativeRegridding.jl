@@ -37,27 +37,15 @@ source_grid = Oceananigans.LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(
 source_field = Oceananigans.CenterField(source_grid)
 Oceananigans.set!(source_field, LongitudeField())
 
-regridder = ConservativeRegridding.Regridder(target_grid, source_field; normalize = false)
+regridder = @test_nowarn ConservativeRegridding.Regridder(target_grid, source_field; normalize = false)
 
-ConservativeRegridding.regrid!(vec(target_data), regridder, vec(interior(source_field)))
+@test_nowarn ConservativeRegridding.regrid!(vec(target_data), regridder, vec(interior(source_field)))
 
-# using GeoMakie, GLMakie, Geodesy
 f, a, p = poly(GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), Trees.getcell(Trees.treeify(target_grid))) |> vec; color = vec(target_data), axis = (; type = GlobeAxis))
 lines!(a, GeoMakie.coastlines(); zlevel = 100_000, color = :orange)
 f
 
 # f, a, p = poly(GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), Trees.getcell(Trees.treeify(source_grid))) |> vec; color = vec(interior(source_field)), axis = (; type = GlobeAxis))
-
-
-poly(GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), Trees.getcell(SST.ISEACircleTree(2))); color = :white, strokewidth = 1, axis = (; type = GlobeAxis))
-
-computed_areas = sum(regridder.intersections, dims=2)[:, 1]
-direct_areas = ConservativeRegridding.areas(GO.Spherical(), target_grid)
-
-mismatch_idxs = findall(!, computed_areas .≈ direct_areas)
-
-computed_areas[2774]
-direct_areas[2774]
 
 @testset "Regridder object conserved areas" begin
     @test sum(regridder.intersections, dims=2)[:, 1] ≈ ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(target_grid))
@@ -69,3 +57,16 @@ end
     source_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(source_grid))
     @test sum(vec(target_data) .* target_areas) ≈ sum(vec(interior(source_field)) .* vec(source_areas))
 end
+
+# old debugging code for polygon intersection issues
+#=
+poly(GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), Trees.getcell(SST.ISEACircleTree(2))); color = :white, strokewidth = 1, axis = (; type = GlobeAxis))
+
+computed_areas = sum(regridder.intersections, dims=2)[:, 1]
+direct_areas = ConservativeRegridding.areas(GO.Spherical(), target_grid)
+
+mismatch_idxs = findall(!, computed_areas .≈ direct_areas)
+
+computed_areas[2774]
+direct_areas[2774]
+=#
