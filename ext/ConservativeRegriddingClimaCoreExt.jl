@@ -91,7 +91,8 @@ GOCore.best_manifold(mesh::Meshes.AbstractCubedSphere) = GOCore.Spherical(; radi
 GOCore.best_manifold(topology::Topologies.Topology2D) = GOCore.best_manifold(topology.mesh)
 GOCore.best_manifold(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = GOCore.best_manifold(space.grid.topology)
 
-
+GOCore.best_manifold(field::ClimaCore.Fields.Field) = GOCore.best_manifold(getfield(field, :space))
+Trees.treeify(manifold::GOCore.Spherical, field::ClimaCore.Fields.Field) = Trees.treeify(manifold, getfield(field, :space))
 
 
 
@@ -143,6 +144,28 @@ function get_element_vertices(space)
         end
     end
     return vertices
+end
+
+
+function get_element_centroids(space)
+    # Get the indices of the vertices of the elements, in clockwise order for each element
+    Nh = Meshes.nelements(space.grid.topology.mesh)
+    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
+    vertex_inds = [
+        CartesianIndex(i, j, 1, 1, e) # f and v are 1 for SpectralElementSpace2D
+        for e in 1:Nh, (i, j) in [(1, 1), (Nq, Nq)]
+    ] # repeat the first coordinate pair at the end
+
+    # Get the lat and lon at each vertex index
+    coords = Fields.coordinate_field(space)
+    lonlat_to_usp = GO.UnitSpherical.UnitSphereFromGeographic()
+    centroids = map(eachslice(vertex_inds; dims = 1)) do (ind1, ind2)
+        coord1 = (Fields.field_values(coords.long)[ind1], Fields.field_values(coords.lat)[ind1])
+        coord2 = (Fields.field_values(coords.long)[ind2], Fields.field_values(coords.lat)[ind2])
+        usp_coord1, usp_coord2 = lonlat_to_usp.((coord1, coord2))
+        return GO.UnitSpherical.slerp(usp_coord1, usp_coord2, 0.5)
+    end
+    return centroids
 end
 
 ### These functions are used to facilitate storing a single value per element on a field
