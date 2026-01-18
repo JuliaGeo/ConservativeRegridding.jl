@@ -7,6 +7,8 @@ import GeoInterface as GI
 import GeometryOps: SpatialTreeInterface as STI, UnitSpherical
 using StaticArrays: SA
 
+using Test
+
 using Oceananigans # for source data
 
 using GeoMakie, GLMakie
@@ -40,7 +42,12 @@ regridder = ConservativeRegridding.Regridder(target_grid, source_field; normaliz
 ConservativeRegridding.regrid!(vec(target_data), regridder, vec(interior(source_field)))
 
 # using GeoMakie, GLMakie, Geodesy
-# f, a, p = poly(GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), Trees.getcell(target_grid)); color = target_data, axis = (; type = GlobeAxis))
+f, a, p = poly(GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), Trees.getcell(Trees.treeify(target_grid))) |> vec; color = vec(target_data), axis = (; type = GlobeAxis))
+lines!(a, GeoMakie.coastlines(); zlevel = 100_000, color = :orange)
+f
+
+# f, a, p = poly(GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), Trees.getcell(Trees.treeify(source_grid))) |> vec; color = vec(interior(source_field)), axis = (; type = GlobeAxis))
+
 
 poly(GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), Trees.getcell(SST.ISEACircleTree(2))); color = :white, strokewidth = 1, axis = (; type = GlobeAxis))
 
@@ -52,4 +59,13 @@ mismatch_idxs = findall(!, computed_areas .≈ direct_areas)
 computed_areas[2774]
 direct_areas[2774]
 
-sum(regridder.intersections, dims=2)[:, 1] .≈ ConservativeRegridding.areas(GO.Spherical(), target_grid)
+@testset "Regridder object conserved areas" begin
+    @test sum(regridder.intersections, dims=2)[:, 1] ≈ ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(target_grid))
+    @test sum(regridder.intersections, dims=1)[1, :] ≈ ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(source_grid))
+end
+
+@testset "Integral was conserved" begin
+    target_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(target_grid))
+    source_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(source_grid))
+    @test sum(vec(target_data) .* target_areas) ≈ sum(vec(interior(source_field)) .* vec(source_areas))
+end
