@@ -19,6 +19,9 @@ using SciMLPublic: @public
 include("utils/MultithreadedDualDepthFirstSearch.jl")
 using .MultithreadedDualDepthFirstSearch
 
+include("utils/example_data.jl")
+export ExampleFieldFunction, LongitudeField, SinusoidField, HarmonicField, GulfStreamField, VortexField
+
 include("trees/Trees.jl")
 using .Trees
 
@@ -29,6 +32,7 @@ export QuadtreeCursor, TopDownQuadtreeCursor
 include("regridder/regridder.jl")
 include("regridder/regrid.jl")
 include("regridder/intersection_areas.jl")
+
 
 @public Regridder, regrid, regrid!
 @public areas

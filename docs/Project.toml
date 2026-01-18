@@ -14,21 +14,26 @@ GeoInterface = "cf35fbd7-0cd7-5166-be24-54bfbe79505f"
 GeoJSON = "61d90e0f-e114-555e-ac52-39dfb47a3ef9"
 GeoMakie = "db073c08-6b98-4ee5-b6a4-5efafb3259c6"
 Geodesy = "0ef565a4-170c-5f04-8de2-149903a85f3d"
+GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
 GeometryOps = "3251bfac-6a57-4b6d-aa61-ac1fef2975ab"
 GeometryOpsCore = "05efe853-fabf-41c8-927e-7063c8b9f013"
+Healpix = "9f4e344d-96bc-545a-84a3-ae6b9e1b672b"
 LibGEOS = "a90b1aa1-3769-5649-ba7e-abc5a9d163eb"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 OhMyThreads = "67456a42-1dca-4109-a031-0a68de7e3ad5"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
+RingGrids = "d1845624-ad4f-453b-8ff4-a8db365bf3a7"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 SpeedyWeather = "9e226e20-d153-4fed-8a5b-493def4f21a9"
 SphericalSpatialTrees = "86b7679e-e8c0-4ea9-ad3d-baef5c69eb57"
 StableTasks = "91464d47-22a1-43fe-8b7f-2d57ee82463f"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 WellKnownGeometry = "0f680547-7be7-4555-8820-bb198eeb646b"
 YAXArrayBase = "90b8fcef-0c2d-428d-9c56-5f86629e9d14"
 
 [sources]
 ConservativeRegridding = {path = ".."}
+GeometryBasics = {rev = "as/fix-gi-convert-staticarray", url = "https://github.com/JuliaGeometry/GeometryBasics.jl"}
 Oceananigans = {rev = "FPivot", url = "https://github.com/briochemc/Oceananigans.jl"}
 SphericalSpatialTrees = {rev = "main", url = "https://github.com/meggart/SphericalSpatialTrees.jl"}
