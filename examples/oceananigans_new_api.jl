@@ -9,8 +9,6 @@ using Statistics
 using GLMakie, GeoMakie
 import LibGEOS
 
-include("oceananigans_common.jl")
-
 # Instantiate some grids
 lonlat_test_grid = LatitudeLongitudeGrid(size=(36, 18, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
 lonlat_coarse_grid = LatitudeLongitudeGrid(size=(100, 100, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
