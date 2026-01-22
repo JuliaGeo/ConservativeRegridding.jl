@@ -3,7 +3,7 @@ module ConservativeRegriddingOceananigansExt
 using Oceananigans
 using Oceananigans.Grids: ξnode, ηnode
 using Oceananigans.Fields: AbstractField
-using Oceananigans.Architectures: on_architecture, CPU
+using Oceananigans.Architectures: CPU
 
 using ConservativeRegridding
 using ConservativeRegridding.Trees
@@ -12,6 +12,7 @@ import GeoInterface as GI
 import GeometryOps as GO
 import GeometryOpsCore as GOCore
 import GeometryOps: SpatialTreeInterface as STI
+import Oceananigans.Architectures: on_architecture
 
 instantiate(L) = L()
 
@@ -92,7 +93,6 @@ end
 Trees.treeify(field::Oceananigans.Field) = Trees.treeify(field.grid)
 Trees.treeify(field::Oceananigans.AbstractField) = Trees.treeify(field.grid)
 
-
 Trees.treeify(manifold::GOCore.Manifold, field::Oceananigans.Field) = Trees.treeify(manifold, field.grid)
 Trees.treeify(manifold::GOCore.Manifold, field::Oceananigans.AbstractField) = Trees.treeify(manifold, field.grid)
 
@@ -103,5 +103,13 @@ GOCore.best_manifold(grid::Oceananigans.LatitudeLongitudeGrid) = GO.Spherical(; 
 GOCore.best_manifold(grid::Oceananigans.OrthogonalSphericalShellGrid) = GO.Spherical(; radius = grid.radius)
 
 GOCore.best_manifold(field::Oceananigans.Field) = GOCore.best_manifold(field.grid)
+
+# Extend the `on_architecture` method for a `Regridder` object
+on_architecture(arch, r::Regridder) = 
+    Regridder(on_architecture(arch, r.intersections),
+              on_architecture(arch, r.dst_areas)
+              on_architecture(arch, r.src_areas)
+              on_architecture(arch, r.dst_temp)
+              on_architecture(arch, r.src_temp))
 
 end
