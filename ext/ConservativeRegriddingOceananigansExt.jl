@@ -56,7 +56,7 @@ function compute_cell_matrix(grid::FPivotTripolarGrid)
     arch = grid.architecture
     FT = eltype(grid)
 
-    cell_matrix = Array{Tuple{FT, FT}}(undef, Nx+1, Ny+1)
+    cell_matrix = Array{Tuple{FT, FT}}(undef, Nx+1, Ny)
 
     # Not GPU compatible so we need to move the grid on the CPU
     cpu_grid = on_architecture(CPU(), grid)
