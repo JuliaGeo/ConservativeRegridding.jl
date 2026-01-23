@@ -8,6 +8,8 @@ using Oceananigans.Architectures: CPU
 using ConservativeRegridding
 using ConservativeRegridding.Trees
 
+using ConservativeRegridding: Regridder, ExampleFieldFunction
+
 import GeoInterface as GI
 import GeometryOps as GO
 import GeometryOpsCore as GOCore
@@ -105,8 +107,8 @@ GOCore.best_manifold(grid::Oceananigans.OrthogonalSphericalShellGrid) = GO.Spher
 GOCore.best_manifold(field::Oceananigans.Field) = GOCore.best_manifold(field.grid)
 
 # Extend the `on_architecture` method for a `Regridder` object
-on_architecture(arch, r::ConservativeRegidding.Regridder) = 
-    ConservativeRegridding.Regridder(on_architecture(arch, r.intersections),
+on_architecture(arch, r::Regridder) = 
+    Regridder(on_architecture(arch, r.intersections),
               on_architecture(arch, r.dst_areas),
               on_architecture(arch, r.src_areas),
               on_architecture(arch, r.dst_temp),
