@@ -107,9 +107,9 @@ GOCore.best_manifold(field::Oceananigans.Field) = GOCore.best_manifold(field.gri
 # Extend the `on_architecture` method for a `Regridder` object
 on_architecture(arch, r::Regridder) = 
     Regridder(on_architecture(arch, r.intersections),
-              on_architecture(arch, r.dst_areas)
-              on_architecture(arch, r.src_areas)
-              on_architecture(arch, r.dst_temp)
+              on_architecture(arch, r.dst_areas),
+              on_architecture(arch, r.src_areas),
+              on_architecture(arch, r.dst_temp),
               on_architecture(arch, r.src_temp))
 
 
