@@ -8,6 +8,8 @@ using Oceananigans.Architectures: CPU
 using ConservativeRegridding
 using ConservativeRegridding.Trees
 
+using ConservativeRegridding: Regridder, ExampleFieldFunction
+
 import GeoInterface as GI
 import GeometryOps as GO
 import GeometryOpsCore as GOCore
