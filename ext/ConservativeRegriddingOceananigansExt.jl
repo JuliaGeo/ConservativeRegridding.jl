@@ -1,7 +1,7 @@
 module ConservativeRegriddingOceananigansExt
 
 using Oceananigans
-using Oceananigans.Grids: ξnode, ηnode
+using Oceananigans.Grids: ξnode, ηnode, RightFaceFolded, RightCenterFolded
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Architectures: CPU
 
@@ -37,7 +37,32 @@ function compute_cell_matrix(grid::Oceananigans.Grids.AbstractGrid)
 
     # Not GPU compatible so we need to move the grid on the CPU
     cpu_grid = on_architecture(CPU(), grid)
-    _compute_cell_matrix!(cell_matrix, Nx, Ny, ℓx, ℓy, cpu_grid)
+    _compute_cell_matrix!(cell_matrix, Nx+1, Ny+1, ℓx, ℓy, cpu_grid)
+
+    return on_architecture(arch, cell_matrix)
+end
+
+# A Tripolar grid that has the north pole at nodes `(Face, Face)` locations
+const FPivotTripolarGrid = Oceananigans.OrthogonalSphericalShellGrids.TripolarGrid{<:Any, <:Any, RightCenterFolded}
+
+# The tracer cell has a repeated row at `Ny`, therefore the prognostic 
+# domain for fields `Center`ed in `y` ends at `Ny-1`.
+function compute_cell_matrix(grid::FPivotTripolarGrid)
+    Nx, Ny, _ = size(grid)
+    ℓx, ℓy    = Center(), Center()
+
+    if isnothing(ℓx) || isnothing(ℓy)
+        error("cell_matrix can only be computed for fields with non-nothing horizontal location.")
+    end
+
+    arch = grid.architecture
+    FT = eltype(grid)
+
+    cell_matrix = Array{Tuple{FT, FT}}(undef, Nx+1, Ny)
+
+    # Not GPU compatible so we need to move the grid on the CPU
+    cpu_grid = on_architecture(CPU(), grid)
+    _compute_cell_matrix!(cell_matrix, Nx+1, Ny, ℓx, ℓy, cpu_grid)
 
     return on_architecture(arch, cell_matrix)
 end
@@ -45,8 +70,8 @@ end
 flip(::Face) = Center()
 flip(::Center) = Face()
 
-function _compute_cell_matrix!(cell_matrix, Nx, Ny, ℓx, ℓy, grid)
-    for i in 1:Nx+1, j in 1:Ny+1
+function _compute_cell_matrix!(cell_matrix, Fx, Fy, ℓx, ℓy, grid)
+    for i in 1:Fx, j in 1:Fy
         vx = flip(ℓx)
         vy = flip(ℓy)
 
