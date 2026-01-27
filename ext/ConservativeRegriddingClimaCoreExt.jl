@@ -35,11 +35,11 @@ end
 function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology2D{<: ClimaComms.AbstractCommsContext, <: Meshes.AbstractCubedSphere})
     mesh = topology.mesh
     ne = mesh.ne
-    # There are always 6 faces of a cubed sphere - 
+    # There are always 6 faces of a cubed sphere -
     # see the ClimaCore docs on AbstractCubedSphere
     # for an explanation on how they are connected.
     # TODO: set the border elements of each cubed sphere face
-    # explicitly equal to each other, so that there are no numerical 
+    # explicitly equal to each other, so that there are no numerical
     # inaccuracies.
     face_idxs = 1:6
     face_coords = map(i -> coords_for_face(mesh, i), face_idxs)
@@ -49,13 +49,13 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
         # Create a quadtree for each face.
         map(face_idxs, face_coords) do face_idx, coords
             Trees.FaceAwareQuadtreeCursor(
-                Trees.CellBasedGrid(manifold, coords), 
+                Trees.CellBasedGrid(manifold, coords),
                 face_idx
             )
         end
     elseif topology.elemorder isa Vector{CartesianIndex{3}} # Some sort of space filling curve
         lin2carts = map.(
-            i -> CartesianIndex((i[1], i[2])), 
+            i -> CartesianIndex((i[1], i[2])),
             Iterators.partition(topology.elemorder, length(topology.elemorder) ÷ 6)
         )
         cart2lins = map(enumerate(lin2carts)) do (face_idx, face_indices)
@@ -70,9 +70,9 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
             Trees.IndexLocalizerRewrapperTree(
                 Trees.ReorderedTopDownQuadtreeCursor(
                     Trees.CellBasedGrid(
-                        GO.Spherical(; radius = mesh.domain.radius), 
+                        GO.Spherical(; radius = mesh.domain.radius * 1000), # convert km to m
                         coords
-                    ), 
+                    ),
                     Trees.Reorderer2D(cart2lin, lin2cart)
                 ),
                 (face_idx - 1) * ne^2
@@ -87,7 +87,7 @@ end
 
 Trees.treeify(manifold::GOCore.Spherical, space::ClimaCore.Spaces.AbstractSpectralElementSpace) = Trees.treeify(manifold, space.grid.topology)
 
-GOCore.best_manifold(mesh::Meshes.AbstractCubedSphere) = GOCore.Spherical(; radius = mesh.domain.radius)
+GOCore.best_manifold(mesh::Meshes.AbstractCubedSphere) = GOCore.Spherical(; radius = mesh.domain.radius * 1000) # convert km to m
 GOCore.best_manifold(topology::Topologies.Topology2D) = GOCore.best_manifold(topology.mesh)
 GOCore.best_manifold(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = GOCore.best_manifold(space.grid.topology)
 
