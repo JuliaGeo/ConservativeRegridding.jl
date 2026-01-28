@@ -70,7 +70,7 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
             Trees.IndexLocalizerRewrapperTree(
                 Trees.ReorderedTopDownQuadtreeCursor(
                     Trees.CellBasedGrid(
-                        GO.Spherical(; radius = mesh.domain.radius * 1000.0), # convert km to m
+                        GO.Spherical(; radius = Float64(mesh.domain.radius)),
                         coords
                     ),
                     Trees.Reorderer2D(cart2lin, lin2cart)
@@ -87,7 +87,7 @@ end
 
 Trees.treeify(manifold::GOCore.Spherical, space::ClimaCore.Spaces.AbstractSpectralElementSpace) = Trees.treeify(manifold, space.grid.topology)
 
-GOCore.best_manifold(mesh::Meshes.AbstractCubedSphere) = GOCore.Spherical(; radius = mesh.domain.radius * 1000.0) # convert km to m
+GOCore.best_manifold(mesh::Meshes.AbstractCubedSphere) = GOCore.Spherical(; radius = Float64(mesh.domain.radius))
 GOCore.best_manifold(topology::Topologies.Topology2D) = GOCore.best_manifold(topology.mesh)
 GOCore.best_manifold(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = GOCore.best_manifold(space.grid.topology)
 
