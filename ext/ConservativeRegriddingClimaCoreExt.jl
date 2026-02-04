@@ -13,6 +13,8 @@ using ClimaCore:
     CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies, ClimaComms
 import ClimaCore
 
+using KernelAbstractions: @kernel, @index, get_backend
+
 """
     coords_for_face(mesh::CubedSphereMesh, face_idx)::Matrix{UnitSphericalPoint}
 
@@ -35,11 +37,11 @@ end
 function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology2D{<: ClimaComms.AbstractCommsContext, <: Meshes.AbstractCubedSphere})
     mesh = topology.mesh
     ne = mesh.ne
-    # There are always 6 faces of a cubed sphere - 
+    # There are always 6 faces of a cubed sphere -
     # see the ClimaCore docs on AbstractCubedSphere
     # for an explanation on how they are connected.
     # TODO: set the border elements of each cubed sphere face
-    # explicitly equal to each other, so that there are no numerical 
+    # explicitly equal to each other, so that there are no numerical
     # inaccuracies.
     face_idxs = 1:6
     face_coords = map(i -> coords_for_face(mesh, i), face_idxs)
@@ -49,13 +51,13 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
         # Create a quadtree for each face.
         map(face_idxs, face_coords) do face_idx, coords
             Trees.FaceAwareQuadtreeCursor(
-                Trees.CellBasedGrid(manifold, coords), 
+                Trees.CellBasedGrid(manifold, coords),
                 face_idx
             )
         end
     elseif topology.elemorder isa Vector{CartesianIndex{3}} # Some sort of space filling curve
         lin2carts = map.(
-            i -> CartesianIndex((i[1], i[2])), 
+            i -> CartesianIndex((i[1], i[2])),
             Iterators.partition(topology.elemorder, length(topology.elemorder) ÷ 6)
         )
         cart2lins = map(enumerate(lin2carts)) do (face_idx, face_indices)
@@ -70,9 +72,9 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
             Trees.IndexLocalizerRewrapperTree(
                 Trees.ReorderedTopDownQuadtreeCursor(
                     Trees.CellBasedGrid(
-                        GO.Spherical(; radius = mesh.domain.radius), 
+                        GO.Spherical(; radius = mesh.domain.radius),
                         coords
-                    ), 
+                    ),
                     Trees.Reorderer2D(cart2lin, lin2cart)
                 ),
                 (face_idx - 1) * ne^2
@@ -206,21 +208,23 @@ function set_value_per_element!(field, value_per_element)
     space = axes(field)
     Nh = Meshes.nelements(space.grid.topology.mesh)
     Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-
     @assert length(value_per_element) == Nh "Length of value_per_element must be equal to the number of elements in the space"
 
-    # Set the value in each node of each element to the value per element
-    for e in 1:Nh
-        for i in 1:Nq
-            for j in 1:Nq
-                Fields.field_values(field)[CartesianIndex(i, j, 1, 1, e)] =
-                    value_per_element[e]
-            end
-        end
-    end
+    # Define a kernel that will set the value in each node of each element to the value per element
+
+    backend = KernelAbstractions.get_backend(value_per_element)
+    n_threads_per_block = (16, 16)
+    loop! = _set_value_per_element!(backend, n_threads_per_block, (Nq, Nq, Nh))
+    # Execute the kernel
+    loop!(field, value_per_element)
+
     return field
 end
 
+@kernel function _set_value_per_element!(field, value_per_element)
+    i, j, e = @index(Global, NTuple)
+    Fields.field_values(field)[CartesianIndex(i, j, 1, 1, e)] = value_per_element[e]
+end
 
 
 end
