@@ -103,6 +103,7 @@ Trees.treeify(manifold::GOCore.Manifold, field::Oceananigans.AbstractField) = Tr
 GOCore.best_manifold(grid::Oceananigans.RectilinearGrid) = GO.Planar()
 GOCore.best_manifold(grid::Oceananigans.LatitudeLongitudeGrid) = GO.Spherical(; radius = grid.radius)
 GOCore.best_manifold(grid::Oceananigans.OrthogonalSphericalShellGrid) = GO.Spherical(; radius = grid.radius)
+GOCore.best_manifold(grid::Oceananigans.ImmersedBoundaryGrid) = GOCore.best_manifold(grid.underlying_grid)
 
 GOCore.best_manifold(field::Oceananigans.Field) = GOCore.best_manifold(field.grid)
 
