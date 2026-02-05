@@ -85,11 +85,11 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
     return Trees.CubedSphereToplevelTree(quadtrees)
 end
 
-Trees.treeify(manifold::GOCore.Spherical, space::ClimaCore.Spaces.AbstractSpectralElementSpace) = Trees.treeify(manifold, space.grid.topology)
+Trees.treeify(manifold::GOCore.Spherical, space::ClimaCore.Spaces.AbstractSpectralElementSpace) = Trees.treeify(manifold, Spaces.topology(space))
 
 GOCore.best_manifold(mesh::Meshes.AbstractCubedSphere) = GOCore.Spherical(; radius = mesh.domain.radius)
 GOCore.best_manifold(topology::Topologies.Topology2D) = GOCore.best_manifold(topology.mesh)
-GOCore.best_manifold(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = GOCore.best_manifold(space.grid.topology)
+GOCore.best_manifold(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = GOCore.best_manifold(Spaces.topology(space))
 
 
 
@@ -118,7 +118,9 @@ Regridder object.
 """
 function get_element_vertices(space)
     # Get the indices of the vertices of the elements, in clockwise order for each element
-    Nh = Meshes.nelements(space.grid.topology.mesh)
+    topology = Spaces.topology(space)
+    mesh = Topologies.mesh(topology)
+    Nh = Meshes.nelements(mesh)
     Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
     vertex_inds = [
         CartesianIndex(i, j, 1, 1, e) # f and v are 1 for SpectralElementSpace2D
@@ -156,13 +158,16 @@ containing the integrated value over the nodes of each element.
 """
 function integrate_each_element(field)
     space = axes(field)
+    topology = Spaces.topology(space)
+    mesh = Topologies.mesh(topology)
+
     weighted_values =
         RecursiveApply.rmul.(
             Spaces.weighted_jacobian(space),
             Fields.todata(field),
         )
 
-    Nh = Meshes.nelements(space.grid.topology.mesh)
+    Nh = Meshes.nelements(mesh)
     integral_each_element = zeros(Float64, Nh)
     Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
     for e in 1:Nh # loop over each element
@@ -204,7 +209,9 @@ the space.
 """
 function set_value_per_element!(field, value_per_element)
     space = axes(field)
-    Nh = Meshes.nelements(space.grid.topology.mesh)
+    topology = Spaces.topology(space)
+    mesh = Topologies.mesh(topology)
+    Nh = Meshes.nelements(mesh)
     Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
     @assert length(value_per_element) == Nh "Length of value_per_element must be equal to the number of elements in the space"
 
