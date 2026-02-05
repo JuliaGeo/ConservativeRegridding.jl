@@ -170,13 +170,10 @@ function integrate_each_element(field)
     Nh = Meshes.nelements(mesh)
     integral_each_element = zeros(Float64, Nh)
     Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-    for e in 1:Nh # loop over each element
-        for i in 1:Nq
-            for j in 1:Nq
-                integral_each_element[e] += weighted_values[CartesianIndex(i, j, 1, 1, e)]
-            end
-        end
-    end
+
+    # Sum over the nodes of each element to get the integral of the field over each element
+    integral_each_element = vec(sum(parent(weighted_values); dims=(1, 2)))
+
     return integral_each_element
 end
 
