@@ -13,8 +13,6 @@ using ClimaCore:
     CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies, ClimaComms
 import ClimaCore
 
-using KernelAbstractions: @kernel, @index, get_backend
-
 """
     coords_for_face(mesh::CubedSphereMesh, face_idx)::Matrix{UnitSphericalPoint}
 
@@ -210,21 +208,13 @@ function set_value_per_element!(field, value_per_element)
     Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
     @assert length(value_per_element) == Nh "Length of value_per_element must be equal to the number of elements in the space"
 
-    # Define a kernel that will set the value in each node of each element to the value per element
-
-    backend = KernelAbstractions.get_backend(value_per_element)
-    n_threads_per_block = (16, 16)
-    loop! = _set_value_per_element!(backend, n_threads_per_block, (Nq, Nq, Nh))
-    # Execute the kernel
-    loop!(field, value_per_element)
+    # Set all nodes in each element to the value per element
+    for i in 1:Nq, j in 1:Nq
+        values = Fields.field_values(field)
+        view(values, i, j, 1, 1, :) .= value_per_element
+    end
 
     return field
 end
-
-@kernel function _set_value_per_element!(field, value_per_element)
-    i, j, e = @index(Global, NTuple)
-    Fields.field_values(field)[CartesianIndex(i, j, 1, 1, e)] = value_per_element[e]
-end
-
 
 end
