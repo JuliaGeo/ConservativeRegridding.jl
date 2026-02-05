@@ -10,7 +10,7 @@ using GeometryOps.UnitSpherical: UnitSphericalPoint
 using LinearAlgebra: normalize
 
 using ClimaCore:
-    CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies, ClimaComms
+    CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies, DataLayouts, ClimaComms
 import ClimaCore
 
 """
@@ -35,11 +35,11 @@ end
 function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology2D{<: ClimaComms.AbstractCommsContext, <: Meshes.AbstractCubedSphere})
     mesh = topology.mesh
     ne = mesh.ne
-    # There are always 6 faces of a cubed sphere - 
+    # There are always 6 faces of a cubed sphere -
     # see the ClimaCore docs on AbstractCubedSphere
     # for an explanation on how they are connected.
     # TODO: set the border elements of each cubed sphere face
-    # explicitly equal to each other, so that there are no numerical 
+    # explicitly equal to each other, so that there are no numerical
     # inaccuracies.
     face_idxs = 1:6
     face_coords = map(i -> coords_for_face(mesh, i), face_idxs)
@@ -49,13 +49,13 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
         # Create a quadtree for each face.
         map(face_idxs, face_coords) do face_idx, coords
             Trees.FaceAwareQuadtreeCursor(
-                Trees.CellBasedGrid(manifold, coords), 
+                Trees.CellBasedGrid(manifold, coords),
                 face_idx
             )
         end
     elseif topology.elemorder isa Vector{CartesianIndex{3}} # Some sort of space filling curve
         lin2carts = map.(
-            i -> CartesianIndex((i[1], i[2])), 
+            i -> CartesianIndex((i[1], i[2])),
             Iterators.partition(topology.elemorder, length(topology.elemorder) ÷ 6)
         )
         cart2lins = map(enumerate(lin2carts)) do (face_idx, face_indices)
@@ -70,9 +70,9 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
             Trees.IndexLocalizerRewrapperTree(
                 Trees.ReorderedTopDownQuadtreeCursor(
                     Trees.CellBasedGrid(
-                        GO.Spherical(; radius = mesh.domain.radius), 
+                        GO.Spherical(; radius = mesh.domain.radius),
                         coords
-                    ), 
+                    ),
                     Trees.Reorderer2D(cart2lin, lin2cart)
                 ),
                 (face_idx - 1) * ne^2
@@ -85,11 +85,11 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
     return Trees.CubedSphereToplevelTree(quadtrees)
 end
 
-Trees.treeify(manifold::GOCore.Spherical, space::ClimaCore.Spaces.AbstractSpectralElementSpace) = Trees.treeify(manifold, space.grid.topology)
+Trees.treeify(manifold::GOCore.Spherical, space::ClimaCore.Spaces.AbstractSpectralElementSpace) = Trees.treeify(manifold, Spaces.topology(space))
 
 GOCore.best_manifold(mesh::Meshes.AbstractCubedSphere) = GOCore.Spherical(; radius = mesh.domain.radius)
 GOCore.best_manifold(topology::Topologies.Topology2D) = GOCore.best_manifold(topology.mesh)
-GOCore.best_manifold(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = GOCore.best_manifold(space.grid.topology)
+GOCore.best_manifold(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = GOCore.best_manifold(Spaces.topology(space))
 
 
 
@@ -118,7 +118,9 @@ Regridder object.
 """
 function get_element_vertices(space)
     # Get the indices of the vertices of the elements, in clockwise order for each element
-    Nh = Meshes.nelements(space.grid.topology.mesh)
+    topology = Spaces.topology(space)
+    mesh = Topologies.mesh(topology)
+    Nh = Meshes.nelements(mesh)
     Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
     vertex_inds = [
         CartesianIndex(i, j, 1, 1, e) # f and v are 1 for SpectralElementSpace2D
@@ -156,22 +158,22 @@ containing the integrated value over the nodes of each element.
 """
 function integrate_each_element(field)
     space = axes(field)
+    topology = Spaces.topology(space)
+    mesh = Topologies.mesh(topology)
+
     weighted_values =
         RecursiveApply.rmul.(
             Spaces.weighted_jacobian(space),
             Fields.todata(field),
         )
 
-    Nh = Meshes.nelements(space.grid.topology.mesh)
+    Nh = Meshes.nelements(mesh)
     integral_each_element = zeros(Float64, Nh)
     Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-    for e in 1:Nh # loop over each element
-        for i in 1:Nq
-            for j in 1:Nq
-                integral_each_element[e] += weighted_values[CartesianIndex(i, j, 1, 1, e)]
-            end
-        end
-    end
+
+    # Sum over the nodes of each element to get the integral of the field over each element
+    integral_each_element = vec(sum(parent(weighted_values); dims=(1, 2)))
+
     return integral_each_element
 end
 
@@ -204,23 +206,40 @@ the space.
 """
 function set_value_per_element!(field, value_per_element)
     space = axes(field)
-    Nh = Meshes.nelements(space.grid.topology.mesh)
+    topology = Spaces.topology(space)
+    mesh = Topologies.mesh(topology)
+    Nh = Meshes.nelements(mesh)
     Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-
     @assert length(value_per_element) == Nh "Length of value_per_element must be equal to the number of elements in the space"
 
-    # Set the value in each node of each element to the value per element
-    for e in 1:Nh
-        for i in 1:Nq
-            for j in 1:Nq
-                Fields.field_values(field)[CartesianIndex(i, j, 1, 1, e)] =
-                    value_per_element[e]
-            end
-        end
+    # Set all nodes in each element to the value per element
+    for i in 1:Nq, j in 1:Nq
+        set_datalayout!(Fields.field_values(field), i, j, value_per_element)
     end
+
     return field
 end
 
+"""
+    set_datalayout!(values::DataLayouts.IJFH, i, j, value_per_element)
+    set_datalayout!(values::DataLayouts.VIJFH, i, j, value_per_element)
 
+Set the values of the provided data laout with the given values in each element.
+The input vector is expected to be of length equal to the number of elements in
+the space.
+
+`i` and `j` are the indices of the element to set the values of. All nodes
+in that element will be set to the same value.
+
+We need two methods of this function because the data layout may have a vertical
+dimension (VIJFH) or not (IJFH). This is true even though we only regrid 2D fields,
+as a 2D field constructed by taking a level of a 3D field will have a vertical dimension.
+"""
+function set_datalayout!(values::DataLayouts.IJFH, i, j, value_per_element)
+    view(parent(values), i, j, 1, :) .= value_per_element
+end
+function set_datalayout!(values::DataLayouts.VIJFH, i, j, value_per_element)
+    view(parent(values), i, j, 1, 1, :) .= value_per_element
+end
 
 end
