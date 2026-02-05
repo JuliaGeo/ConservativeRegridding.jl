@@ -10,7 +10,7 @@ using GeometryOps.UnitSpherical: UnitSphericalPoint
 using LinearAlgebra: normalize
 
 using ClimaCore:
-    CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies, ClimaComms
+    CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies, DataLayouts, ClimaComms
 import ClimaCore
 
 """
@@ -210,11 +210,32 @@ function set_value_per_element!(field, value_per_element)
 
     # Set all nodes in each element to the value per element
     for i in 1:Nq, j in 1:Nq
-        values = Fields.field_values(field)
-        view(values, i, j, 1, 1, :) .= value_per_element
+        set_datalayout!(Fields.field_values(field), i, j, value_per_element)
     end
 
     return field
+end
+
+"""
+    set_datalayout!(values::DataLayouts.IJFH, i, j, value_per_element)
+    set_datalayout!(values::DataLayouts.VIJFH, i, j, value_per_element)
+
+Set the values of the provided data laout with the given values in each element.
+The input vector is expected to be of length equal to the number of elements in
+the space.
+
+`i` and `j` are the indices of the element to set the values of. All nodes
+in that element will be set to the same value.
+
+We need two methods of this function because the data layout may have a vertical
+dimension (VIJFH) or not (IJFH). This is true even though we only regrid 2D fields,
+as a 2D field constructed by taking a level of a 3D field will have a vertical dimension.
+"""
+function set_datalayout!(values::DataLayouts.IJFH, i, j, value_per_element)
+    view(parent(values), i, j, 1, :) .= value_per_element
+end
+function set_datalayout!(values::DataLayouts.VIJFH, i, j, value_per_element)
+    view(parent(values), i, j, 1, 1, :) .= value_per_element
 end
 
 end
