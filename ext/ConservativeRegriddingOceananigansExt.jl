@@ -59,6 +59,48 @@ end
 
 
 # Define the ConservativeRegridding interface for Oceananigans grids.
+
+function Trees.treeify(
+    manifold::GOCore.Spherical,
+    grid::Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Oceananigans.RightFaceFolded}
+)
+    # Compute the matrix of vertices - for an n×m grid, this is an (n+1)×(m+1) matrix of vertices.
+    cells_longlat = compute_cell_matrix(grid)
+    cells_unitspherical = GO.UnitSphereFromGeographic().(cells_longlat)
+
+    Nx = size(cells_unitspherical, 1) - 1
+    Ny = size(cells_unitspherical, 2) - 1
+    Nhalf = Nx ÷ 2
+    @assert iseven(Nx) "RightFaceFolded requires even number of cells in x"
+
+    # 1. Rest of grid: all rows except the fold row → Nx × (Ny-1) cells
+    rest_vertices = cells_unitspherical[:, 1:Ny]
+    rest_grid = Trees.CellBasedGrid(manifold, rest_vertices)
+    N_rest = Nx * (Ny - 1)
+
+    # 2. Top arc left half: left half of the fold row → Nhalf × 1 cells
+    left_top_vertices = cells_unitspherical[1:Nhalf+1, Ny:Ny+1]
+    left_top_grid = Trees.CellBasedGrid(manifold, left_top_vertices)
+
+    # 3. Top arc right half: right half of the fold row → Nhalf × 1 cells
+    # The right half of the fold line has its own vertices (at different longitudes
+    # from the left half), so we just slice the vertex matrix directly.
+    right_top_vertices = cells_unitspherical[Nhalf+1:Nx+1, Ny:Ny+1]
+    right_top_grid = Trees.CellBasedGrid(manifold, right_top_vertices)
+
+    # Create index-offset quadtrees for each part
+    rest_tree = Trees.IndexOffsetQuadtreeCursor(rest_grid, 0)
+    left_top_tree = Trees.IndexOffsetQuadtreeCursor(left_top_grid, N_rest)
+    right_top_tree = Trees.IndexOffsetQuadtreeCursor(right_top_grid, N_rest + Nhalf)
+
+    # Combine into a multi-tree; offsets are cumulative cell counts for searchsortedfirst
+    tree = Trees.MultiTreeWrapper(
+        [rest_tree, left_top_tree, right_top_tree],
+        [N_rest, N_rest + Nhalf, N_rest + 2 * Nhalf]
+    )
+
+    return Trees.KnownFullSphereExtentWrapper(tree)
+end
 function Trees.treeify(
     manifold::GOCore.Spherical,
     grid::Oceananigans.Grids.AbstractGrid
