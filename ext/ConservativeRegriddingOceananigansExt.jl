@@ -6,6 +6,7 @@ using Oceananigans.Fields: AbstractField
 using Oceananigans.Architectures: CPU
 
 using ConservativeRegridding
+using ConservativeRegridding: Regridder, ExampleFieldFunction
 using ConservativeRegridding.Trees
 
 import GeoInterface as GI
@@ -40,11 +41,11 @@ function compute_cell_matrix(grid::Oceananigans.Grids.AbstractGrid)
     return on_architecture(arch, cell_matrix)
 end
 
-# A Tripolar grid that has the north pole at nodes `(Face, Face)` locations
-const FPivotTripolarGrid = Oceananigans.OrthogonalSphericalShellGrids.TripolarGrid{<:Any, <:Any, RightCenterFolded}
+# An FPivot Tripolar grid has a `RightFaceFolded` topology: the fold is at `Face` nodes,
+# which means there is an extra line of Face nodes at the north boundary.
+# The prognostic domain for fields `Center`ed in `y` ends at `Ny-1`.
+const FPivotTripolarGrid = Oceananigans.OrthogonalSphericalShellGrids.TripolarGrid{<:Any, <:Any, RightFaceFolded}
 
-# The tracer cell has a repeated row at `Ny`, therefore the prognostic 
-# domain for fields `Center`ed in `y` ends at `Ny-1`.
 function compute_cell_matrix(grid::FPivotTripolarGrid)
     Nx, Ny, _ = size(grid)
     ℓx, ℓy    = Center(), Center()

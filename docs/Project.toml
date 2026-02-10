@@ -35,5 +35,5 @@ YAXArrayBase = "90b8fcef-0c2d-428d-9c56-5f86629e9d14"
 [sources]
 ConservativeRegridding = {path = ".."}
 GeometryBasics = {rev = "as/fix-gi-convert-staticarray", url = "https://github.com/JuliaGeometry/GeometryBasics.jl"}
-Oceananigans = {rev = "FPivot", url = "https://github.com/briochemc/Oceananigans.jl"}
+
 SphericalSpatialTrees = {rev = "main", url = "https://github.com/meggart/SphericalSpatialTrees.jl"}
