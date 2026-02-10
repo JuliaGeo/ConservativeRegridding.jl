@@ -1,11 +1,12 @@
 module ConservativeRegriddingOceananigansExt
 
 using Oceananigans
-using Oceananigans.Grids: ξnode, ηnode
+using Oceananigans.Grids: ξnode, ηnode, RightFaceFolded, RightCenterFolded
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Architectures: CPU
 
 using ConservativeRegridding
+using ConservativeRegridding: Regridder, ExampleFieldFunction
 using ConservativeRegridding.Trees
 
 using ConservativeRegridding: Regridder, ExampleFieldFunction
@@ -37,7 +38,32 @@ function compute_cell_matrix(grid::Oceananigans.Grids.AbstractGrid)
 
     # Not GPU compatible so we need to move the grid on the CPU
     cpu_grid = on_architecture(CPU(), grid)
-    _compute_cell_matrix!(cell_matrix, Nx, Ny, ℓx, ℓy, cpu_grid)
+    _compute_cell_matrix!(cell_matrix, Nx+1, Ny+1, ℓx, ℓy, cpu_grid)
+
+    return on_architecture(arch, cell_matrix)
+end
+
+# An FPivot Tripolar grid has a `RightFaceFolded` topology: the fold is at `Face` nodes,
+# which means there is an extra line of Face nodes at the north boundary.
+# The prognostic domain for fields `Center`ed in `y` ends at `Ny-1`.
+const FPivotTripolarGrid = Oceananigans.OrthogonalSphericalShellGrids.TripolarGrid{<:Any, <:Any, RightFaceFolded}
+
+function compute_cell_matrix(grid::FPivotTripolarGrid)
+    Nx, Ny, _ = size(grid)
+    ℓx, ℓy    = Center(), Center()
+
+    if isnothing(ℓx) || isnothing(ℓy)
+        error("cell_matrix can only be computed for fields with non-nothing horizontal location.")
+    end
+
+    arch = grid.architecture
+    FT = eltype(grid)
+
+    cell_matrix = Array{Tuple{FT, FT}}(undef, Nx+1, Ny)
+
+    # Not GPU compatible so we need to move the grid on the CPU
+    cpu_grid = on_architecture(CPU(), grid)
+    _compute_cell_matrix!(cell_matrix, Nx+1, Ny, ℓx, ℓy, cpu_grid)
 
     return on_architecture(arch, cell_matrix)
 end
@@ -45,8 +71,8 @@ end
 flip(::Face) = Center()
 flip(::Center) = Face()
 
-function _compute_cell_matrix!(cell_matrix, Nx, Ny, ℓx, ℓy, grid)
-    for i in 1:Nx+1, j in 1:Ny+1
+function _compute_cell_matrix!(cell_matrix, Fx, Fy, ℓx, ℓy, grid)
+    for i in 1:Fx, j in 1:Fy
         vx = flip(ℓx)
         vy = flip(ℓy)
 
