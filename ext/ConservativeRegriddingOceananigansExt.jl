@@ -88,7 +88,7 @@ end
 
 function Trees.treeify(
     manifold::GOCore.Spherical,
-    grid::Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Oceananigans.RightFaceFolded}
+    grid::Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Oceananigans.RightCenterFolded}
 )
     # Compute the matrix of vertices - for an n×m grid, this is an (n+1)×(m+1) matrix of vertices.
     cells_longlat = compute_cell_matrix(grid)
