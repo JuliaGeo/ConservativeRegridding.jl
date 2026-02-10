@@ -17,10 +17,9 @@ struct QuadtreeCursor{GridType <: AbstractCurvilinearGrid} <: AbstractQuadtreeCu
     grid::GridType
     "The index of the current cell at the current level in the quadtree."
     idx::CartesianIndex{2}
-    "The level of the cursor - 1 is the base i.e. smallest polygon level, as you increase the number you increase the size of the thing."
+    "The level of the cursor: 1 is the base i.e. smallest polygon level, as you increase the number you increase the size of the thing."
     level::Int
 end
-
 
 function QuadtreeCursor(grid::AbstractCurvilinearGrid)
     # Need 2^(level-1) >= max_size, so level >= log2(max_size) + 1

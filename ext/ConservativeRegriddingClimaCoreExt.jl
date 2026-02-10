@@ -48,9 +48,9 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
     quadtrees = if topology.elemorder isa CartesianIndices # Matrix order filling
         # Create a quadtree for each face.
         map(face_idxs, face_coords) do face_idx, coords
-            Trees.FaceAwareQuadtreeCursor(
-                Trees.CellBasedGrid(manifold, coords), 
-                face_idx
+            Trees.IndexOffsetQuadtreeCursor(
+                Trees.CellBasedGrid(manifold, coords),
+                (face_idx - 1) * ne^2
             )
         end
     elseif topology.elemorder isa Vector{CartesianIndex{3}} # Some sort of space filling curve

@@ -123,3 +123,42 @@ end
 Base.parent(wrapper::IndexLocalizerRewrapperTree) = wrapper.tree
 Trees.getcell(wrapper::IndexLocalizerRewrapperTree, i::Int) = Trees.getcell(parent(wrapper), i - wrapper.index_offset)
 Trees.getcell(wrapper::IndexLocalizerRewrapperTree) = Trees.getcell(parent(wrapper))
+
+#=
+## MultiTreeWrapper
+
+Wraps multiple spatial trees as children of a single parent node.
+Each subsidiary tree must handle global-to-local index conversion itself
+(e.g., via `IndexOffsetQuadtreeCursor`).
+
+`offsets` stores cumulative cell counts: `[N1, N1+N2, N1+N2+N3, ...]`
+where N_k is the number of cells in tree k. This allows `searchsortedfirst`
+to find the correct tree for a given global index.
+=#
+struct MultiTreeWrapper{T}
+    trees::Vector{T}
+    offsets::Vector{Int}
+end
+
+STI.isspatialtree(::Type{<: MultiTreeWrapper}) = true
+STI.isleaf(::MultiTreeWrapper) = false
+STI.nchild(w::MultiTreeWrapper) = length(w.trees)
+STI.getchild(w::MultiTreeWrapper, i::Int) = w.trees[i]
+STI.getchild(w::MultiTreeWrapper) = (w.trees[i] for i in 1:length(w.trees))
+STI.node_extent(w::MultiTreeWrapper) = GO.UnitSpherical.SphericalCap(GO.UnitSphericalPoint((0.,0.,1.)), Float64(pi) |> nextfloat)
+
+function Trees.getcell(wrapper::MultiTreeWrapper)
+    return Iterators.flatten(Trees.getcell(tree) for tree in wrapper.trees)
+end
+
+function Trees.getcell(wrapper::MultiTreeWrapper, i::Int)
+    # offsets stores cumulative cell counts: [N1, N1+N2, ...]
+    # searchsortedfirst finds the first offset >= i, which is the tree containing index i
+    tree_idx = searchsortedfirst(wrapper.offsets, i)
+    # Pass the index unmodified — subsidiary trees handle global-to-local conversion.
+    return Trees.getcell(wrapper.trees[tree_idx], i)
+end
+
+function Trees.ncells(wrapper::MultiTreeWrapper)
+    return sum(prod(Trees.ncells(tree)) for tree in wrapper.trees)
+end

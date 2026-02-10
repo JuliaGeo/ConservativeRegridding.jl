@@ -14,6 +14,6 @@ using Test, SafeTestsets
     @safetestset "Unit tests: QuadtreeCursors" begin include("trees/quadtree_cursors.jl") end
 
     @safetestset "Extensions: Oceananigans" begin include("extensions/oceananigans.jl") end
-    # @safetestset "Extensions: ClimaCore" begin include("extensions/climacore.jl") end # TODO Broken
+    @safetestset "Extensions: ClimaCore" begin include("extensions/climacore.jl") end # TODO Broken
     @safetestset "Extensions: Healpix" begin include("extensions/healpix.jl") end
 end

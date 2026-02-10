@@ -44,10 +44,13 @@ src_polys = collect(Trees.getcell(Trees.treeify(src_field))) |>  x-> GO.transfor
 dst_polys = collect(Trees.getcell(Trees.treeify(dst_field))) |>  x-> GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), x) .|> GI.convert(LibGEOS) |> vec
 
 f, a, p = poly(src_polys; color = vec(interior(src_field)), axis = (; type = GlobeAxis), colorrange = extrema(interior(src_field)), highclip = :red)
+p2 = poly!(a, src_polys; zlevel = 100_000, color = :transparent, strokewidth = .5, strokecolor = :black, transparency = true)
+
 f, a, p = poly(dst_polys; color = vec(interior(dst_field)), axis = (; type = GlobeAxis), colorrange = extrema(interior(src_field)), highclip = :red)
+p2 = poly!(a, dst_polys; zlevel = 100_000, color = :transparent, strokewidth = .5, strokecolor = :black, transparency = true)
 
-lines!(a, GeoMakie.coastlines(); zlevel = 100_000, color = :orange)
-
+lp = lines!(a, GeoMakie.coastlines(); zlevel = 100_000, color = :orange)
+lp.color = :gray
 # ## Metrics
 # First, set up the analytical destination field.
 analytical_dst_field = CenterField(dst_grid)
