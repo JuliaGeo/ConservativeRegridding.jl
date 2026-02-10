@@ -74,7 +74,7 @@ Trees Module (grid representations + quadtree cursors for spatial indexing)
 - `QuadtreeCursor`: Bottom-up traversal with level-based indexing
 
 **Specialized cursors** (`specialized_quadtree_cursors.jl`):
-- `FaceAwareQuadtreeCursor`: For multi-face grids (cubed spheres), tracks face index
+- `IndexOffsetQuadtreeCursor`: For multi-grid scenarios (e.g., cubed spheres), applies an index offset to grid-local indices
 - `ReorderedTopDownQuadtreeCursor`: For custom element orderings (space-filling curves in ClimaCore)
 
 **Wrappers** (`wrappers.jl`):
