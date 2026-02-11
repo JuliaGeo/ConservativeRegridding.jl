@@ -12,7 +12,7 @@ const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeReg
 
 @testset "Test helper functions in extension" begin
     cubedsphere_space = CommonSpaces.CubedSphereSpace(;
-        radius = latlon_grid.radius,
+        radius = GO.Spherical().radius,
         n_quad_points = 2,
         h_elem = 64,
     )

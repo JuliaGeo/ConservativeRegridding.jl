@@ -120,11 +120,10 @@ end
     ClimaCoreExt.set_value_per_element!(field_remapped, cubed_sphere_vals)
 
     # Check that the integral over the space is conserved
-    # TODO broken: -6 vs -3
-    @test_broken isapprox(
+    @test isapprox(
         sum(field),
         sum(field_remapped),
-        rtol = 1e-8,
+        rtol = 1e-10,
     )
 end
 
