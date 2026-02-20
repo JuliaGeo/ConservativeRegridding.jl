@@ -13,37 +13,46 @@ using ClimaCore:
     CommonSpaces, Fields, Spaces, Meshes, Topologies, Domains, ClimaComms
 
 # ---------------------------------------------------------------------------
-# Helper: regrid a field of ones and check max deviation from 1.0.
+# Helper: regrid a field of ones and check the result.
 #
-# Only cells that received intersection coverage AND have nonzero area are
-# checked.  Cells with zero coverage (from spatial tree search pruning near
-# poles or fold boundaries) are excluded — those reflect tree search limits,
-# not regridding logic bugs.  This still catches the issue #63 class of bugs
-# where *covered* cells produce spurious extrema.
+# The check depends on whether the *source* grid covers the whole earth:
+#   - global source:     every covered dst cell should be ≈ 1.0
+#   - non-global source: undershoot is expected (uncovered regions),
+#                        but overshoot (value > 1 + atol) indicates a bug
 # ---------------------------------------------------------------------------
-function test_constant_field(name, regridder; atol=1e-2, test_forward=true, test_backward=true)
-    n_dst, n_src = size(regridder)
-    A = regridder.intersections
+function test_constant_regrid(R, src_global, dst_global; atol=1e-2)
+    n_dst, n_src = size(R)
+    A = R.intersections
 
-    @testset "$name" begin
-        if test_forward
-            # Forward: ones(n_src) → dst
-            src_vals = ones(n_src)
-            dst_vals = zeros(n_dst)
-            ConservativeRegridding.regrid!(dst_vals, regridder, src_vals)
-            covered_dst = (regridder.dst_areas .> 0) .& (vec(sum(A, dims=2)) .> 0)
-            max_dev = maximum(abs.(dst_vals[covered_dst] .- 1.0))
+    # Forward: src → dst
+    @testset let direction = :forward, src_covers_globe = src_global
+        src_vals = ones(n_src)
+        dst_vals = zeros(n_dst)
+        ConservativeRegridding.regrid!(dst_vals, R, src_vals)
+        covered = vec(sum(A, dims=2)) .> 0
+        if src_global
+            max_dev = maximum(abs.(dst_vals[covered] .- 1.0); init=0.0)
             @test max_dev < atol
+        else
+            max_val = maximum(dst_vals[covered]; init=0.0)
+            @test max_val < 1.0 + atol
         end
+    end
 
-        if test_backward
-            # Backward: ones(n_dst) → src via transpose
-            dst_vals2 = ones(n_dst)
-            src_vals2 = zeros(n_src)
-            ConservativeRegridding.regrid!(src_vals2, transpose(regridder), dst_vals2)
-            covered_src = (regridder.src_areas .> 0) .& (vec(sum(A, dims=1)) .> 0)
-            max_dev_bwd = maximum(abs.(src_vals2[covered_src] .- 1.0))
-            @test max_dev_bwd < atol
+    # Backward: dst → src via transpose
+    # In the backward direction the "source" of the regrid is the dst grid of R,
+    # so dst_global determines the check.
+    @testset let direction = :backward, src_covers_globe = dst_global
+        dst_vals = ones(n_dst)
+        src_vals = zeros(n_src)
+        ConservativeRegridding.regrid!(src_vals, transpose(R), dst_vals)
+        covered = vec(sum(A, dims=1)) .> 0
+        if dst_global
+            max_dev = maximum(abs.(src_vals[covered] .- 1.0); init=0.0)
+            @test max_dev < atol
+        else
+            max_val = maximum(src_vals[covered]; init=0.0)
+            @test max_val < 1.0 + atol
         end
     end
 end
@@ -85,68 +94,40 @@ climacore_g = CommonSpaces.CubedSphereSpace(;
 )
 
 # ---------------------------------------------------------------------------
-# Tests: 10 regridders, forward + backward where feasible
+# Grid registry and test pairs
+# ---------------------------------------------------------------------------
+
+grids = [
+    (name = "LonLat(90×45)",       grid = lonlat,       global_coverage = true),
+    (name = "LonLat(180×90)",      grid = lonlat_fine,  global_coverage = true),
+    (name = "TripolarF(120×60)",   grid = tripolar_f,   global_coverage = false),
+    (name = "TripolarC(120×60)",   grid = tripolar_c,   global_coverage = false),
+    (name = "Healpix(Nested,16)",  grid = healpix_n,    global_coverage = true),
+    (name = "Healpix(Ring,16)",    grid = healpix_r,    global_coverage = true),
+    (name = "ClimaCore(regular)",  grid = climacore_r,  global_coverage = true),
+    (name = "ClimaCore(Gilbert)",  grid = climacore_g,  global_coverage = true),
+]
+
+# ---------------------------------------------------------------------------
+# Tests: all spherical grid pairs
 # ---------------------------------------------------------------------------
 
 @testset "Constant-field regridding" begin
-
-    # --- Hub tests: LonLat(90×45) as central grid ---
-    # Tripolar tests: the forward direction (tripolar → lonlat) has inherent
-    # polar coverage gaps in the spatial tree search at any resolution, so
-    # only the backward direction (lonlat → tripolar) is tested.  The
-    # backward direction verifies the original issue #63 scenario.
-
-    @testset "Hub: LonLat → TripolarF" begin
-        R = ConservativeRegridding.Regridder(lonlat, tripolar_f)
-        test_constant_field("backward", R; test_forward=false)
+    for i in 1:length(grids), j in (i+1):length(grids)
+        d = grids[i]
+        s = grids[j]
+        @testset "$(d.name) ↔ $(s.name)" begin
+            R = ConservativeRegridding.Regridder(GO.Spherical(), d.grid, s.grid)
+            test_constant_regrid(R, s.global_coverage, d.global_coverage)
+        end
     end
+end
 
-    @testset "Hub: LonLat → TripolarC" begin
-        R = ConservativeRegridding.Regridder(lonlat, tripolar_c)
-        test_constant_field("backward", R; test_forward=false)
-    end
+# ---------------------------------------------------------------------------
+# Planar tests (separate section)
+# ---------------------------------------------------------------------------
 
-    @testset "Hub: LonLat ↔ Healpix(Nested)" begin
-        R = ConservativeRegridding.Regridder(GO.Spherical(), lonlat, healpix_n)
-        test_constant_field("forward & backward", R)
-    end
-
-    @testset "Hub: LonLat ↔ Healpix(Ring)" begin
-        R = ConservativeRegridding.Regridder(GO.Spherical(), lonlat, healpix_r)
-        test_constant_field("forward & backward", R)
-    end
-
-    @testset "Hub: LonLat ↔ ClimaCore(regular)" begin
-        R = ConservativeRegridding.Regridder(GO.Spherical(), lonlat, climacore_r)
-        test_constant_field("forward & backward", R)
-    end
-
-    @testset "Hub: LonLat ↔ ClimaCore(Gilbert)" begin
-        R = ConservativeRegridding.Regridder(GO.Spherical(), lonlat, climacore_g)
-        test_constant_field("forward & backward", R)
-    end
-
-    # --- Self-type tests ---
-
-    @testset "Self: LonLat ↔ LonLat" begin
-        R = ConservativeRegridding.Regridder(lonlat, lonlat_fine)
-        test_constant_field("forward & backward", R)
-    end
-
-    @testset "Self: Rectilinear ↔ Rectilinear" begin
-        R = ConservativeRegridding.Regridder(rect_a, rect_b; threaded=false)
-        test_constant_field("forward & backward", R)
-    end
-
-    # --- Cross-grid non-hub tests ---
-
-    @testset "Cross: Healpix(Ring) ↔ ClimaCore(Gilbert)" begin
-        R = ConservativeRegridding.Regridder(GO.Spherical(), healpix_r, climacore_g)
-        test_constant_field("forward & backward", R)
-    end
-
-    @testset "Cross: ClimaCore(regular) ↔ Healpix(Nested)" begin
-        R = ConservativeRegridding.Regridder(GO.Spherical(), climacore_r, healpix_n)
-        test_constant_field("forward & backward", R)
-    end
+@testset "Constant-field regridding (planar)" begin
+    R = ConservativeRegridding.Regridder(rect_a, rect_b; threaded=false)
+    test_constant_regrid(R, true, true)
 end
