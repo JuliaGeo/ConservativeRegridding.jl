@@ -4,6 +4,7 @@ using Test, SafeTestsets
     @safetestset "Integration: Simple Regridding" begin include("usecases/simple.jl") end
     @safetestset "Integration: Oceananigans" begin include("usecases/oceananigans.jl") end
     @safetestset "Integration: ClimaCore" begin include("usecases/climacore.jl") end
+    @safetestset "Integration: Constant Field" begin include("usecases/constant_field.jl") end
 
     # This test is erroring so it's commented out for now
 
