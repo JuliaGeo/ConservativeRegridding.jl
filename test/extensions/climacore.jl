@@ -18,16 +18,16 @@ const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeReg
     )
 
     # Define a field on the first space, to use as our source field
-    field = Fields.coordinate_field(cubedsphere_space).long
-    ones_field = Fields.ones(cubedsphere_space)
+    field = Fields.coordinate_field(cubedsphere_space).long .+ 180
+    ones_field = ones(cubedsphere_space)
     cubed_sphere_vals = zeros(6*cubedsphere_space.grid.topology.mesh.ne^2)
     ClimaCoreExt.get_value_per_element!(cubed_sphere_vals, field, ones_field)
 
     @testset "integrate_each_element" begin
         @test isapprox(
-            sum(ClimaCoreExt.integrate_each_element(field)),
-            sum(field),
-            rtol = 1e-11
+            sum(ClimaCoreExt.integrate_each_element(field)), 
+            sum(field), 
+            rtol = 1e-11 # atol was failing
         )
         @test sum(ClimaCoreExt.integrate_each_element(ones_field)) ≈ sum(ones_field)
     end

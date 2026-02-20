@@ -51,6 +51,8 @@ ncells(grid::ExplicitPolygonGrid, dim::Int) = size(grid.polygons, dim)
 
 A grid that is built from a matrix of corner points.  This is more optimized than [`ExplicitPolygonGrid`](@ref)
 because it knows the corner points of each polygon.
+
+For a cell based grid with n by m cells, the points matrix will have n+1 by m+1 points.
 """
 struct CellBasedGrid{M <: GOCore.Manifold, PointMatrixType <: AbstractMatrix} <: AbstractCurvilinearGrid
     manifold::M

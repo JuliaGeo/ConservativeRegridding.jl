@@ -1,11 +1,12 @@
 module ConservativeRegriddingOceananigansExt
 
 using Oceananigans
-using Oceananigans.Grids: ξnode, ηnode
+using Oceananigans.Grids: ξnode, ηnode, RightFaceFolded, RightCenterFolded
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Architectures: CPU
 
 using ConservativeRegridding
+using ConservativeRegridding: Regridder, ExampleFieldFunction
 using ConservativeRegridding.Trees
 
 using ConservativeRegridding: Regridder, ExampleFieldFunction
@@ -37,7 +38,32 @@ function compute_cell_matrix(grid::Oceananigans.Grids.AbstractGrid)
 
     # Not GPU compatible so we need to move the grid on the CPU
     cpu_grid = on_architecture(CPU(), grid)
-    _compute_cell_matrix!(cell_matrix, Nx, Ny, ℓx, ℓy, cpu_grid)
+    _compute_cell_matrix!(cell_matrix, Nx+1, Ny+1, ℓx, ℓy, cpu_grid)
+
+    return on_architecture(arch, cell_matrix)
+end
+
+# An FPivot Tripolar grid has a `RightFaceFolded` topology: the fold is at `Face` nodes,
+# which means there is an extra line of Face nodes at the north boundary.
+# The prognostic domain for fields `Center`ed in `y` ends at `Ny-1`.
+const FPivotTripolarGrid = Oceananigans.OrthogonalSphericalShellGrids.TripolarGrid{<:Any, <:Any, RightFaceFolded}
+
+function compute_cell_matrix(grid::FPivotTripolarGrid)
+    Nx, Ny, _ = size(grid)
+    ℓx, ℓy    = Center(), Center()
+
+    if isnothing(ℓx) || isnothing(ℓy)
+        error("cell_matrix can only be computed for fields with non-nothing horizontal location.")
+    end
+
+    arch = grid.architecture
+    FT = eltype(grid)
+
+    cell_matrix = Array{Tuple{FT, FT}}(undef, Nx+1, Ny)
+
+    # Not GPU compatible so we need to move the grid on the CPU
+    cpu_grid = on_architecture(CPU(), grid)
+    _compute_cell_matrix!(cell_matrix, Nx+1, Ny, ℓx, ℓy, cpu_grid)
 
     return on_architecture(arch, cell_matrix)
 end
@@ -45,8 +71,8 @@ end
 flip(::Face) = Center()
 flip(::Center) = Face()
 
-function _compute_cell_matrix!(cell_matrix, Nx, Ny, ℓx, ℓy, grid)
-    for i in 1:Nx+1, j in 1:Ny+1
+function _compute_cell_matrix!(cell_matrix, Fx, Fy, ℓx, ℓy, grid)
+    for i in 1:Fx, j in 1:Fy
         vx = flip(ℓx)
         vy = flip(ℓy)
 
@@ -59,6 +85,48 @@ end
 
 
 # Define the ConservativeRegridding interface for Oceananigans grids.
+
+function Trees.treeify(
+    manifold::GOCore.Spherical,
+    grid::Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Oceananigans.RightCenterFolded}
+)
+    # Compute the matrix of vertices - for an n×m grid, this is an (n+1)×(m+1) matrix of vertices.
+    cells_longlat = compute_cell_matrix(grid)
+    cells_unitspherical = GO.UnitSphereFromGeographic().(cells_longlat)
+
+    Nx = size(cells_unitspherical, 1) - 1
+    Ny = size(cells_unitspherical, 2) - 1
+    Nhalf = Nx ÷ 2
+    @assert iseven(Nx) "RightFaceFolded requires even number of cells in x"
+
+    # 1. Rest of grid: all rows except the fold row → Nx × (Ny-1) cells
+    rest_vertices = cells_unitspherical[:, 1:Ny]
+    rest_grid = Trees.CellBasedGrid(manifold, rest_vertices)
+    N_rest = Nx * (Ny - 1)
+
+    # 2. Top arc left half: left half of the fold row → Nhalf × 1 cells
+    left_top_vertices = cells_unitspherical[1:Nhalf+1, Ny:Ny+1]
+    left_top_grid = Trees.CellBasedGrid(manifold, left_top_vertices)
+
+    # 3. Top arc right half: right half of the fold row → Nhalf × 1 cells
+    # The right half of the fold line has its own vertices (at different longitudes
+    # from the left half), so we just slice the vertex matrix directly.
+    right_top_vertices = cells_unitspherical[Nhalf+1:Nx+1, Ny:Ny+1]
+    right_top_grid = Trees.CellBasedGrid(manifold, right_top_vertices)
+
+    # Create index-offset quadtrees for each part
+    rest_tree = Trees.IndexOffsetQuadtreeCursor(rest_grid, 0)
+    left_top_tree = Trees.IndexOffsetQuadtreeCursor(left_top_grid, N_rest)
+    right_top_tree = Trees.IndexOffsetQuadtreeCursor(right_top_grid, N_rest + Nhalf)
+
+    # Combine into a multi-tree; offsets are cumulative cell counts for searchsortedfirst
+    tree = Trees.MultiTreeWrapper(
+        [rest_tree, left_top_tree, right_top_tree],
+        [N_rest, N_rest + Nhalf, N_rest + 2 * Nhalf]
+    )
+
+    return Trees.KnownFullSphereExtentWrapper(tree)
+end
 function Trees.treeify(
     manifold::GOCore.Spherical,
     grid::Oceananigans.Grids.AbstractGrid

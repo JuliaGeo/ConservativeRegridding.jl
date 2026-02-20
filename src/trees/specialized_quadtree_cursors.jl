@@ -2,44 +2,46 @@ import GeometryOps as GO
 
 
 #=
-## FaceAwareQuadtreeCursor
+## IndexOffsetQuadtreeCursor
 
-This assumes all faces have the same size, and is so able 
-to provide and accept global indices for polygons instead
-of face-local ones.
+Provides and accepts global indices for polygons by applying
+an `index_offset` to the grid-local linear indices. This is
+useful for multi-grid scenarios (e.g., cubed sphere faces)
+where each sub-grid's indices must be offset into a global
+index space.
 =#
 
-struct FaceAwareQuadtreeCursor{GridType <: Trees.AbstractCurvilinearGrid} <: Trees.AbstractQuadtreeCursor
+struct IndexOffsetQuadtreeCursor{GridType <: Trees.AbstractCurvilinearGrid} <: Trees.AbstractQuadtreeCursor
     grid::GridType
     leafranges::NTuple{2, UnitRange{Int}}
-    face_idx::Int
+    index_offset::Int
 end
-function FaceAwareQuadtreeCursor(grid::Trees.AbstractCurvilinearGrid, face_idx)
-    return FaceAwareQuadtreeCursor(grid, (1:Trees.ncells(grid, 1), 1:Trees.ncells(grid, 2)), face_idx)
-end
-
-Trees.getgrid(q::FaceAwareQuadtreeCursor) = q.grid
-
-function Base.show(io::IO, q::FaceAwareQuadtreeCursor)
-    print(io, "FaceAwareQuadtreeCursor(($(q.leafranges[1])), ($(q.leafranges[2])))")
-end
-function Base.show(io::IO, ::MIME"text/plain", q::FaceAwareQuadtreeCursor)
-    print(io, "FaceAwareQuadtreeCursor(($(q.leafranges[1])), ($(q.leafranges[2])))")
+function IndexOffsetQuadtreeCursor(grid::Trees.AbstractCurvilinearGrid, index_offset)
+    return IndexOffsetQuadtreeCursor(grid, (1:Trees.ncells(grid, 1), 1:Trees.ncells(grid, 2)), index_offset)
 end
 
-STI.isspatialtree(::Type{<: FaceAwareQuadtreeCursor}) = true
+Trees.getgrid(q::IndexOffsetQuadtreeCursor) = q.grid
 
-function STI.isleaf(q::FaceAwareQuadtreeCursor)
+function Base.show(io::IO, q::IndexOffsetQuadtreeCursor)
+    print(io, "IndexOffsetQuadtreeCursor(($(q.leafranges[1])), ($(q.leafranges[2])))")
+end
+function Base.show(io::IO, ::MIME"text/plain", q::IndexOffsetQuadtreeCursor)
+    print(io, "IndexOffsetQuadtreeCursor(($(q.leafranges[1])), ($(q.leafranges[2])))")
+end
+
+STI.isspatialtree(::Type{<: IndexOffsetQuadtreeCursor}) = true
+
+function STI.isleaf(q::IndexOffsetQuadtreeCursor)
     return all(length.(q.leafranges) .<= 2)
 end
 
-function STI.child_indices_extents(q::FaceAwareQuadtreeCursor)
-    idxs = (Trees.cartesian_to_linear_idx(q.grid, CartesianIndex(i, j)) + (q.face_idx - 1) * Trees.ncells(q.grid, 1) * Trees.ncells(q.grid, 2) for i in q.leafranges[1], j in q.leafranges[2])
+function STI.child_indices_extents(q::IndexOffsetQuadtreeCursor)
+    idxs = (Trees.cartesian_to_linear_idx(q.grid, CartesianIndex(i, j)) + q.index_offset for i in q.leafranges[1], j in q.leafranges[2])
     extents = (Trees.cell_range_extent(q.grid, i:i, j:j) for i in q.leafranges[1], j in q.leafranges[2])
     return zip(idxs, extents)
 end
 
-function STI.nchild(q::FaceAwareQuadtreeCursor)
+function STI.nchild(q::IndexOffsetQuadtreeCursor)
     i_is_one = length(q.leafranges[1]) == 1 # length-1 in i
     j_is_one = length(q.leafranges[2]) == 1 # length-1 in j
 
@@ -54,7 +56,7 @@ function STI.nchild(q::FaceAwareQuadtreeCursor)
     end
 end
 
-function STI.getchild(q::FaceAwareQuadtreeCursor, i::Int)
+function STI.getchild(q::IndexOffsetQuadtreeCursor, i::Int)
     i_is_one = length(q.leafranges[1]) == 1 # length-1 in i
     j_is_one = length(q.leafranges[2]) == 1 # length-1 in j
 
@@ -63,60 +65,60 @@ function STI.getchild(q::FaceAwareQuadtreeCursor, i::Int)
     elseif i_is_one
         j_split_point = length(q.leafranges[2]) ÷ 2
         (
-            FaceAwareQuadtreeCursor(q.grid, (q.leafranges[1], q.leafranges[2][1:j_split_point]), q.face_idx),
-            FaceAwareQuadtreeCursor(q.grid, (q.leafranges[1], q.leafranges[2][j_split_point+1:end]), q.face_idx)
+            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1], q.leafranges[2][1:j_split_point]), q.index_offset),
+            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1], q.leafranges[2][j_split_point+1:end]), q.index_offset)
         )
     elseif j_is_one
         i_split_point = length(q.leafranges[1]) ÷ 2
-        (   
-            FaceAwareQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2]), q.face_idx),
-            FaceAwareQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2]), q.face_idx)
+        (
+            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2]), q.index_offset),
+            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2]), q.index_offset)
         )
     else
         i_split_point = length(q.leafranges[1]) ÷ 2
         j_split_point = length(q.leafranges[2]) ÷ 2
         (
-            FaceAwareQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2][1:j_split_point]), q.face_idx),
-            FaceAwareQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2][j_split_point+1:end]), q.face_idx),
-            FaceAwareQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2][1:j_split_point]), q.face_idx),
-            FaceAwareQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2][j_split_point+1:end]), q.face_idx)
+            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2][1:j_split_point]), q.index_offset),
+            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2][j_split_point+1:end]), q.index_offset),
+            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2][1:j_split_point]), q.index_offset),
+            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2][j_split_point+1:end]), q.index_offset)
         )
     end
     return vals[i]
 end
 
-function STI.getchild(q::FaceAwareQuadtreeCursor)
+function STI.getchild(q::IndexOffsetQuadtreeCursor)
     return (STI.getchild(q, i) for i in 1:STI.nchild(q))
 end
 
-function STI.node_extent(q::FaceAwareQuadtreeCursor)
+function STI.node_extent(q::IndexOffsetQuadtreeCursor)
     return Trees.cell_range_extent(q.grid, q.leafranges[1], q.leafranges[2])
 end
 
-function Trees.getcell(q::FaceAwareQuadtreeCursor)
+function Trees.getcell(q::IndexOffsetQuadtreeCursor)
     return (Trees.getcell(q.grid, ij) for ij in CartesianIndices(q.leafranges))
 end
 
-function Trees.getcell(q::FaceAwareQuadtreeCursor, i::Int)
-    leaf_ij = Trees.linear_to_cartesian_idx(q.grid, i - (q.face_idx - 1) * Trees.ncells(q.grid, 1) * Trees.ncells(q.grid, 2))
-    
+function Trees.getcell(q::IndexOffsetQuadtreeCursor, i::Int)
+    leaf_ij = Trees.linear_to_cartesian_idx(q.grid, i - q.index_offset)
+
     return try
         Trees.getcell(q.grid, leaf_ij)
     catch e
-        @show i q.face_idx
+        @show i q.index_offset
         rethrow(e)
     end
 end
 
-function Trees.ncells(q::FaceAwareQuadtreeCursor, dim::Int)
+function Trees.ncells(q::IndexOffsetQuadtreeCursor, dim::Int)
     return length(q.leafranges[dim])
 end
 
-function Trees.ncells(q::FaceAwareQuadtreeCursor)
+function Trees.ncells(q::IndexOffsetQuadtreeCursor)
     return length.(q.leafranges)
 end
 
-function istoplevel(q::FaceAwareQuadtreeCursor)
+function istoplevel(q::IndexOffsetQuadtreeCursor)
     return length(q.leafranges[1]) == Trees.ncells(q.grid, 1) && length(q.leafranges[2]) == Trees.ncells(q.grid, 2)
 end
 
