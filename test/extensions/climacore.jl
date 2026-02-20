@@ -18,9 +18,10 @@ const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeReg
     )
 
     # Define a field on the first space, to use as our source field
-    field = Fields.coordinate_field(cubedsphere_space).long .+ 180
+    long_climacore = Fields.coordinate_field(cubedsphere_space).long
+    field = @. ifelse(long_climacore < 0, long_climacore + 360, long_climacore)
     ones_field = ones(cubedsphere_space)
-    cubed_sphere_vals = zeros(6*cubedsphere_space.grid.topology.mesh.ne^2)
+    cubed_sphere_vals = zeros(Meshes.nelements(cubedsphere_space.grid.topology.mesh))
     ClimaCoreExt.get_value_per_element!(cubed_sphere_vals, field, ones_field)
 
     @testset "integrate_each_element" begin

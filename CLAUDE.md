@@ -29,8 +29,6 @@ julia --project=docs -e 'using ConservativeRegridding'
 
 The repo uses Julia's workspace feature (`[workspace]` in Project.toml) with separate environments in `test/`, `docs/`, and `examples/`.
 
-**Test dependency note**: `test/Project.toml` pins Oceananigans to a specific fork (`briochemc/Oceananigans.jl` branch `FPivot`). If test instantiation fails on Oceananigans, check this source entry.
-
 ## Architecture
 
 ### Three-Layer Design
