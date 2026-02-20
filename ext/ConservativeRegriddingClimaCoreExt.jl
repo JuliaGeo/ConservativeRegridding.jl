@@ -16,7 +16,10 @@ import ClimaCore
 """
     coords_for_face(mesh::CubedSphereMesh, face_idx)::Matrix{UnitSphericalPoint}
 
-Get the right coordinates for a face of a cubed sphere.
+Get the normalized coordinates of each element vertex for a face of a cubed sphere.
+
+For example, if the cubed sphere has 8 elements in each dimension of a panel (face),
+this function will return a matrix of 9x9 points, each with normalized coordinates.
 """
 function coords_for_face(mesh::Meshes.AbstractCubedSphere, face_idx)
     ne = mesh.ne
@@ -35,11 +38,11 @@ end
 function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology2D{<: ClimaComms.AbstractCommsContext, <: Meshes.AbstractCubedSphere})
     mesh = topology.mesh
     ne = mesh.ne
-    # There are always 6 faces of a cubed sphere - 
+    # There are always 6 faces of a cubed sphere -
     # see the ClimaCore docs on AbstractCubedSphere
     # for an explanation on how they are connected.
     # TODO: set the border elements of each cubed sphere face
-    # explicitly equal to each other, so that there are no numerical 
+    # explicitly equal to each other, so that there are no numerical
     # inaccuracies.
     face_idxs = 1:6
     face_coords = map(i -> coords_for_face(mesh, i), face_idxs)
@@ -55,7 +58,7 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
         end
     elseif topology.elemorder isa Vector{CartesianIndex{3}} # Some sort of space filling curve
         lin2carts = map.(
-            i -> CartesianIndex((i[1], i[2])), 
+            i -> CartesianIndex((i[1], i[2])),
             Iterators.partition(topology.elemorder, length(topology.elemorder) ÷ 6)
         )
         cart2lins = map(enumerate(lin2carts)) do (face_idx, face_indices)
@@ -70,9 +73,9 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
             Trees.IndexLocalizerRewrapperTree(
                 Trees.ReorderedTopDownQuadtreeCursor(
                     Trees.CellBasedGrid(
-                        GO.Spherical(; radius = mesh.domain.radius), 
+                        GO.Spherical(; radius = mesh.domain.radius),
                         coords
-                    ), 
+                    ),
                     Trees.Reorderer2D(cart2lin, lin2cart)
                 ),
                 (face_idx - 1) * ne^2
