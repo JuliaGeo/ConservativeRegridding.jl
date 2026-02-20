@@ -16,7 +16,10 @@ import ClimaCore
 """
     coords_for_face(mesh::CubedSphereMesh, face_idx)::Matrix{UnitSphericalPoint}
 
-Get the right coordinates for a face of a cubed sphere.
+Get the normalized coordinates of each element vertex for a face of a cubed sphere.
+
+For example, if the cubed sphere has 8 elements in each dimension of a panel (face),
+this function will return a matrix of 9x9 points, each with normalized coordinates.
 """
 function coords_for_face(mesh::Meshes.AbstractCubedSphere, face_idx)
     ne = mesh.ne
