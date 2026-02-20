@@ -222,45 +222,13 @@ function Trees.treeify(
     manifold::GOCore.Spherical,
     grid::FPivotTripolarGrid
 )
-    Nx, Ny, _ = size(grid)
-    # The FPivot-specific compute_cell_matrix returns (Nx+1, Ny) which excludes
-    # the fold Face row at j=Ny+1.  Compute the full (Nx+1, Ny+1) vertex matrix
-    # so we can build a tree with all Nx×Ny cells.
-    FT = eltype(grid)
-    cell_matrix = Array{Tuple{FT, FT}}(undef, Nx+1, Ny+1)
-    cpu_grid = on_architecture(CPU(), grid)
-    _compute_cell_matrix!(cell_matrix, Nx+1, Ny+1, Center(), Center(), cpu_grid)
-
-    cells_unitspherical = GO.UnitSphereFromGeographic().(cell_matrix)
-
-    Nhalf = Nx ÷ 2
-    @assert iseven(Nx) "RightFaceFolded requires even number of cells in x"
-
-    # 1. Rest of grid: all rows except the fold row → Nx × (Ny-1) cells
-    rest_vertices = cells_unitspherical[:, 1:Ny]
-    rest_grid = Trees.CellBasedGrid(manifold, rest_vertices)
-    N_rest = Nx * (Ny - 1)
-
-    # 2. Fold row: split into left and right halves so the quadtree descent
-    #    doesn't mix cells from opposite sides of the fold.
-    #    Unlike RightCenterFolded, RightFaceFolded fold cells are NOT exact
-    #    duplicates, so all cells are real (no ghost padding needed).
-    left_top_vertices = cells_unitspherical[1:Nhalf+1, Ny:Ny+1]
-    left_top_grid = Trees.CellBasedGrid(manifold, left_top_vertices)
-
-    right_top_vertices = cells_unitspherical[Nhalf+1:Nx+1, Ny:Ny+1]
-    right_top_grid = Trees.CellBasedGrid(manifold, right_top_vertices)
-
-    # Wrap all sub-trees in KnownFullSphereExtentWrapper
-    rest_tree = Trees.KnownFullSphereExtentWrapper(Trees.IndexOffsetQuadtreeCursor(rest_grid, 0))
-    left_top_tree = Trees.KnownFullSphereExtentWrapper(Trees.IndexOffsetQuadtreeCursor(left_top_grid, N_rest))
-    right_top_tree = Trees.KnownFullSphereExtentWrapper(Trees.IndexOffsetQuadtreeCursor(right_top_grid, N_rest + Nhalf))
-
-    tree = Trees.MultiTreeWrapper(
-        [rest_tree, left_top_tree, right_top_tree],
-        [N_rest, N_rest + Nhalf, N_rest + 2 * Nhalf]
-    )
-
+    # compute_cell_matrix for FPivotTripolarGrid returns (Nx+1, Ny) which
+    # excludes the diagnostic fold row, giving Nx*(Ny-1) cells matching
+    # the interior size of Center-Center fields in released Oceananigans.
+    cells_longlat = compute_cell_matrix(grid)
+    cells_unitspherical = GO.UnitSphereFromGeographic().(cells_longlat)
+    cbg = Trees.CellBasedGrid(manifold, cells_unitspherical)
+    tree = Trees.TopDownQuadtreeCursor(cbg)
     return Trees.KnownFullSphereExtentWrapper(tree)
 end
 function Trees.treeify(

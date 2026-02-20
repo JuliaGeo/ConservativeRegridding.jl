@@ -62,12 +62,12 @@ latlon_grid = LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), lati
     ClimaCoreExt.set_value_per_element!(field_remapped, cubed_sphere_vals)
 
     # Check that the integral over the space is conserved
-    # TODO broken: -2 vs -4
-    @test_broken isapprox(
-        sum(field),
-        sum(field_remapped),
-        rtol = 1e-6,
-    )
+    # Fails on macOS aarch64 due to platform-specific FP differences in LibGEOS
+    if Sys.isapple() && Sys.ARCH === :aarch64
+        @test_broken isapprox(sum(field), sum(field_remapped), rtol = 1e-6)
+    else
+        @test isapprox(sum(field), sum(field_remapped), rtol = 1e-6)
+    end
 end
 
 @testset "Gilbert ordered cubed sphere (with spacefillingcurve)" begin
@@ -120,12 +120,12 @@ end
     ClimaCoreExt.set_value_per_element!(field_remapped, cubed_sphere_vals)
 
     # Check that the integral over the space is conserved
-    # TODO broken: sum(field) = -6.0 vs sum(field_remapped) = -5.0
-    @test_broken isapprox(
-        sum(field),
-        sum(field_remapped),
-        rtol = 1e-10,
-    )
+    # Fails on macOS aarch64 due to platform-specific FP differences in LibGEOS
+    if Sys.isapple() && Sys.ARCH === :aarch64
+        @test_broken isapprox(sum(field), sum(field_remapped), rtol = 1e-10)
+    else
+        @test isapprox(sum(field), sum(field_remapped), rtol = 1e-10)
+    end
 end
 
 @testset "Oceananigans TripolarGrid to ClimaCore cubed sphere (default folding)" begin
