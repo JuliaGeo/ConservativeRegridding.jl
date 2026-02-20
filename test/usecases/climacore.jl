@@ -127,6 +127,68 @@ end
     )
 end
 
+@testset "Oceananigans TripolarGrid to ClimaCore cubed sphere (default folding)" begin
+    tripolar_grid = TripolarGrid(size=(360, 180, 1))
+    cubedsphere_space = CommonSpaces.CubedSphereSpace(;
+        radius = tripolar_grid.radius,
+        n_quad_points = 2,
+        h_elem = 32,
+    )
+
+    # Set the source field to a constant, non-zero value
+    src_tripolar = Field{Center, Center, Nothing}(tripolar_grid)
+    set!(src_tripolar, src_tripolar + 1)
+
+    dst_cubedsphere = zeros(cubedsphere_space)
+    ones_cubedsphere = ones(cubedsphere_space)
+    cubed_sphere_vals = zeros(Meshes.nelements(cubedsphere_space.grid.topology.mesh))
+
+    regridder = ConservativeRegridding.Regridder(cubedsphere_space, tripolar_grid)
+
+    ConservativeRegridding.regrid!(cubed_sphere_vals, regridder, vec(interior(src_tripolar)))
+
+    ClimaCoreExt.set_value_per_element!(dst_cubedsphere, cubed_sphere_vals)
+    @show extrema(dst_cubedsphere) # Should be (1.0, 1.0) but we get (0.0, 1.707097145678124)
+
+    # using ClimaCoreMakie, Makie, CairoMakie
+    # fig = Figure();
+    # ax = Axis(fig[1, 1])
+    # hm = fieldheatmap!(ax, dst_cubedsphere)
+    # Colorbar(fig[:, 2], hm)
+    # fig
+end
+
+@testset "Oceananigans TripolarGrid to ClimaCore cubed sphere (RightFaceFolded)" begin
+    tripolar_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
+    cubedsphere_space = CommonSpaces.CubedSphereSpace(;
+        radius = tripolar_grid.radius,
+        n_quad_points = 2,
+        h_elem = 32,
+    )
+
+    # Set the source field to a constant, non-zero value
+    src_tripolar = Field{Center, Center, Nothing}(tripolar_grid)
+    set!(src_tripolar, src_tripolar + 1)
+
+    dst_cubedsphere = zeros(cubedsphere_space)
+    ones_cubedsphere = ones(cubedsphere_space)
+    cubed_sphere_vals = zeros(Meshes.nelements(cubedsphere_space.grid.topology.mesh))
+
+    regridder = ConservativeRegridding.Regridder(cubedsphere_space, tripolar_grid)
+
+    ConservativeRegridding.regrid!(cubed_sphere_vals, regridder, vec(interior(src_tripolar)))
+
+    ClimaCoreExt.set_value_per_element!(dst_cubedsphere, cubed_sphere_vals)
+    @show extrema(dst_cubedsphere) # Should be (1.0, 1.0) but we get (0.0, 1.000000000000019)
+
+    # using ClimaCoreMakie, Makie, CairoMakie
+    # fig = Figure();
+    # ax = Axis(fig[1, 1])
+    # hm = fieldheatmap!(ax, dst_cubedsphere)
+    # Colorbar(fig[:, 2], hm)
+    # fig
+end
+
 # Get metrics
 
 # ## Metrics
