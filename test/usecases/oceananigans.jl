@@ -34,7 +34,7 @@ using Oceananigans
     @test mean(dst) ≈ mean(src) rtol=1e-5
 end
 
-@testset "Tripolar to lat-long" begin
+@testset "Tripolar (FPivot / RightFaceFolded) to lat-long" begin
     dst_grid = LatitudeLongitudeGrid(size=(360, 180, 1),   longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
     src_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
 
@@ -52,7 +52,30 @@ end
 
     set!(src, (x, y, z) -> rand())
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
-    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-5
+    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+end
+
+@testset "Tripolar (UPivot / RightCenterFolded) to lat-long" begin
+    dst_grid = LatitudeLongitudeGrid(size=(360, 180, 1),   longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+    src_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightCenterFolded)
+
+    dst = CenterField(dst_grid)
+    src = CenterField(src_grid)
+
+    regridder = ConservativeRegridding.Regridder(dst, src)
+
+    set!(src, (x, y, z) -> abs(x))
+    set!(dst, (x, y, z) -> 0)
+
+    ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+
+    # The tests on a `RightCenterFolded` grid have a lower relative tolerance because of the extra 
+    # half row thatis repeated at the top of the domain
+    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+
+    set!(src, (x, y, z) -> rand())
+    ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
 end
 
 @testset "Rectilinear (planar) upscaling" begin

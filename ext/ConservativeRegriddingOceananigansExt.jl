@@ -1,14 +1,13 @@
 module ConservativeRegriddingOceananigansExt
 
 using Oceananigans
-using Oceananigans.Grids: ξnode, ηnode
+using Oceananigans.Grids: ξnode, ηnode, RightFaceFolded, RightCenterFolded
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Architectures: CPU
 
 using ConservativeRegridding
-using ConservativeRegridding.Trees
-
 using ConservativeRegridding: Regridder, ExampleFieldFunction
+using ConservativeRegridding.Trees
 
 import GeoInterface as GI
 import GeometryOps as GO
@@ -37,7 +36,32 @@ function compute_cell_matrix(grid::Oceananigans.Grids.AbstractGrid)
 
     # Not GPU compatible so we need to move the grid on the CPU
     cpu_grid = on_architecture(CPU(), grid)
-    _compute_cell_matrix!(cell_matrix, Nx, Ny, ℓx, ℓy, cpu_grid)
+    _compute_cell_matrix!(cell_matrix, Nx+1, Ny+1, ℓx, ℓy, cpu_grid)
+
+    return on_architecture(arch, cell_matrix)
+end
+
+# An FPivot Tripolar grid has a `RightFaceFolded` topology: the fold is at `Face` nodes,
+# which means there is an extra line of Face nodes at the north boundary.
+# The prognostic domain for fields `Center`ed in `y` ends at `Ny-1`.
+const FPivotTripolarGrid = Oceananigans.OrthogonalSphericalShellGrids.TripolarGrid{<:Any, <:Any, RightFaceFolded}
+
+function compute_cell_matrix(grid::FPivotTripolarGrid)
+    Nx, Ny, _ = size(grid)
+    ℓx, ℓy    = Center(), Center()
+
+    if isnothing(ℓx) || isnothing(ℓy)
+        error("cell_matrix can only be computed for fields with non-nothing horizontal location.")
+    end
+
+    arch = grid.architecture
+    FT = eltype(grid)
+
+    cell_matrix = Array{Tuple{FT, FT}}(undef, Nx+1, Ny)
+
+    # Not GPU compatible so we need to move the grid on the CPU
+    cpu_grid = on_architecture(CPU(), grid)
+    _compute_cell_matrix!(cell_matrix, Nx+1, Ny, ℓx, ℓy, cpu_grid)
 
     return on_architecture(arch, cell_matrix)
 end
@@ -45,8 +69,8 @@ end
 flip(::Face) = Center()
 flip(::Center) = Face()
 
-function _compute_cell_matrix!(cell_matrix, Nx, Ny, ℓx, ℓy, grid)
-    for i in 1:Nx+1, j in 1:Ny+1
+function _compute_cell_matrix!(cell_matrix, Fx, Fy, ℓx, ℓy, grid)
+    for i in 1:Fx, j in 1:Fy
         vx = flip(ℓx)
         vy = flip(ℓy)
 
@@ -58,7 +82,135 @@ function _compute_cell_matrix!(cell_matrix, Nx, Ny, ℓx, ℓy, grid)
 end
 
 
+using StaticArrays
+
+"""
+    PaddedTreeWrapper(tree, n_padding, padding_polygon, index_offset)
+
+Wraps a spatial tree and adds `n_padding` ghost cells after the real cells.
+Ghost cells return `padding_polygon` from `getcell` and have zero area.
+They do NOT participate in the spatial tree traversal (dual DFS won't find them
+as candidates), ensuring they don't contribute to intersection computations.
+
+This is used for TripolarGrid fold rows where duplicate cells must be present
+for dimension matching but should not contribute to intersections.
+"""
+struct PaddedTreeWrapper{T, P} <: Trees.AbstractTreeWrapper
+    tree::T
+    n_padding::Int
+    padding_polygon::P
+    index_offset::Int
+end
+
+Base.parent(w::PaddedTreeWrapper) = w.tree
+
+# Override ncells to include padding
+function Trees.ncells(w::PaddedTreeWrapper)
+    real = Trees.ncells(parent(w))
+    return (real[1] + w.n_padding, real[2])
+end
+
+function Trees.ncells(w::PaddedTreeWrapper, dim::Int)
+    if dim == 1
+        return Trees.ncells(parent(w), 1) + w.n_padding
+    else
+        return Trees.ncells(parent(w), dim)
+    end
+end
+
+# Override getcell(w, i) for individual cell access
+function Trees.getcell(w::PaddedTreeWrapper, i::Int)
+    local_i = i - w.index_offset
+    n_real = prod(Trees.ncells(parent(w)))
+    if local_i <= n_real
+        return Trees.getcell(parent(w), i)
+    else
+        return w.padding_polygon
+    end
+end
+
+# Override getcell(w) for iteration over all cells (including ghost)
+function Trees.getcell(w::PaddedTreeWrapper)
+    real_cells = Trees.getcell(parent(w))
+    ghost_cells = (w.padding_polygon for _ in 1:w.n_padding)
+    return Iterators.flatten((real_cells, ghost_cells))
+end
+
 # Define the ConservativeRegridding interface for Oceananigans grids.
+
+function Trees.treeify(
+    manifold::GOCore.Spherical,
+    grid::Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Oceananigans.RightCenterFolded}
+)
+    # Compute the matrix of vertices - for an n×m grid, this is an (n+1)×(m+1) matrix of vertices.
+    cells_longlat = compute_cell_matrix(grid)
+    cells_unitspherical = GO.UnitSphereFromGeographic().(cells_longlat)
+
+    Nx = size(cells_unitspherical, 1) - 1
+    Ny = size(cells_unitspherical, 2) - 1
+    Nhalf = Nx ÷ 2
+    @assert iseven(Nx) "RightFaceFolded requires even number of cells in x"
+
+    # 1. Rest of grid: all rows except the fold row → Nx × (Ny-1) cells
+    rest_vertices = cells_unitspherical[:, 1:Ny]
+    rest_grid = Trees.CellBasedGrid(manifold, rest_vertices)
+    N_rest = Nx * (Ny - 1)
+
+    # 2. Fold row halves.
+    #    In a RightCenterFolded grid, each fold half has a within-half duplication:
+    #    cell i and cell (Nhalf+1-i) are the same physical quadrilateral (their
+    #    bottom vertices coincide with the other's top vertices due to the fold
+    #    geometry).  We keep only the first Nquarter = Nhalf÷2 cells as real
+    #    polygons in the spatial tree and add the remaining duplicate cells as
+    #    ghost cells via PaddedTreeWrapper.  Ghost cells exist for dimension
+    #    matching (the source field has Nhalf cells per fold half) but are never
+    #    reached during the dual DFS, so they contribute nothing to intersections.
+    Nquarter = Nhalf ÷ 2
+
+    # Build CellBasedGrids with only the unique cells (Nquarter per half)
+    left_real_grid = Trees.CellBasedGrid(manifold, cells_unitspherical[1:Nquarter+1, Ny:Ny+1])
+    right_real_grid = Trees.CellBasedGrid(manifold, cells_unitspherical[Nhalf+1:Nhalf+Nquarter+1, Ny:Ny+1])
+
+    # Create degenerate polygon for ghost cells (all vertices at the same point)
+    p = cells_unitspherical[1, Ny]
+    ghost_polygon = GI.Polygon(SA[GI.LinearRing(SA[p, p, p, p, p])])
+
+    # Build quadtree cursors over only the real cells, then wrap with
+    # PaddedTreeWrapper to add ghost cells for dimension matching.
+    # Ghost cells are never in the spatial tree → never intersection candidates.
+    left_cursor = Trees.IndexOffsetQuadtreeCursor(left_real_grid, N_rest)
+    left_padded = PaddedTreeWrapper(left_cursor, Nquarter, ghost_polygon, N_rest)
+
+    right_cursor = Trees.IndexOffsetQuadtreeCursor(right_real_grid, N_rest + Nhalf)
+    right_padded = PaddedTreeWrapper(right_cursor, Nquarter, ghost_polygon, N_rest + Nhalf)
+
+    # Wrap all sub-trees in KnownFullSphereExtentWrapper so their top-level extents
+    # don't cause the dual DFS to incorrectly prune candidate pairs.
+    rest_tree = Trees.KnownFullSphereExtentWrapper(Trees.IndexOffsetQuadtreeCursor(rest_grid, 0))
+    left_top_tree = Trees.KnownFullSphereExtentWrapper(left_padded)
+    right_top_tree = Trees.KnownFullSphereExtentWrapper(right_padded)
+
+    # Combine into a multi-tree; offsets are cumulative cell counts for searchsortedfirst
+    tree = Trees.MultiTreeWrapper(
+        [rest_tree, left_top_tree, right_top_tree],
+        [N_rest, N_rest + Nhalf, N_rest + 2 * Nhalf]
+    )
+
+    return Trees.KnownFullSphereExtentWrapper(tree)
+end
+function Trees.treeify(
+    manifold::GOCore.Spherical,
+    grid::FPivotTripolarGrid
+)
+    # compute_cell_matrix for FPivotTripolarGrid returns (Nx+1, Ny) which
+    # excludes the diagnostic fold row, giving Nx*(Ny-1) cells matching
+    # the interior size of Center-Center fields in released Oceananigans.
+    cells_longlat = compute_cell_matrix(grid)
+    cells_unitspherical = GO.UnitSphereFromGeographic().(cells_longlat)
+    cbg = Trees.CellBasedGrid(manifold, cells_unitspherical)
+    tree = Trees.TopDownQuadtreeCursor(cbg)
+    return Trees.KnownFullSphereExtentWrapper(tree)
+end
 function Trees.treeify(
     manifold::GOCore.Spherical,
     grid::Oceananigans.Grids.AbstractGrid
