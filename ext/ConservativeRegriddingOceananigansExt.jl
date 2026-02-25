@@ -165,31 +165,11 @@ function Trees.treeify(
     #    ghost cells via PaddedTreeWrapper.  Ghost cells exist for dimension
     #    matching (the source field has Nhalf cells per fold half) but are never
     #    reached during the dual DFS, so they contribute nothing to intersections.
-    #    We use ExplicitPolygonGrid (not CellBasedGrid) so that each cell's
-    #    polygon is independent.
     Nquarter = Nhalf ÷ 2
 
-    # Build ExplicitPolygonGrids with only the unique cells (Nquarter per half)
-    left_polys = Matrix{GI.Polygon}(undef, Nquarter, 1)
-    for k in 1:Nquarter
-        left_polys[k, 1] = GI.Polygon(SA[GI.LinearRing(SA[
-            cells_unitspherical[k, Ny], cells_unitspherical[k+1, Ny],
-            cells_unitspherical[k+1, Ny+1], cells_unitspherical[k, Ny+1],
-            cells_unitspherical[k, Ny]
-        ])])
-    end
-    left_real_grid = Trees.ExplicitPolygonGrid(manifold, left_polys)
-
-    right_polys = Matrix{GI.Polygon}(undef, Nquarter, 1)
-    for k in 1:Nquarter
-        i = Nhalf + k
-        right_polys[k, 1] = GI.Polygon(SA[GI.LinearRing(SA[
-            cells_unitspherical[i, Ny], cells_unitspherical[i+1, Ny],
-            cells_unitspherical[i+1, Ny+1], cells_unitspherical[i, Ny+1],
-            cells_unitspherical[i, Ny]
-        ])])
-    end
-    right_real_grid = Trees.ExplicitPolygonGrid(manifold, right_polys)
+    # Build CellBasedGrids with only the unique cells (Nquarter per half)
+    left_real_grid = Trees.CellBasedGrid(manifold, cells_unitspherical[1:Nquarter+1, Ny:Ny+1])
+    right_real_grid = Trees.CellBasedGrid(manifold, cells_unitspherical[Nhalf+1:Nhalf+Nquarter+1, Ny:Ny+1])
 
     # Create degenerate polygon for ghost cells (all vertices at the same point)
     p = cells_unitspherical[1, Ny]
