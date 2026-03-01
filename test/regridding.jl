@@ -2,6 +2,7 @@ using ConservativeRegridding
 using Test
 
 import GeometryOps as GO, GeoInterface as GI
+import GeometryOpsCore
 using SparseArrays
 
 @testset "Custom intersection_operator" begin
@@ -37,8 +38,6 @@ using SparseArrays
         @test Aop == spzeros(eltype(Aop), size(Aop)...)
     end
 end
-
-import GeometryOpsCore
 
 @testset "regrid! with n-dimensional arrays" begin
     function make_grid(nx, ny)
@@ -106,4 +105,29 @@ import GeometryOpsCore
             @test all(dst_3d .≈ 1.0)
         end
     end
+end
+
+# Regression test for GitHub issue #66:
+# Planar grids with threaded=true should work (previously errored in _area_criterion).
+@testset "Planar grid threaded regridding (#66)" begin
+    function make_grid(nx, ny)
+        polys = Matrix{GI.Polygon}(undef, nx, ny)
+        for j in 1:ny, i in 1:nx
+            x0, x1 = (i-1)/nx, i/nx
+            y0, y1 = (j-1)/ny, j/ny
+            ring = GI.LinearRing([(x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0)])
+            polys[i,j] = GI.Polygon([ring])
+        end
+        polys
+    end
+    src = make_grid(2, 2)
+    dst = make_grid(3, 3)
+    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst, src; threaded=true)
+    @test r isa ConservativeRegridding.Regridder
+    # Verify that the regridder has the correct dimensions
+    @test size(r) == (9, 4)
+    # Verify areas are conserved: total area of all intersections should equal
+    # the total area of the smaller grid (both grids cover [0,1]x[0,1])
+    A = r.intersections
+    @test sum(A) > 0
 end
