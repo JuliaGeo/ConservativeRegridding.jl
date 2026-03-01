@@ -127,7 +127,7 @@ compute the `Extents.Extent` and return it.
 =#
 
 function cell_range_extent(q::ExplicitPolygonGrid{<: GO.Planar}, irange::UnitRange{Int}, jrange::UnitRange{Int})
-    return mapreduce(Extents.union, GI.extent, (getcell(q, i, j) for i in irange, j in jrange))
+    return mapreduce(GI.extent, Extents.union, (getcell(q, i, j) for i in irange, j in jrange))
 end
 
 function cell_range_extent(q::ExplicitPolygonGrid{<: GO.Spherical}, irange::UnitRange{Int}, jrange::UnitRange{Int})

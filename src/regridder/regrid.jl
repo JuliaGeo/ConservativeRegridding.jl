@@ -46,6 +46,19 @@ function regrid!(dst_field::AbstractVector, regridder::Regridder, src_field::Den
     return dst_field
 end
 
+# For n-dimensional arrays, iterate over slices of the first dimension
+function regrid!(dst_field::AbstractArray, regridder::Regridder, src_field::AbstractArray)
+    if ndims(src_field) == 1
+        return regrid!(vec(dst_field), regridder, vec(src_field))
+    end
+    for I in CartesianIndices(axes(src_field)[2:end])
+        src_slice = view(src_field, :, I)
+        dst_slice = view(dst_field, :, I)
+        regrid!(dst_slice, regridder, src_slice)
+    end
+    return dst_field
+end
+
 """$(TYPEDSIGNATURES)
 regrid a vector `src_field` using `regridder`. Area vector for the output grid can
 be passed on as optional argument to prevent recalculating it from the regridder."""
