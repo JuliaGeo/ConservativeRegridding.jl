@@ -14,8 +14,8 @@ d = (A s) / aˢ
 Note that by construction,
 
 ```julia
-aᵈ = sum(A, 2)
-aˢ = sum(A, 1)
+aᵈ = sum(A; dims=2)
+aˢ = sum(A; dims=1)
 ```
 """
 function regrid!(dst_field::DenseVector, regridder::Regridder, src_field::DenseVector)
