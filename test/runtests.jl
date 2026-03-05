@@ -4,7 +4,8 @@ using Test, SafeTestsets
     @safetestset "Integration: Simple Regridding" begin include("usecases/simple.jl") end
     @safetestset "Integration: Oceananigans" begin include("usecases/oceananigans.jl") end
     @safetestset "Integration: ClimaCore" begin include("usecases/climacore.jl") end
-    
+    @safetestset "Integration: Constant Field" begin include("usecases/constant_field.jl") end
+
     # This test is erroring so it's commented out for now
 
     # @safetestset "Integration: SpeedyWeather" begin include("usecases/speedyweather.jl") end
@@ -14,6 +15,6 @@ using Test, SafeTestsets
     @safetestset "Unit tests: QuadtreeCursors" begin include("trees/quadtree_cursors.jl") end
 
     @safetestset "Extensions: Oceananigans" begin include("extensions/oceananigans.jl") end
-    # @safetestset "Extensions: ClimaCore" begin include("extensions/climacore.jl") end # TODO Broken
+    @safetestset "Extensions: ClimaCore" begin include("extensions/climacore.jl") end
     @safetestset "Extensions: Healpix" begin include("extensions/healpix.jl") end
 end

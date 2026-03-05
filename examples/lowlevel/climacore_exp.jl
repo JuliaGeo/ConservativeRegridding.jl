@@ -260,7 +260,7 @@ quadtrees = map(lin2carts, cart2lins, all_coords) do lin2cart, cart2lin, coords
     ReorderedTopDownQuadtreeCursor(Trees.CellBasedGrid(GO.Spherical(; radius = mesh.domain.radius), coords), Reorderer2D(cart2lin, lin2cart))
 end
 quadtrees = map(1:6, all_coords) do face_idx, coords
-    Trees.FaceAwareQuadtreeCursor(Trees.CellBasedGrid(GO.Spherical(; radius = mesh.domain.radius), coords), face_idx)
+    Trees.IndexOffsetQuadtreeCursor(Trees.CellBasedGrid(GO.Spherical(; radius = mesh.domain.radius), coords), (face_idx - 1) * ne^2)
 end
 
 

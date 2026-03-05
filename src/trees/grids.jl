@@ -51,6 +51,8 @@ ncells(grid::ExplicitPolygonGrid, dim::Int) = size(grid.polygons, dim)
 
 A grid that is built from a matrix of corner points.  This is more optimized than [`ExplicitPolygonGrid`](@ref)
 because it knows the corner points of each polygon.
+
+For a cell based grid with n by m cells, the points matrix will have n+1 by m+1 points.
 """
 struct CellBasedGrid{M <: GOCore.Manifold, PointMatrixType <: AbstractMatrix} <: AbstractCurvilinearGrid
     manifold::M
@@ -125,7 +127,22 @@ compute the `Extents.Extent` and return it.
 =#
 
 function cell_range_extent(q::ExplicitPolygonGrid{<: GO.Planar}, irange::UnitRange{Int}, jrange::UnitRange{Int})
-    return mapreduce(Extents.union, GI.extent, (getcell(q, i, j) for i in irange, j in jrange))
+    return mapreduce(GI.extent, Extents.union, (getcell(q, i, j) for i in irange, j in jrange))
+end
+
+function cell_range_extent(q::ExplicitPolygonGrid{<: GO.Spherical}, irange::UnitRange{Int}, jrange::UnitRange{Int})
+    # Collect all unique points from polygons in the range and compute a bounding SphericalCap.
+    all_points = GO.UnitSpherical.UnitSphericalPoint[]
+    for j in jrange, i in irange
+        poly = getcell(q, i, j)
+        for pt in GI.getpoint(GI.getexterior(poly))
+            push!(all_points, pt)
+        end
+    end
+    isempty(all_points) && return GO.UnitSpherical.SphericalCap(GO.UnitSpherical.UnitSphericalPoint(0.0, 0.0, 1.0), 0.0)
+    center = LinearAlgebra.normalize(sum(all_points) / length(all_points))
+    radius = maximum(p -> GO.spherical_distance(center, p), all_points)
+    return GO.UnitSpherical.SphericalCap(center, radius * 1.0001)
 end
 
 function cell_range_extent(q::CellBasedGrid{<: GO.Planar}, irange::UnitRange{Int}, jrange::UnitRange{Int})
@@ -157,9 +174,12 @@ Since we know our grids are curvilinear, this is broadly okay.  It's not perfect
 
 using LinearAlgebra
 function circle_from_four_corners(corner_points, other_points)
-    p1, p2, p3, p4 = GO.UnitSphereFromGeographic().(corner_points)
+    raw = GO.UnitSphereFromGeographic().(corner_points)
+    # corner_points arrive as (BL, TL, BR, TR); reorder to CCW (BL, BR, TR, TL)
+    # so that consecutive slerps give bottom, right, top, left edge midpoints.
+    p1, p2, p3, p4 = raw[1], raw[3], raw[4], raw[2]
     center = LinearAlgebra.normalize((p1 .+ p2 .+ p3 .+ p4) ./ 4)
-    # Midpoints of lines / edges
+    # Midpoints of edges (bottom, right, top, left)
     p12 = GO.UnitSpherical.slerp(p1, p2, 0.5)
     p23 = GO.UnitSpherical.slerp(p2, p3, 0.5)
     p34 = GO.UnitSpherical.slerp(p3, p4, 0.5)
@@ -177,7 +197,7 @@ end
 function cell_range_extent(q::CellBasedGrid{<: GO.Spherical}, irange::UnitRange{Int}, jrange::UnitRange{Int})
     imin, imax = extrema(irange)
     jmin, jmax = extrema(jrange)
-    # For cell based we need 1 to the max indices from cell space 
+    # For cell based we need 1 to the max indices from cell space
     # to get the max indices in point space (`(n,m) -> (n+1, m+1)`)
     imax += 1
     jmax += 1
@@ -185,16 +205,18 @@ function cell_range_extent(q::CellBasedGrid{<: GO.Spherical}, irange::UnitRange{
     quadtree_points = q.points
     corner_points = (quadtree_points[imin, jmin], quadtree_points[imin, jmax], quadtree_points[imax, jmin], quadtree_points[imax, jmax])
 
-    # Collect points from all border polygons
+    # Collect points from all border rows/columns
     other_points = typeof(GI.getpoint(GI.getexterior(getcell(q, imin, jmin)), 1))[]
-    sizehint!(other_points, (imax - imin + 1) * (jmax - jmin + 1))
-    # Top and bottom rows (all columns)
+    sizehint!(other_points, 2 * (imax - imin + 1) + 2 * (jmax - jmin + 1))
+    # Left and right columns (all rows)
     append!(other_points, view(q.points, imin, jmin:jmax))
     if imax != imin
         append!(other_points, view(q.points, imax, jmin:jmax))
     end
+    # Top and bottom rows (all columns)
     if jmax != jmin
         append!(other_points, view(q.points, imin:imax, jmax))
+        append!(other_points, view(q.points, imin:imax, jmin))
     end
     return circle_from_four_corners(corner_points, other_points)
 end
@@ -219,6 +241,10 @@ function cell_range_extent(q::RegularGrid{<: GO.Spherical}, irange::UnitRange{In
     end
     if jmax != jmin
         append!(other_points, tuple.(q.x[imin:imax], q.y[jmax]))
+    end
+    # Bottom row (all columns) - needed for correct cap near poles
+    if jmin != jmax
+        append!(other_points, tuple.(q.x[imin:imax], q.y[jmin]))
     end
     return circle_from_four_corners(corner_points, other_points)
 end

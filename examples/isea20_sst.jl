@@ -22,6 +22,7 @@ function Trees.ncells(tree::SST.ISEACircleTree)
     return prod(SST.gridsize(tree))
 end
 
+# vec(values)[i] <=> Trees.getcell(tree, i)
 function Trees.getcell(tree::SST.ISEACircleTree, i::Int)
     return GI.Polygon(SA[GI.LinearRing(SST.index_to_polygon_unitsphere(i, tree))])
 end
