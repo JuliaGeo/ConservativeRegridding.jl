@@ -30,37 +30,74 @@ function zero_field!(field, values)
     set_field_values!(field, values, (x, y, z = 0) -> 0)
 end
 
-function set_field_values!(field::Oceananigans.Field, values, fun)
-    Oceananigans.set!(field, fun)
-    values .= vec(Oceananigans.interior(field))
+# function set_field_values!(field::Oceananigans.Field, values, fun)
+#     Oceananigans.set!(field, fun)
+#     values .= vec(Oceananigans.interior(field))
+# end
+# function set_field_values!(field::ClimaCore.Fields.Field, values, fun)
+#     space = getfield(field, :space)
+#     centroids_latlong = GO.UnitSpherical.GeographicFromUnitSphere().(ClimaCoreExt.get_element_centroids(space))
+#     values .= splat(fun).(centroids_latlong)
+#     # ClimaCoreExt.set_value_per_element!(field, elems)
+# end
+# function set_field_values!(field::Healpix.HealpixMap, values, fun)
+#     idxs = 1:length(field.pixels)
+#     vals = (
+#         begin
+#             theta, phi = Healpix.pix2ang(field, idx)
+#             lat = deg2rad(90-theta)
+#             lon = deg2rad(phi)
+#             fun(lon, lat)
+#         end
+#         for idx in idxs
+#     )
+
+#     values .= vals
+# end
+
+
+import SimplexQuad
+using LinearAlgebra: cross, dot, norm
+import IterTools
+
+struct SphericalPolygonIntegrator{X, W}
+    x::X
+    w::W
+    function SphericalPolygonIntegrator(; order=7)
+        X, W = SimplexQuad.simplexquad(order, 2)  # points in barycentric-like coords on unit simplex
+        new{typeof(X), typeof(W)}(X, W)
+    end
 end
-function set_field_values!(field::ClimaCore.Fields.Field, values, fun)
-    space = getfield(field, :space)
-    centroids_latlong = GO.UnitSpherical.GeographicFromUnitSphere().(ClimaCoreExt.get_element_centroids(space))
-    values .= splat(fun).(centroids_latlong)
-    # ClimaCoreExt.set_value_per_element!(field, elems)
-end
-function set_field_values!(field::Healpix.HealpixMap, values, fun)
-    idxs = 1:length(field.pixels)
-    vals = (
-        begin
-            theta, phi = Healpix.pix2ang(field, idx)
-            lat = deg2rad(90-theta)
-            lon = deg2rad(phi)
-            fun(lon, lat)
+
+function (integrator::SphericalPolygonIntegrator)(vertices::AbstractVector{<:GO.UnitSpherical.UnitSphericalPoint}, f)
+    # Reference triangle: unit 2-simplex
+    X, W = integrator.x, integrator.w  # points in barycentric-like coords on unit simplex
+    
+    total = 0.0
+    A = vertices[1]
+    for i in 2:length(vertices)-1
+        B, C = vertices[i], vertices[i+1]
+        det_ABC = dot(A, cross(B, C))
+        for k in axes(X, 1)
+            ξ1, ξ2 = X[k, 1], X[k, 2]
+            ξ0 = 1 - ξ1 - ξ2
+            p = ξ1 * A + ξ2 * B + ξ0 * C
+            np = norm(p)
+            s = p / np
+            J = abs(det_ABC) / np^3
+            total += W[k] * f(s) * J
         end
-        for idx in idxs
-    )
-
-    values .= vals
+    end
+    return total
 end
 
 
-
-
-
-
-
+function set_field_values!(field, values, fun; integrator = SphericalPolygonIntegrator(; order=7))
+    polys = IterTools.ivec(Trees.getcell(Trees.treeify(field)))
+    values .= Iterators.map(polys) do poly
+        integrator(GI.getpoint(GI.getexterior(poly)), p -> fun((GO.UnitSpherical.GeographicFromUnitSphere()(p))...))
+    end
+end
 
 
 
@@ -68,7 +105,7 @@ end
 
 
 oceananigans_latlong_grid = Oceananigans.LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z = (0, 1), radius = GO.Spherical().radius)
-oceananigans_tripolar_grid = Oceananigans.TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
+oceananigans_tripolar_grid = Oceananigans.TripolarGrid(size=(360, 180, 1), fold_topology = Oceananigans.RightFaceFolded)
 
 oceananigans_latlong_field = Oceananigans.CenterField(oceananigans_latlong_grid)
 oceananigans_tripolar_field = Oceananigans.CenterField(oceananigans_tripolar_grid)
@@ -124,74 +161,69 @@ climacore_fields = [
 fields = [oceananigans_fields..., climacore_fields..., healpix_fields...]
 
 regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
-for (i, (name1, field1, vals1)) in enumerate(fields)
-    for (j, (name2, field2, vals2)) in enumerate(fields)
-        @testset "$name1 -> $name2" begin
-            tic = time()
-            regridder = @test_nowarn ConservativeRegridding.Regridder(GO.Spherical(), field2, field1; normalize = false)
-            toc = time()
-            push!(regridder_construction_times, (name1, name2) => toc - tic)
+@testset "Sweat test" begin
+    @testset "Sweat test: $name1 -> $name2" for (i, (name1, field1, vals1)) in enumerate(fields), (j, (name2, field2, vals2)) in enumerate(fields)
+        tic = time()
+        regridder = @test_nowarn ConservativeRegridding.Regridder(GO.Spherical(), field2, field1; normalize = false)
+        toc = time()
+        push!(regridder_construction_times, (name1, name2) => toc - tic)
 
-            # Test that the areas are correct approximately
-            if !(field2 isa Oceananigans.Field && field2.grid isa Oceananigans.TripolarGrid) &&
-                !(field1 isa Oceananigans.Field && field1.grid isa Oceananigans.TripolarGrid)
-                test_intersection_areas_agree(regridder, field1, field2)
-            end
+        # Test that the areas are correct approximately
+        if !(field2 isa Oceananigans.Field && field2.grid isa Oceananigans.TripolarGrid) &&
+            !(field1 isa Oceananigans.Field && field1.grid isa Oceananigans.TripolarGrid)
+            test_intersection_areas_agree(regridder, field1, field2)
+        end
 
-            zero_field!(field1, vals1)
-            zero_field!(field2, vals2)
+        zero_field!(field1, vals1)
+        zero_field!(field2, vals2)
 
-            set_field_values!(field1, vals1, ConservativeRegridding.VortexField(; lat0_rad = deg2rad(80)))
-            ConservativeRegridding.regrid!(vals2, regridder, vals1)
+        set_field_values!(field1, vals1, ConservativeRegridding.VortexField(; lat0_rad = deg2rad(80)))
+        ConservativeRegridding.regrid!(vals2, regridder, vals1)
 
-            vals2_regridded = vals2[:]
-            vals2_analytical = vals2[:]
+        vals2_regridded = vals2[:]
+        vals2_analytical = vals2[:]
 
-            # Test that the areas are correct approximately
-            if !(field2 isa Oceananigans.Field && field2.grid isa Oceananigans.TripolarGrid) &&
-                !(field1 isa Oceananigans.Field && field1.grid isa Oceananigans.TripolarGrid)
-                # Oceananigans tripolar grid does not cover the globe
-                test_intersection_areas_agree(regridder, field1, field2)
-            else
-                continue
-            end
-            i == j && continue
+        # Test that the areas are correct approximately
+        if !(field2 isa Oceananigans.Field && field2.grid isa Oceananigans.TripolarGrid) &&
+            !(field1 isa Oceananigans.Field && field1.grid isa Oceananigans.TripolarGrid)
+            # Oceananigans tripolar grid does not cover the globe
+            test_intersection_areas_agree(regridder, field1, field2)
+        else
+            # continue
+        end
+        i == j && continue
 
-            if field2 isa ClimaCore.Fields.Field # TODO: haven't figured out how this can work yet
-                continue
-            end
+        # if field2 isa ClimaCore.Fields.Field # TODO: haven't figured out how this can work yet
+        #     continue
+        # end
 
-            # if field2 isa Healpix.HealpixMap || field1 isa Healpix.HealpixMap
-            #     # Some unknown issue with healpix grids where the regridding to them
-            #     # is not conserving the integral?  Not sure what is going on there.
-            #     continue
-            # end
+        # if field2 isa Healpix.HealpixMap || field1 isa Healpix.HealpixMap
+        #     # Some unknown issue with healpix grids where the regridding to them
+        #     # is not conserving the integral?  Not sure what is going on there.
+        #     continue
+        # end
 
-            @testset "Integral is conserved" begin
-                for (fun_name, fun_to_test) in [
-                    ("Longitude field", ConservativeRegridding.LongitudeField()),
-                    ("Sinusoid field", ConservativeRegridding.SinusoidField()),
-                    ("Harmonic field", ConservativeRegridding.HarmonicField()),
-                    ("Gulf stream field", ConservativeRegridding.GulfStreamField()),
-                    ("Vortex field", ConservativeRegridding.VortexField(; lat0_rad = deg2rad(80))),
-                ]
-                    @testset "$fun_name" begin
-                        set_field_values!(field1, vals1, fun_to_test)
-                        # zero_field!(field2, vals2)
+        @testset "Integral is conserved w.r.t. analytical values" begin
+            for (fun_name, fun_to_test) in [
+                ("Longitude field", ConservativeRegridding.LongitudeField()),
+                ("Sinusoid field", ConservativeRegridding.SinusoidField()),
+                ("Harmonic field", ConservativeRegridding.HarmonicField()),
+                ("Gulf stream field", ConservativeRegridding.GulfStreamField()),
+                ("Vortex field", ConservativeRegridding.VortexField(; lat0_rad = deg2rad(80))),
+            ]
+                @testset "$fun_name" begin
+                    set_field_values!(field1, vals1, fun_to_test)
+                    # zero_field!(field2, vals2)
 
-                        ConservativeRegridding.regrid!(vals2, regridder, vals1)
-                        vals2_regridded .= vals2
-                        
-                        set_field_values!(field2, vals2, fun_to_test)
-                        vals2_analytical .= vals2
+                    ConservativeRegridding.regrid!(vals2, regridder, vals1)
+                    vals2_regridded .= vals2
+                    
+                    set_field_values!(field2, vals2, fun_to_test)
+                    vals2_analytical .= vals2
 
-                        @test sum(abs.(vals2_regridded) .* regridder.dst_areas) ≈ sum(abs.(vals2_analytical) .* regridder.dst_areas) rtol=1e-2
-                    end
+                    @test sum(abs.(vals2_regridded) .* regridder.dst_areas) ≈ sum(abs.(vals2_analytical) .* regridder.dst_areas) rtol=1e-6
                 end
             end
         end
     end
 end
-
-
-
