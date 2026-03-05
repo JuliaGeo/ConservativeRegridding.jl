@@ -1,8 +1,8 @@
 """$(TYPEDSIGNATURES)
 Regrid data on `src_field` onto `dst_field` conservatively (mean-preserving) using the `regridder` matrix.
 `dst_area` is the area of each grid cell in `dst_field` and is used to normalize the result,
-if not provided, will recompute this from `regridder`. `src_field` and `dst_field` can be any n-dimensional array
-in which case it regridding of the 1st dimension is broadcast to additional dimensions.
+if not provided, will recompute this from `regridder`. `src_field` and `dst_field` can be any n-dimensional array,
+in which case the regridding of the 1st dimension is broadcast to additional dimensions.
 
 Mathematics of regridding: if A are the intersection areas between the respective grids of the fields d (dst) and s (src),
 and aˢ and aᵈ are the areas of the source and destination grid cells, then ``d`` is computed via
