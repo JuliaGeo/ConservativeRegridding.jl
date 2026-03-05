@@ -21,7 +21,14 @@ aˢ = sum(A; dims=1)
 function regrid!(dst_field::DenseVector, regridder::Regridder, src_field::DenseVector)
     areas = regridder.dst_areas # area of each grid cell
     LinearAlgebra.mul!(dst_field, regridder.intersections, src_field) # units of src_field times area of grid cell
-    dst_field ./= areas # normalize by area of each grid cell
+
+    # Normalize by destination area while avoiding NaNs on degenerate cells
+    # (for example, polar edge-control volumes with exactly zero area).
+    @inbounds for i in eachindex(dst_field, areas)
+        Ai = areas[i]
+        dst_field[i] = iszero(Ai) ? zero(eltype(dst_field)) : dst_field[i] / Ai
+    end
+
     return dst_field
 end
 
