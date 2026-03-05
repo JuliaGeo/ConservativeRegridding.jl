@@ -33,8 +33,30 @@ include("regridder/regridder.jl")
 include("regridder/regrid.jl")
 include("regridder/intersection_areas.jl")
 
+"""
+    VelocityLineIntegralRegridder(args...; kwargs...)
+
+Construct a velocity transport remapper.
+
+The concrete implementation is provided by package extensions (currently the
+Oceananigans extension). If the required extension is not loaded, this fallback
+throws an informative error.
+"""
+function VelocityLineIntegralRegridder(args...; kwargs...)
+    throw(ArgumentError("VelocityLineIntegralRegridder requires an extension implementation (for Oceananigans, load Oceananigans + LibGEOS)."))
+end
+
+"""
+    regrid_velocity_transport!(dst_u, dst_v, R, src_u, src_v)
+
+Apply an extension-provided velocity transport remap operator.
+"""
+function regrid_velocity_transport!(dst_u, dst_v, R, src_u, src_v)
+    throw(ArgumentError("regrid_velocity_transport! requires an extension implementation (for Oceananigans, load Oceananigans + LibGEOS)."))
+end
 
 @public Regridder, regrid, regrid!
+@public VelocityLineIntegralRegridder, regrid_velocity_transport!
 @public areas
 
 end
