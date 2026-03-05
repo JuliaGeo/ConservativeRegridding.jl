@@ -1,5 +1,5 @@
 """$(TYPEDSIGNATURES)
-Regrid data on `src_field` onto `dst_field` conservativly (mean-preserving) using the `regridder` matrix.
+Regrid data on `src_field` onto `dst_field` conservatively (mean-preserving) using the `regridder` matrix.
 `dst_area` is the area of each grid cell in `dst_field` and is used to normalize the result,
 if not provided, will recompute this from `regridder`. `src_field` and `dst_field` can be any n-dimensional array
 in which case it regridding of the 1st dimension is broadcast to additional dimensions.
@@ -13,9 +13,9 @@ d = (A s) / aˢ
 
 Note that by construction,
 
-```math
-    aᵈ = sum(A, 2)
-    aˢ = sum(A, 1)
+```julia
+aᵈ = sum(A, 2)
+aˢ = sum(A, 1)
 ```
 """
 function regrid!(dst_field::DenseVector, regridder::Regridder, src_field::DenseVector)
@@ -47,7 +47,7 @@ function regrid!(dst_field::AbstractVector, regridder::Regridder, src_field::Den
 end
 
 """$(TYPEDSIGNATURES)
-regrid a vector `src_field` using `regridder`. Area vector for the output grid can
+Regrid a vector `src_field` using `regridder`. Area vector for the output grid can
 be passed on as optional argument to prevent recalculating it from the regridder."""
 function regrid(
     regridder::AbstractMatrix,
