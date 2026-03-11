@@ -76,7 +76,7 @@ flip(::Face) = Center()
 flip(::Center) = Face()
 
 function _compute_cell_matrix!(cell_matrix, Fx, Fy, ℓx, ℓy, grid)
-    for i in 1:Fx, j in 1:Fy
+    for j in 1:Fy, i in 1:Fx
         vx = flip(ℓx)
         vy = flip(ℓy)
 
