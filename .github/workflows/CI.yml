@@ -51,7 +51,7 @@ jobs:
         with:
           python-version: '3.13' 
       - name: Download all workflow run artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
       - uses: julia-actions/setup-julia@latest
         with:
           version: '1'
