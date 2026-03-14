@@ -61,6 +61,81 @@ function LinearAlgebra.normalize!(regridder::Regridder)
     return regridder
 end
 
+function margin_relative_error(current::AbstractVector, target::AbstractVector)
+    T = promote_type(eltype(current), eltype(target))
+    denom = max.(abs.(target), eps(T))
+    return maximum(abs.(current .- target) ./ denom)
+end
+
+function intersection_margin_error(intersections, dst_areas::AbstractVector, src_areas::AbstractVector)
+    row_sums = vec(sum(intersections; dims=2))
+    col_sums = vec(sum(intersections; dims=1))
+    row_err = margin_relative_error(row_sums, dst_areas)
+    col_err = margin_relative_error(col_sums, src_areas)
+    return max(row_err, col_err)
+end
+
+function reconcile_intersection_margins(intersections,
+                                        dst_areas::AbstractVector,
+                                        src_areas::AbstractVector;
+                                        rtol = 1e-8,
+                                        maxiter = 200)
+    n_dst, n_src = size(intersections)
+    T = promote_type(eltype(intersections), eltype(dst_areas), eltype(src_areas))
+
+    dst_target = max.(zero(T), T.(dst_areas))
+    src_target = max.(zero(T), T.(src_areas))
+
+    # Unreachable margins are impossible to satisfy with this sparsity pattern.
+    row_support = vec(sum(intersections; dims=2))
+    col_support = vec(sum(intersections; dims=1))
+    @inbounds for i in 1:n_dst
+        if row_support[i] <= eps(T)
+            dst_target[i] = zero(T)
+        end
+    end
+    @inbounds for j in 1:n_src
+        if col_support[j] <= eps(T)
+            src_target[j] = zero(T)
+        end
+    end
+
+    total_dst = sum(dst_target)
+    total_src = sum(src_target)
+    if total_dst > zero(T) && total_src > zero(T) && !isapprox(total_dst, total_src; rtol, atol = eps(T))
+        dst_target .*= total_src / total_dst
+    end
+
+    row_scale = ones(T, n_dst)
+    col_scale = ones(T, n_src)
+
+    for iter in 1:maxiter
+        row_den = intersections * col_scale
+        @inbounds for i in eachindex(row_scale)
+            target = dst_target[i]
+            den = row_den[i]
+            row_scale[i] = (target <= eps(T) || den <= eps(T)) ? zero(T) : target / den
+        end
+
+        col_den = transpose(intersections) * row_scale
+        @inbounds for j in eachindex(col_scale)
+            target = src_target[j]
+            den = col_den[j]
+            col_scale[j] = (target <= eps(T) || den <= eps(T)) ? zero(T) : target / den
+        end
+
+        if iter % 10 == 0 || iter == maxiter
+            row_sums = row_scale .* (intersections * col_scale)
+            col_sums = col_scale .* (transpose(intersections) * row_scale)
+            row_err = margin_relative_error(row_sums, dst_target)
+            col_err = margin_relative_error(col_sums, src_target)
+            max(row_err, col_err) <= rtol && break
+        end
+    end
+
+    return LinearAlgebra.Diagonal(row_scale) * intersections * LinearAlgebra.Diagonal(col_scale)
+end
+
 struct DefaultIntersectionFailureError{T1, T2, E} <: Base.Exception
     p1::T1
     p2::T2
@@ -127,6 +202,9 @@ function Regridder(
         normalize = true, 
         intersection_operator::F = DefaultIntersectionOperator(manifold), 
         threaded = True(),
+        reconcile_margins = true,
+        margin_rtol = 1e-8,
+        margin_maxiter = 200,
         kwargs...
     ) where {M <: Manifold, F}
     # "Normalize" the destination and source grids into trees.
@@ -148,6 +226,17 @@ function Regridder(
     # of the destination and source grids.
     dst_areas = areas(manifold, dst, dst_tree)
     src_areas = areas(manifold, src, src_tree)
+
+    if reconcile_margins
+        mismatch = intersection_margin_error(intersections, dst_areas, src_areas)
+        if mismatch > margin_rtol
+            intersections = reconcile_intersection_margins(intersections, dst_areas, src_areas;
+                                                           rtol = margin_rtol,
+                                                           maxiter = margin_maxiter)
+            dst_areas = vec(sum(intersections; dims=2))
+            src_areas = vec(sum(intersections; dims=1))
+        end
+    end
 
     # TODO: make this GPU-compatible?
     # Allocate temporary arrays for the regridding operation - 
