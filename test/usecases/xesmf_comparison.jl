@@ -6,24 +6,26 @@ using Test
 import GeometryOps as GO
 using SparseArrays
 
+const R = 1.0  # unit sphere radius for all grids
+
 # ---------------------------------------------------------------------------
 # LatLon ↔ LatLon grid pairs (cell ordering matches exactly)
 # ---------------------------------------------------------------------------
 latlon_configs = [
     (
         name = "coarse to fine",
-        src  = LatitudeLongitudeGrid(size = (18, 9, 1),  longitude = (0, 360), latitude = (-90, 90), z = (0, 1)),
-        dst  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1)),
+        src  = LatitudeLongitudeGrid(size = (18, 9, 1),  longitude = (0, 360), latitude = (-90, 90), z = (0, 1), radius = R),
+        dst  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1), radius = R),
     ),
     (
         name = "fine to coarse",
-        src  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1)),
-        dst  = LatitudeLongitudeGrid(size = (18, 9, 1),  longitude = (0, 360), latitude = (-90, 90), z = (0, 1)),
+        src  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1), radius = R),
+        dst  = LatitudeLongitudeGrid(size = (18, 9, 1),  longitude = (0, 360), latitude = (-90, 90), z = (0, 1), radius = R),
     ),
     (
         name = "same resolution",
-        src  = LatitudeLongitudeGrid(size = (24, 12, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1)),
-        dst  = LatitudeLongitudeGrid(size = (24, 12, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1)),
+        src  = LatitudeLongitudeGrid(size = (24, 12, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1), radius = R),
+        dst  = LatitudeLongitudeGrid(size = (24, 12, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1), radius = R),
     ),
 ]
 
@@ -39,13 +41,13 @@ latlon_configs = [
 tripolar_configs = [
     (
         name = "tripolar to latlon",
-        src  = TripolarGrid(size = (40, 20, 1), fold_topology = RightCenterFolded),
-        dst  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1)),
+        src  = TripolarGrid(size = (40, 20, 1), fold_topology = RightCenterFolded, radius = R),
+        dst  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1), radius = R),
     ),
     (
         name = "latlon to tripolar",
-        src  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1)),
-        dst  = TripolarGrid(size = (40, 20, 1), fold_topology = RightCenterFolded),
+        src  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1), radius = R),
+        dst  = TripolarGrid(size = (40, 20, 1), fold_topology = RightCenterFolded, radius = R),
     ),
 ]
 
@@ -61,8 +63,9 @@ tripolar_configs = [
                 Nsrc = config.src.Nx * config.src.Ny
                 Ndst = config.dst.Nx * config.dst.Ny
 
+                # Manifold is inferred from grid radius via best_manifold
                 cr = ConservativeRegridding.Regridder(
-                    GO.Spherical(), config.dst, config.src; normalize = false,
+                    config.dst, config.src; normalize = false,
                 )
                 xr = XESMF.Regridder(dst_field, src_field; method = "conservative")
 
@@ -149,7 +152,7 @@ tripolar_configs = [
                 Ndst = config.dst.Nx * config.dst.Ny
 
                 cr = ConservativeRegridding.Regridder(
-                    GO.Spherical(), config.dst, config.src; normalize = false,
+                    config.dst, config.src; normalize = false,
                 )
                 xr = XESMF.Regridder(dst_field, src_field; method = "conservative")
 
