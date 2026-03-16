@@ -162,8 +162,9 @@ tripolar_configs = [
                     ConservativeRegridding.regrid!(dst_cr, cr, ones(Nsrc))
                     xr(dst_xesmf, ones(Nsrc))
 
-                    # Exclude fold-doubled cells (XESMF > 1.01) and ghost cells (CR NaN/0)
-                    clean = (dst_xesmf .> 0.01) .& (dst_xesmf .< 1.01) .&
+                    # Exclude fold-affected cells (XESMF > 1.001 indicates partial
+                    # fold contamination) and ghost cells (CR NaN/0)
+                    clean = (dst_xesmf .> 0.01) .& (dst_xesmf .< 1.001) .&
                             isfinite.(dst_cr) .& (dst_cr .> 0.01)
                     n_clean = count(clean)
                     @test n_clean > 0
@@ -173,11 +174,11 @@ tripolar_configs = [
                         max_diff = maximum(diffs)
                         mean_diff = sum(diffs) / n_clean
 
-                        n_fold_doubled = count(dst_xesmf .> 1.01)
+                        n_fold_affected = count(dst_xesmf .> 1.001)
                         n_ghost_nan    = count(.!isfinite.(dst_cr))
 
-                        @info "$(config.name) constant field" n_clean n_fold_doubled n_ghost_nan max_diff mean_diff
-                        @test max_diff < 0.01
+                        @info "$(config.name) constant field" n_clean n_fold_affected n_ghost_nan max_diff mean_diff
+                        @test max_diff < 1e-13
                     end
                 end
             end
