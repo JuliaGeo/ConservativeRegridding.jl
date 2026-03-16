@@ -1,14 +1,15 @@
 using ConservativeRegridding
 using XESMF
 using Oceananigans
+using Oceananigans.Grids: RightCenterFolded
 using Test
 import GeometryOps as GO
 using SparseArrays
 
 # ---------------------------------------------------------------------------
-# Grid pairs to test
+# LatLon ↔ LatLon grid pairs (cell ordering matches exactly)
 # ---------------------------------------------------------------------------
-test_configs = [
+latlon_configs = [
     (
         name = "coarse to fine",
         src  = LatitudeLongitudeGrid(size = (18, 9, 1),  longitude = (0, 360), latitude = (-90, 90), z = (0, 1)),
@@ -26,96 +27,155 @@ test_configs = [
     ),
 ]
 
+# ---------------------------------------------------------------------------
+# Tripolar ↔ LatLon pairs
+#
+# Cell ordering for RightCenterFolded tripolar differs between CR and XESMF,
+# so we compare using constant-field regridding (ordering-invariant).
+#
+# Additionally, XESMF does not know about the fold topology, so it
+# double-counts fold-row cells.  We exclude those from the comparison.
+# ---------------------------------------------------------------------------
+tripolar_configs = [
+    (
+        name = "tripolar to latlon",
+        src  = TripolarGrid(size = (40, 20, 1), fold_topology = RightCenterFolded),
+        dst  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1)),
+    ),
+    (
+        name = "latlon to tripolar",
+        src  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1)),
+        dst  = TripolarGrid(size = (40, 20, 1), fold_topology = RightCenterFolded),
+    ),
+]
+
 @testset "XESMF comparison" begin
-    for config in test_configs
-        @testset "$(config.name)" begin
-            src_field = CenterField(config.src)
-            dst_field = CenterField(config.dst)
+    # =======================================================================
+    # LatLon ↔ LatLon: full cell-by-cell comparison
+    # =======================================================================
+    @testset "LatLon ↔ LatLon" begin
+        for config in latlon_configs
+            @testset "$(config.name)" begin
+                src_field = CenterField(config.src)
+                dst_field = CenterField(config.dst)
+                Nsrc = config.src.Nx * config.src.Ny
+                Ndst = config.dst.Nx * config.dst.Ny
 
-            Nsrc = config.src.Nx * config.src.Ny
-            Ndst = config.dst.Nx * config.dst.Ny
+                cr = ConservativeRegridding.Regridder(
+                    GO.Spherical(), config.dst, config.src; normalize = false,
+                )
+                xr = XESMF.Regridder(dst_field, src_field; method = "conservative")
 
-            # --- Build both regridders ---
-            cr = ConservativeRegridding.Regridder(
-                GO.Spherical(), config.dst, config.src; normalize = false,
-            )
-            xr = XESMF.Regridder(dst_field, src_field; method = "conservative")
+                A_cr      = cr.intersections
+                dst_areas = cr.dst_areas
+                W_xesmf   = xr.weights
 
-            # CR gives raw intersection areas; XESMF gives dst-area-normalised weights.
-            # Normalise CR to match: w_cr[d,s] = A[d,s] / dst_areas[d]
-            A_cr      = cr.intersections
-            dst_areas = cr.dst_areas
-            W_xesmf   = xr.weights
+                @testset "Weight matrix (cell-by-cell)" begin
+                    max_abs_diff = 0.0
+                    max_rel_diff = 0.0
+                    n_compared   = 0
+                    n_cr_only    = 0
+                    n_xesmf_only = 0
 
-            # ---- Cell-by-cell weight comparison ----
-            @testset "Weight matrix (cell-by-cell)" begin
-                max_abs_diff = 0.0
-                max_rel_diff = 0.0
-                n_compared   = 0
-                n_cr_only    = 0
-                n_xesmf_only = 0
-
-                # Compare all nonzero CR entries against XESMF
-                for d in 1:Ndst, s in 1:Nsrc
-                    a = A_cr[d, s]
-                    a == 0 && continue
-
-                    w_cr = a / dst_areas[d]
-                    w_x  = W_xesmf[d, s]
-
-                    if w_x == 0
-                        n_cr_only += 1
-                        continue
+                    for d in 1:Ndst, s in 1:Nsrc
+                        a = A_cr[d, s]
+                        a == 0 && continue
+                        w_cr = a / dst_areas[d]
+                        w_x  = W_xesmf[d, s]
+                        if w_x == 0
+                            n_cr_only += 1
+                            continue
+                        end
+                        abs_diff = abs(w_cr - w_x)
+                        denom    = max(abs(w_x), abs(w_cr), 1e-15)
+                        max_abs_diff = max(max_abs_diff, abs_diff)
+                        max_rel_diff = max(max_rel_diff, abs_diff / denom)
+                        n_compared += 1
                     end
 
-                    abs_diff = abs(w_cr - w_x)
-                    denom    = max(abs(w_x), abs(w_cr), 1e-15)
-                    max_abs_diff = max(max_abs_diff, abs_diff)
-                    max_rel_diff = max(max_rel_diff, abs_diff / denom)
-                    n_compared += 1
-                end
-
-                # Check for entries in XESMF that CR missed
-                rows_x = rowvals(W_xesmf)
-                for col in 1:size(W_xesmf, 2)
-                    for idx in nzrange(W_xesmf, col)
-                        row = rows_x[idx]
-                        if A_cr[row, col] == 0
-                            n_xesmf_only += 1
+                    rows_x = rowvals(W_xesmf)
+                    for col in 1:size(W_xesmf, 2)
+                        for idx in nzrange(W_xesmf, col)
+                            if A_cr[rows_x[idx], col] == 0
+                                n_xesmf_only += 1
+                            end
                         end
                     end
+
+                    @test n_compared > 0
+                    @info "$(config.name) weights" n_compared n_cr_only n_xesmf_only max_abs_diff max_rel_diff
+                    @test max_rel_diff < 0.05
                 end
 
-                @test n_compared > 0
-                @info "$(config.name) weights" n_compared n_cr_only n_xesmf_only max_abs_diff max_rel_diff
-                @test max_rel_diff < 0.05
+                @testset "Regridded field" begin
+                    set!(src_field, (lon, lat, z) -> cosd(lat) * sind(lon))
+                    src_data = vec(interior(src_field, :, :, 1))
+
+                    dst_cr    = zeros(Ndst)
+                    dst_xesmf = zeros(Ndst)
+                    ConservativeRegridding.regrid!(dst_cr, cr, src_data)
+                    xr(dst_xesmf, src_data)
+
+                    covered   = (dst_cr .!= 0) .& (dst_xesmf .!= 0)
+                    @test any(covered)
+                    if any(covered)
+                        abs_diffs = abs.(dst_cr[covered] .- dst_xesmf[covered])
+                        denom     = max.(abs.(dst_cr[covered]), abs.(dst_xesmf[covered]), 1e-15)
+                        rel_diffs = abs_diffs ./ denom
+                        max_rel   = maximum(rel_diffs)
+                        mean_rel  = sum(rel_diffs) / length(rel_diffs)
+                        @info "$(config.name) regrid" max_rel mean_rel
+                        @test max_rel < 0.05
+                    end
+                end
             end
+        end
+    end
 
-            # ---- Regridded-field comparison ----
-            @testset "Regridded field" begin
-                # Smooth test field: f(lon, lat) = cos(lat) * sin(lon)
-                set!(src_field, (lon, lat, z) -> cosd(lat) * sind(lon))
-                src_data = vec(interior(src_field, :, :, 1))
+    # =======================================================================
+    # Tripolar ↔ LatLon: constant-field comparison (ordering-invariant)
+    #
+    # For tripolar grids the cell ordering in CR's sparse matrix differs from
+    # XESMF's column-major ordering, so we regrid a constant field (ones),
+    # which is invariant to reordering.  Fold-affected destination cells
+    # (where XESMF double-counts) are excluded from the comparison.
+    # =======================================================================
+    @testset "Tripolar ↔ LatLon" begin
+        for config in tripolar_configs
+            @testset "$(config.name)" begin
+                src_field = CenterField(config.src)
+                dst_field = CenterField(config.dst)
+                Nsrc = config.src.Nx * config.src.Ny
+                Ndst = config.dst.Nx * config.dst.Ny
 
-                # CR regrid
-                dst_cr = zeros(Ndst)
-                ConservativeRegridding.regrid!(dst_cr, cr, src_data)
+                cr = ConservativeRegridding.Regridder(
+                    GO.Spherical(), config.dst, config.src; normalize = false,
+                )
+                xr = XESMF.Regridder(dst_field, src_field; method = "conservative")
 
-                # XESMF regrid
-                dst_xesmf = zeros(Ndst)
-                xr(dst_xesmf, src_data)
+                @testset "Constant field" begin
+                    dst_cr    = zeros(Ndst)
+                    dst_xesmf = zeros(Ndst)
+                    ConservativeRegridding.regrid!(dst_cr, cr, ones(Nsrc))
+                    xr(dst_xesmf, ones(Nsrc))
 
-                # Compare where both are nonzero
-                covered = (dst_cr .!= 0) .& (dst_xesmf .!= 0)
-                @test any(covered)
-                if any(covered)
-                    abs_diffs = abs.(dst_cr[covered] .- dst_xesmf[covered])
-                    denom     = max.(abs.(dst_cr[covered]), abs.(dst_xesmf[covered]), 1e-15)
-                    rel_diffs = abs_diffs ./ denom
-                    max_rel   = maximum(rel_diffs)
-                    mean_rel  = sum(rel_diffs) / length(rel_diffs)
-                    @info "$(config.name) regrid" max_rel mean_rel
-                    @test max_rel < 0.05
+                    # Exclude fold-doubled cells (XESMF > 1.01) and ghost cells (CR NaN/0)
+                    clean = (dst_xesmf .> 0.01) .& (dst_xesmf .< 1.01) .&
+                            isfinite.(dst_cr) .& (dst_cr .> 0.01)
+                    n_clean = count(clean)
+                    @test n_clean > 0
+
+                    if n_clean > 0
+                        diffs    = abs.(dst_cr[clean] .- dst_xesmf[clean])
+                        max_diff = maximum(diffs)
+                        mean_diff = sum(diffs) / n_clean
+
+                        n_fold_doubled = count(dst_xesmf .> 1.01)
+                        n_ghost_nan    = count(.!isfinite.(dst_cr))
+
+                        @info "$(config.name) constant field" n_clean n_fold_doubled n_ghost_nan max_diff mean_diff
+                        @test max_diff < 0.01
+                    end
                 end
             end
         end
