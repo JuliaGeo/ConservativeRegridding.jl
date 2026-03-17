@@ -108,12 +108,15 @@ end
 
 oceananigans_latlong_grid = Oceananigans.LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z = (0, 1), radius = GO.Spherical().radius)
 oceananigans_tripolar_grid = Oceananigans.TripolarGrid(size=(360, 180, 1), fold_topology = Oceananigans.RightFaceFolded)
+oceananigans_rotated_latlong_grid = Oceananigans.RotatedLatitudeLongitudeGrid(size=(90, 40, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1), north_pole=(70, 55))
 
 oceananigans_latlong_field = Oceananigans.CenterField(oceananigans_latlong_grid)
 oceananigans_tripolar_field = Oceananigans.CenterField(oceananigans_tripolar_grid)
+oceananigans_rotated_latlong_field = Oceananigans.CenterField(oceananigans_rotated_latlong_grid)
 
 oceananigans_latlong_vals = vec(Oceananigans.interior(oceananigans_latlong_field))
 oceananigans_tripolar_vals = vec(Oceananigans.interior(oceananigans_tripolar_field))
+oceananigans_rotated_latlong_vals = vec(Oceananigans.interior(oceananigans_rotated_latlong_field))
 
 climacore_cubedsphere_grid = ClimaCore.CommonSpaces.CubedSphereSpace(;
     radius = GO.Spherical().radius,
@@ -148,6 +151,7 @@ healpix_ring_order_vals = healpix_ring_order_field.pixels
 oceananigans_fields = [
     ("Oceananigans longitude-latitude grid", oceananigans_latlong_field, oceananigans_latlong_vals),
     ("Oceananigans tripolar grid", oceananigans_tripolar_field, oceananigans_tripolar_vals),
+    ("Oceananigans rotated longitude-latitude grid", oceananigans_rotated_latlong_field, oceananigans_rotated_latlong_vals),
 ]
 
 healpix_fields = [
