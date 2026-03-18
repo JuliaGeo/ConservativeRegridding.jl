@@ -227,11 +227,14 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
                     set_field_values!(field2, vals2, fun_to_test)
                     vals2_analytical .= vals2
 
-                    # Tripolar grid cells near the "north poles" straddle the date line,
-                    # causing the longitude field's 0°/360° discontinuity to produce
-                    # inaccurate cell-averaged integrals. Loosen tolerance for that case.
-                    is_tripolar_source = field1 isa Oceananigans.Field && field1.grid isa Oceananigans.TripolarGrid
-                    tol = (is_tripolar_source && fun_to_test isa ConservativeRegridding.LongitudeField) ? 5e-2 : 1e-2
+                    # Tripolar and rotated lat-lon grid cells near the "north poles" straddle
+                    # the date line, causing the longitude field's 0°/360° discontinuity to
+                    # produce inaccurate cell-averaged integrals. Loosen tolerance for that case.
+                    is_dateline_straddling_source = field1 isa Oceananigans.Field && (
+                        field1.grid isa Oceananigans.TripolarGrid ||
+                        field1.grid isa Oceananigans.RotatedLatitudeLongitudeGrid
+                    )
+                    tol = (is_dateline_straddling_source && fun_to_test isa ConservativeRegridding.LongitudeField) ? 5e-2 : 1e-2
                     @test sum(abs.(vals2_regridded) .* regridder.dst_areas) ≈ sum(abs.(vals2_analytical) .* regridder.dst_areas) rtol=tol
                 end
             end
