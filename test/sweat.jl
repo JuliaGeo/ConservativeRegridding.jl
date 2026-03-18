@@ -175,9 +175,15 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
         push!(regridder_construction_times, (name1, name2) => toc - tic)
 
         # Test that the areas are correct approximately
-        if !(field2 isa Oceananigans.Field && field2.grid isa Oceananigans.TripolarGrid) &&
-            !(field1 isa Oceananigans.Field && field1.grid isa Oceananigans.TripolarGrid)
-            test_intersection_areas_agree(regridder, field1, field2)
+        has_tripolar = (field2 isa Oceananigans.Field && field2.grid isa Oceananigans.TripolarGrid) ||
+                       (field1 isa Oceananigans.Field && field1.grid isa Oceananigans.TripolarGrid)
+        # Rotated grid cells have oblique edges that produce more complex intersection
+        # polygons, accumulating slightly more floating-point error in area sums.
+        has_rotated = (field2 isa Oceananigans.Field && field2.grid isa Oceananigans.RotatedLatitudeLongitudeGrid) ||
+                      (field1 isa Oceananigans.Field && field1.grid isa Oceananigans.RotatedLatitudeLongitudeGrid)
+        areas_rtol = has_rotated ? 1e-6 : sqrt(eps(Float64))
+        if !has_tripolar
+            test_intersection_areas_agree(regridder, field1, field2; rtol=areas_rtol)
         end
 
         zero_field!(field1, vals1)
@@ -190,10 +196,9 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
         vals2_analytical = vals2[:]
 
         # Test that the areas are correct approximately
-        if !(field2 isa Oceananigans.Field && field2.grid isa Oceananigans.TripolarGrid) &&
-            !(field1 isa Oceananigans.Field && field1.grid isa Oceananigans.TripolarGrid)
+        if !has_tripolar
             # Oceananigans tripolar grid does not cover the globe
-            test_intersection_areas_agree(regridder, field1, field2)
+            test_intersection_areas_agree(regridder, field1, field2; rtol=areas_rtol)
         else
             # continue
         end
