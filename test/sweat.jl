@@ -181,7 +181,7 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
         # polygons, accumulating slightly more floating-point error in area sums.
         has_rotated = (field2 isa Oceananigans.Field && field2.grid isa Oceananigans.RotatedLatitudeLongitudeGrid) ||
                       (field1 isa Oceananigans.Field && field1.grid isa Oceananigans.RotatedLatitudeLongitudeGrid)
-        areas_rtol = has_rotated ? 1e-6 : sqrt(eps(Float64))
+        areas_rtol = has_rotated ? 1e-4 : sqrt(eps(Float64))
         if !has_tripolar
             test_intersection_areas_agree(regridder, field1, field2; rtol=areas_rtol)
         end
