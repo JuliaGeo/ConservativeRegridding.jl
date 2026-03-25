@@ -197,6 +197,7 @@ function Trees.treeify(
     # for long-lat grids that don't cover the whole sphere - TODO.
     return Trees.KnownFullSphereExtentWrapper(tree)
 end
+
 function Trees.treeify(manifold::GOCore.Planar, grid::Oceananigans.RectilinearGrid)
     # Compute the matrix of verti|ces - for an n×m grid, this is an (n+1)×(m+1) matrix of vertices.
     cells = compute_cell_matrix(grid) # from oceananigans_common.jl
