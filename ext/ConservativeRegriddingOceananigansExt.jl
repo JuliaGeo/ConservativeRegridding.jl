@@ -41,31 +41,6 @@ function compute_cell_matrix(grid::Oceananigans.Grids.AbstractGrid)
     return on_architecture(arch, cell_matrix)
 end
 
-# An FPivot Tripolar grid has a `RightFaceFolded` topology: the fold is at `Face` nodes,
-# which means there is an extra line of Face nodes at the north boundary.
-# The prognostic domain for fields `Center`ed in `y` ends at `Ny-1`.
-const FPivotTripolarGrid = Oceananigans.OrthogonalSphericalShellGrids.TripolarGrid{<:Any, <:Any, RightFaceFolded}
-
-function compute_cell_matrix(grid::FPivotTripolarGrid)
-    Nx, Ny, _ = size(grid)
-    ℓx, ℓy    = Center(), Center()
-
-    if isnothing(ℓx) || isnothing(ℓy)
-        error("cell_matrix can only be computed for fields with non-nothing horizontal location.")
-    end
-
-    arch = grid.architecture
-    FT = eltype(grid)
-
-    cell_matrix = Array{Tuple{FT, FT}}(undef, Nx+1, Ny)
-
-    # Not GPU compatible so we need to move the grid on the CPU
-    cpu_grid = on_architecture(CPU(), grid)
-    _compute_cell_matrix!(cell_matrix, Nx+1, Ny, ℓx, ℓy, cpu_grid)
-
-    return on_architecture(arch, cell_matrix)
-end
-
 flip(::Face) = Center()
 flip(::Center) = Face()
 
@@ -198,19 +173,7 @@ function Trees.treeify(
 
     return Trees.KnownFullSphereExtentWrapper(tree)
 end
-function Trees.treeify(
-    manifold::GOCore.Spherical,
-    grid::FPivotTripolarGrid
-)
-    # compute_cell_matrix for FPivotTripolarGrid returns (Nx+1, Ny) which
-    # excludes the diagnostic fold row, giving Nx*(Ny-1) cells matching
-    # the interior size of Center-Center fields in released Oceananigans.
-    cells_longlat = compute_cell_matrix(grid)
-    cells_unitspherical = GO.UnitSphereFromGeographic().(cells_longlat)
-    cbg = Trees.CellBasedGrid(manifold, cells_unitspherical)
-    tree = Trees.TopDownQuadtreeCursor(cbg)
-    return Trees.KnownFullSphereExtentWrapper(tree)
-end
+
 function Trees.treeify(
     manifold::GOCore.Spherical,
     grid::Oceananigans.Grids.AbstractGrid
