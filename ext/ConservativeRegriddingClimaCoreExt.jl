@@ -5,6 +5,9 @@ using ConservativeRegridding: Trees
 
 import GeometryOpsCore as GOCore
 import GeometryOps as GO
+import GeoInterface as GI
+import SparseArrays
+import Extents
 
 using GeometryOps.UnitSpherical: UnitSphericalPoint
 using LinearAlgebra: normalize
@@ -95,154 +98,425 @@ GOCore.best_manifold(topology::Topologies.Topology2D) = GOCore.best_manifold(top
 GOCore.best_manifold(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = GOCore.best_manifold(Spaces.topology(space))
 
 
+## Node extraction helpers for spectral element fields
 
-
-
-
-
-
-
-
-## Utility functions for getting values from ClimaCore fields
-## Might be useful for when we implement regrid!
-
-### Helper functions to interface with ClimaCore.jl
 """
-    get_element_vertices(space::SpectralElementSpace2D)
+    _flat_nodal_data(p::AbstractArray) → Vector
 
-Returns a vector of vectors, each containing the coordinates of the vertices
-of an element. The vertices are in clockwise order for each element, and the
-first coordinate pair is repeated at the end.
+Extract a flat vector from a parent array in IJFH or VIJFH data layout.
+Ordering: i varies fastest, then j, then element h.
 
-Also performs a check for zero area polygons, and throws an error if any are found.
-
-This is the format expected by ConservativeRegridding.jl to construct a
-Regridder object.
+Note we regrid only 2D Fields here, so we can drop the
+F and V indices.
 """
-function get_element_vertices(space)
-    # Get the indices of the vertices of the elements, in clockwise order for each element
-    topology = Spaces.topology(space)
-    mesh = Topologies.mesh(topology)
-    Nh = Meshes.nelements(mesh)
-    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-    vertex_inds = [
-        CartesianIndex(i, j, 1, 1, e) # f and v are 1 for SpectralElementSpace2D
-        for e in 1:Nh
-        for (i, j) in [(1, 1), (1, Nq), (Nq, Nq), (Nq, 1), (1, 1)]
-    ] # repeat the first coordinate pair at the end
+function _flat_nodal_data(p::AbstractArray)
+    if ndims(p) == 4      # IJFH: (I, J, F, H)
+        return collect(vec(view(p, :, :, 1, :)))
+    elseif ndims(p) == 5  # VIJFH: (I, J, F, V, H)
+        return collect(vec(view(p, :, :, 1, 1, :)))
+    else
+        error("Unexpected data layout dimensionality: $(ndims(p))")
+    end
+end
 
-    # Get the lat and lon at each vertex index
+"""
+    se_node_positions(space) → Vector{UnitSphericalPoint}
+
+Extract the lat/lon positions of all spectral element nodes as a flat vector of
+`UnitSphericalPoint`s.  Ordering: all Nq² nodes of element 1 (i fastest),
+then element 2, etc.
+"""
+function se_node_positions(space)
     coords = Fields.coordinate_field(space)
-    vertex_coords = [
-        (Fields.field_values(coords.lat)[ind], Fields.field_values(coords.long)[ind])
-        for ind in vertex_inds
-    ]
+    lat_flat  = _flat_nodal_data(parent(Fields.field_values(coords.lat)))
+    long_flat = _flat_nodal_data(parent(Fields.field_values(coords.long)))
+    transform = GO.UnitSphereFromGeographic()
+    return [transform((long_flat[k], lat_flat[k])) for k in eachindex(lat_flat)]
+end
 
-    # Put each polygon into a vector, with the first coordinate pair repeated at the end
-    vertices = collect(Iterators.partition(vertex_coords, 5))
+"""
+    se_node_weights(space) → Vector{Float64}
 
-    # Check for zero area polygons
-    for polygon in vertices
-        if allequal(first.(polygon)) || allequal(last.(polygon))
-            @error "Zero area polygon found in vertices" polygon
-        end
+Extract the Jacobian integration weights ``W_{e,i,j}`` for all SE nodes as a
+flat vector.  Same ordering as [`se_node_positions`](@ref).
+"""
+function se_node_weights(space)
+    wj = Spaces.weighted_jacobian(space)
+    return _flat_nodal_data(parent(wj))
+end
+
+"""
+    se_field_to_vec(field)
+
+Convert a ClimaCore field to a flat vector of nodal values.
+Same ordering as [`se_node_positions`](@ref).
+"""
+function se_field_to_vec(field)
+    return _flat_nodal_data(parent(Fields.field_values(field)))
+end
+
+"""
+    vec_to_se_field!(field, v::AbstractVector) → field
+
+Copy values from a flat nodal vector back into a ClimaCore field.
+Inverse of [`se_field_to_vec`](@ref).
+"""
+function vec_to_se_field!(field, v::AbstractVector)
+    p = parent(Fields.field_values(field))
+    Nq = size(p, 1)
+    if ndims(p) == 4
+        Nh = size(p, 4)
+        view(p, :, :, 1, :) .= reshape(v, Nq, Nq, Nh)
+    elseif ndims(p) == 5
+        Nh = size(p, 5)
+        view(p, :, :, 1, 1, :) .= reshape(v, Nq, Nq, Nh)
     end
-    return vertices
-end
-
-### These functions are used to facilitate storing a single value per element on a field
-### rather than one value per node.
-"""
-    integrate_each_element(field)
-
-Integrate the field over each element of the space.
-Returns a vector with length equal to the number of elements in the space,
-containing the integrated value over the nodes of each element.
-"""
-function integrate_each_element(field)
-    space = axes(field)
-    topology = Spaces.topology(space)
-    mesh = Topologies.mesh(topology)
-
-    weighted_values =
-        RecursiveApply.rmul.(
-            Spaces.weighted_jacobian(space),
-            Fields.todata(field),
-        )
-
-    Nh = Meshes.nelements(mesh)
-    integral_each_element = zeros(Float64, Nh)
-    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-
-    # Sum over the nodes of each element to get the integral of the field over each element
-    integral_each_element = vec(sum(parent(weighted_values); dims=(1, 2)))
-
-    return integral_each_element
-end
-
-"""
-    get_value_per_element!(value_per_element, field, ones_field)
-
-Get one value per element of a field by integrating over the nodes of
-each element and dividing by the area of the element. The result is stored in
-`value_per_element`, which is expected to be a Float-valued vector of length equal
-to the number of elements in the space.
-
-Here `ones_field` is a field on the same space as `field` with all
-values set to 1.
-"""
-function get_value_per_element!(value_per_element, field, ones_field)
-    integral_each_element = integrate_each_element(field)
-    area_each_element = integrate_each_element(ones_field)
-    value_per_element .= integral_each_element ./ area_each_element
-    return nothing
-end
-
-"""
-    set_value_per_element!(field, value_per_element)
-
-Set the values of a field with the provided values in each element.
-Each node within an element will have the same value.
-
-The input vector is expected to be of length equal to the number of elements in
-the space.
-"""
-function set_value_per_element!(field, value_per_element)
-    space = axes(field)
-    topology = Spaces.topology(space)
-    mesh = Topologies.mesh(topology)
-    Nh = Meshes.nelements(mesh)
-    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-    @assert length(value_per_element) == Nh "Length of value_per_element must be equal to the number of elements in the space"
-
-    # Set all nodes in each element to the value per element
-    for i in 1:Nq, j in 1:Nq
-        set_datalayout!(Fields.field_values(field), i, j, value_per_element)
-    end
-
     return field
 end
 
 """
-    set_datalayout!(values::DataLayouts.IJFH, i, j, value_per_element)
-    set_datalayout!(values::DataLayouts.VIJFH, i, j, value_per_element)
+    _point_in_convex_spherical_polygon(point, ring)
 
-Set the values of the provided data laout with the given values in each element.
-The input vector is expected to be of length equal to the number of elements in
-the space.
+Check whether a `UnitSphericalPoint` lies strictly inside a convex polygon on the
+unit sphere, using the cross-product sign-consistency test. For a convex polygon on the
+unit sphere, P is inside if and only if it lies on the same side of every edge of the polygon.
 
-`i` and `j` are the indices of the element to set the values of. All nodes
-in that element will be set to the same value.
-
-We need two methods of this function because the data layout may have a vertical
-dimension (VIJFH) or not (IJFH). This is true even though we only regrid 2D fields,
-as a 2D field constructed by taking a level of a 3D field will have a vertical dimension.
+For an edge from vertex A to vertex B, the signed distance of P from that edge's
+great-circle plane is the scalar triple product: `A x B · P`,
+which is positive if P is on the "left" of the directed edge A→B, negative on the "right".
+For a consistently-wound convex polygon, all edges should give the same sign for an interior point.
 """
-function set_datalayout!(values::DataLayouts.IJFH, i, j, value_per_element)
-    view(parent(values), i, j, 1, :) .= value_per_element
+function _point_in_convex_spherical_polygon(point, ring)
+    n = GI.npoint(ring) - 1  # unique vertices (exclude closing point)
+    n < 3 && return false
+
+    first_sign = 0
+    for k in 1:n
+        A = GI.getpoint(ring, k)
+        B = GI.getpoint(ring, k + 1)
+        tp = _triple_product(A, B, point)
+        s = sign(tp)
+        if s != 0
+            if first_sign == 0
+                first_sign = s
+            elseif s != first_sign
+                return false
+            end
+        end
+    end
+    return first_sign != 0
 end
-function set_datalayout!(values::DataLayouts.VIJFH, i, j, value_per_element)
-    view(parent(values), i, j, 1, 1, :) .= value_per_element
+
+"""
+    _triple_product(a, b, c)
+
+Compute the triple product of three vectors.
+
+Accumulate the sign of the first non-zero edge test, then return false the
+moment any subsequent edge gives the opposite sign. If all edges give the
+same sign (or zero, for a point exactly on an edge), the point is inside.
+"""
+@inline function _triple_product(a, b, c)
+    ax, ay, az = a[1], a[2], a[3]
+    bx, by, bz = b[1], b[2], b[3]
+    cx, cy, cz = c[1], c[2], c[3]
+    return cx * (ay*bz - az*by) + cy * (az*bx - ax*bz) + cz * (ax*by - ay*bx)
+end
+
+## Shared helpers for SE regridder construction
+
+"""
+    _get_candidate_pairs(manifold, se_tree, cell_tree, threaded)
+
+Get all candidate (SE element, cell) pairs for regridding.
+Uses a dual depth-first search to find all pairs of cells/elements that may intersect.
+"""
+function _get_candidate_pairs(manifold, se_tree, cell_tree, threaded)
+    _threaded = GOCore.booltype(threaded)
+    predicate_f = manifold isa GOCore.Spherical ?
+        GO.UnitSpherical._intersects : Extents.intersects
+    return ConservativeRegridding.get_all_candidate_pairs(
+        _threaded, predicate_f, se_tree, cell_tree
+    )
+end
+
+"""
+    _find_nodes_in_cells(candidate_pairs, cell_tree, node_positions, Nq)
+
+For each candidate (SE element, cell) pair, check which SE nodes lie inside the
+cell polygon.
+
+Returns a `Vector{Tuple{Int,Int}}` of `(node_idx, cell_idx)` pairs — one entry per
+SE node that falls inside a destination cell.
+"""
+function _find_nodes_in_cells(candidate_pairs, cell_tree, node_positions, Nq)
+    pairs = Tuple{Int,Int}[]
+
+    for (se_elem_idx, cell_idx) in candidate_pairs
+        cell_polygon = Trees.getcell(cell_tree, cell_idx)
+        ring = GI.getexterior(cell_polygon)
+
+        node_offset = (se_elem_idx - 1) * Nq^2
+        for jj in 1:Nq, ii in 1:Nq
+            node_idx = node_offset + (jj - 1) * Nq + ii
+            if _point_in_convex_spherical_polygon(node_positions[node_idx], ring)
+                push!(pairs, (node_idx, cell_idx))
+            end
+        end
+    end
+
+    return pairs
+end
+
+"""
+    _add_intersection_fallback!(weight_matrix, candidate_pairs, zero_rows, manifold, se_tree, cell_tree, node_weights, Nq, N_cells, N_nodes)
+
+For destination cells with zero node contribution (typically when the destination cells are
+much finer than the SE nodal spacing), fall back to intersection-area-weighted element
+averages for those rows. Adds entries to the weight matrix for those rows.
+
+Each node `(e,i,j)` in a SE element `e` that intersects destination cell `k` receives weight:
+    `int_area(e, k) * W[e,i,j] / ∑_{i',j'} W[e,i',j']`
+
+This distributes the intersection area proportionally to the Jacobian weights within the element.
+"""
+function _add_intersection_fallback!(
+    weight_matrix, candidate_pairs, zero_rows,
+    manifold, se_tree, cell_tree, node_weights, Nq, N_cells, N_nodes
+)
+    isempty(zero_rows) && return weight_matrix
+
+    zero_row_set = Set(zero_rows)
+    intersection_op = ConservativeRegridding.DefaultIntersectionOperator(manifold)
+
+    # Filter to only pairs involving zero-contribution destination cells, then
+    # reuse the existing intersection area computation from intersection_areas.jl.
+    # Candidate pairs are (se_elem_idx, cell_idx); compute_intersection_areas
+    # treats the first index as src (se_tree) and second as dst (cell_tree).
+    fallback_pairs = filter(((_, cell_idx),) -> cell_idx in zero_row_set, candidate_pairs)
+    isempty(fallback_pairs) && return weight_matrix
+
+    se_idxs, cell_idxs, int_areas = ConservativeRegridding.compute_intersection_areas(
+        manifold, intersection_op, cell_tree, se_tree, fallback_pairs
+    )
+
+    fb_rows = Int[]
+    fb_cols = Int[]
+    fb_vals = Float64[]
+
+    for (se_elem_idx, cell_idx, int_area) in zip(se_idxs, cell_idxs, int_areas)
+        elem_offset = (se_elem_idx - 1) * Nq^2
+        elem_area   = sum(node_weights[elem_offset+1 : elem_offset+Nq^2])
+        for jj in 1:Nq, ii in 1:Nq
+            node_idx = elem_offset + (jj - 1) * Nq + ii
+            push!(fb_rows, cell_idx)
+            push!(fb_cols, node_idx)
+            push!(fb_vals, int_area * node_weights[node_idx] / elem_area)
+        end
+    end
+
+    isempty(fb_rows) && return weight_matrix
+    fb_matrix = SparseArrays.sparse(fb_rows, fb_cols, fb_vals, N_cells, N_nodes)
+    return weight_matrix + fb_matrix
+end
+
+## Regridder constructors
+
+# SE source → FV destination
+function ConservativeRegridding.Regridder(
+    manifold::M, dst, src::ClimaCore.Spaces.AbstractSpectralElementSpace;
+    threaded = true,
+    kwargs...
+) where {M <: GOCore.Manifold}
+    # Convert the SE source and FV destination grids into trees
+    se_tree = Trees.treeify(manifold, src)
+    fv_tree = Trees.treeify(manifold, dst)
+
+    # Get the SE node positions and weights as flat vectors
+    node_positions = se_node_positions(src)
+    node_weights = se_node_weights(src)
+
+    # Get the number of SE nodes and FV cells
+    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(src))
+    Nh = Meshes.nelements(Topologies.mesh(Spaces.topology(src)))
+    N_nodes = Nq^2 * Nh
+    N_fv = prod(Trees.ncells(fv_tree))
+
+    # Get all source SE nodes that lie in the FV cells we're remapping to
+    candidate_pairs = _get_candidate_pairs(manifold, se_tree, fv_tree, threaded)
+    node_cell_pairs = _find_nodes_in_cells(candidate_pairs, fv_tree, node_positions, Nq)
+    node_idxs = first.(node_cell_pairs)
+    cell_idxs  = last.(node_cell_pairs)
+
+    # The weights are the SE node weights for the SE nodes in the FV cells we're remapping to
+    vals = [node_weights[n] for n in node_idxs]
+    weight_matrix = SparseArrays.sparse(cell_idxs, node_idxs, vals, N_fv, N_nodes)
+
+    # Find all rows of the weight matrix that have zero sum (i.e. no SE nodes in the FV cell)
+    # and add the fallback intersection-area-weighted element averages to those rows
+    zero_rows = findall(iszero, vec(sum(weight_matrix; dims=2)))
+    weight_matrix = _add_intersection_fallback!(
+        weight_matrix, candidate_pairs, zero_rows,
+        manifold, se_tree, fv_tree, node_weights, Nq, N_fv, N_nodes
+    )
+
+    # Get the areas of the FV cells, which are used for normalization
+    dst_areas = ConservativeRegridding.areas(manifold, dst, fv_tree)
+
+    # Allocate temporary arrays for the regridding operation
+    dst_temp  = zeros(N_fv)
+    src_temp  = zeros(N_nodes)
+
+    return ConservativeRegridding.SEtoFVRegridder(weight_matrix, dst_areas, dst_temp, src_temp)
+end
+
+# FV source → SE destination
+function ConservativeRegridding.Regridder(
+    manifold::M, dst::ClimaCore.Spaces.AbstractSpectralElementSpace, src;
+    threaded = true,
+    kwargs...
+) where {M <: GOCore.Manifold}
+    # Convert the SE source and FV destination grids into trees
+    se_tree = Trees.treeify(manifold, dst)
+    fv_tree = Trees.treeify(manifold, src)
+
+    # Get the SE node positions as a flat vector
+    node_positions = se_node_positions(dst)
+
+    # Get the number of SE nodes and FV cells
+    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(dst))
+    Nh = Meshes.nelements(Topologies.mesh(Spaces.topology(dst)))
+    N_nodes = Nq^2 * Nh
+    N_fv = prod(Trees.ncells(fv_tree))
+
+    # Get all destination SE nodes that lie in the FV cells we're remapping from
+    candidate_pairs = _get_candidate_pairs(manifold, se_tree, fv_tree, threaded)
+    node_cell_pairs = _find_nodes_in_cells(candidate_pairs, fv_tree, node_positions, Nq)
+    node_idxs = first.(node_cell_pairs)
+    cell_idxs  = last.(node_cell_pairs)
+
+    # The weights are 1 for all SE nodes in the FV cells we're remapping from
+    weight_matrix = SparseArrays.sparse(
+        node_idxs, cell_idxs, ones(length(node_idxs)), N_nodes, N_fv
+    )
+
+    # Allocate temporary arrays for the regridding operation
+    dst_temp = zeros(N_nodes)
+    src_temp = zeros(N_fv)
+
+    return ConservativeRegridding.FVtoSERegridder(weight_matrix, dst_temp, src_temp)
+end
+
+# SE source → SE destination
+function ConservativeRegridding.Regridder(
+    manifold::M,
+    dst::ClimaCore.Spaces.AbstractSpectralElementSpace,
+    src::ClimaCore.Spaces.AbstractSpectralElementSpace;
+    threaded = true,
+    kwargs...
+) where {M <: GOCore.Manifold}
+    # Convert the SE source and destination grids into trees
+    src_se_tree = Trees.treeify(manifold, src)
+    dst_se_tree = Trees.treeify(manifold, dst)
+
+    # Get the SE node positions and weights as flat vectors
+    src_node_positions = se_node_positions(src)
+    src_node_weights   = se_node_weights(src)
+    dst_node_weights   = se_node_weights(dst)
+
+    # Get the number of SE source and destination nodes
+    Nq_src = Quadratures.degrees_of_freedom(Spaces.quadrature_style(src))
+    Nh_src = Meshes.nelements(Topologies.mesh(Spaces.topology(src)))
+    N_src_nodes = Nq_src^2 * Nh_src
+
+    Nq_dst = Quadratures.degrees_of_freedom(Spaces.quadrature_style(dst))
+    Nh_dst = Meshes.nelements(Topologies.mesh(Spaces.topology(dst)))
+    N_dst_nodes = Nq_dst^2 * Nh_dst
+
+    # Get all source SE nodes that lie in the destination SE elements we're remapping to
+    candidate_pairs = _get_candidate_pairs(manifold, src_se_tree, dst_se_tree, threaded)
+    node_elem_pairs = _find_nodes_in_cells(
+        candidate_pairs, dst_se_tree, src_node_positions, Nq_src
+    )
+    node_idxs = first.(node_elem_pairs)
+    elem_idxs  = last.(node_elem_pairs)
+
+    # The weights are the source SE node weights for the source SE nodes in the destination
+    # SE elements we're remapping to
+    vals = [src_node_weights[n] for n in node_idxs]
+    weight_matrix = SparseArrays.sparse(elem_idxs, node_idxs, vals, Nh_dst, N_src_nodes)
+
+    # Find all rows of the weight matrix that have zero sum (i.e. no source SE nodes in the dest SE element)
+    # and add the fallback intersection-area-weighted element averages to those rows
+    zero_rows = findall(iszero, vec(sum(weight_matrix; dims=2)))
+    weight_matrix = _add_intersection_fallback!(
+        weight_matrix, candidate_pairs, zero_rows,
+        manifold, src_se_tree, dst_se_tree, src_node_weights, Nq_src, Nh_dst, N_src_nodes
+    )
+
+    # Get the areas of the destination SE elements, which are used for normalization
+    Nq_dst2 = Nq_dst^2
+    dst_element_areas = [
+        sum(dst_node_weights[(e-1)*Nq_dst2+1 : e*Nq_dst2]) for e in 1:Nh_dst
+    ]
+
+    # Allocate temporary arrays for the regridding operation
+    dst_temp = zeros(N_dst_nodes)
+    src_temp = zeros(N_src_nodes)
+
+    return ConservativeRegridding.SEtoSERegridder(
+        weight_matrix, dst_element_areas, Nq_dst, dst_temp, src_temp
+    )
+end
+
+## Field-level regrid! convenience interface
+
+"""
+    regrid!(dst::AbstractVector, regridder::SEtoFVRegridder, src::ClimaCore.Fields.Field)
+
+Remap a ClimaCore spectral element `Field` to a flat FV vector, converting the field
+to a flat nodal vector internally.
+"""
+function ConservativeRegridding.regrid!(
+    dst::AbstractVector,
+    regridder::ConservativeRegridding.SEtoFVRegridder,
+    src::ClimaCore.Fields.Field,
+)
+    return ConservativeRegridding.regrid!(dst, regridder, se_field_to_vec(src))
+end
+
+"""
+    regrid!(dst::ClimaCore.Fields.Field, regridder::FVtoSERegridder, src::AbstractVector)
+
+Remap a flat FV vector into a ClimaCore spectral element `Field`, writing the
+result back into `dst` in-place.
+"""
+function ConservativeRegridding.regrid!(
+    dst::ClimaCore.Fields.Field,
+    regridder::ConservativeRegridding.FVtoSERegridder,
+    src::AbstractVector,
+)
+    dst_vec = regridder.dst_temp
+    ConservativeRegridding.regrid!(dst_vec, regridder, src)
+    vec_to_se_field!(dst, dst_vec)
+    return dst
+end
+
+"""
+    regrid!(dst::ClimaCore.Fields.Field, regridder::SEtoSERegridder, src::ClimaCore.Fields.Field)
+
+Remap one ClimaCore spectral element `Field` to another, converting both fields to
+flat nodal vectors internally and writing the result back into `dst` in-place.
+"""
+function ConservativeRegridding.regrid!(
+    dst::ClimaCore.Fields.Field,
+    regridder::ConservativeRegridding.SEtoSERegridder,
+    src::ClimaCore.Fields.Field,
+)
+    dst_vec = regridder.dst_temp
+    ConservativeRegridding.regrid!(dst_vec, regridder, se_field_to_vec(src))
+    vec_to_se_field!(dst, dst_vec)
+    return dst
 end
 
 end
