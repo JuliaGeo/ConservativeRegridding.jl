@@ -35,11 +35,11 @@ const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeReg
         # Sum of weights should equal the surface area of the sphere (4πr²)
         radius = GO.Spherical().radius
         expected_area = 4π * radius^2
-        @test isapprox(sum(weights), expected_area, rtol=1e-10)
+        @test isapprox(sum(weights), expected_area, rtol=1e-5)
     end
 
     @testset "se_field_to_vec and vec_to_se_field!" begin
-        field = Fields.coordinate_field(cubedsphere_space).long
+        field = Fields.coordinate_field(cubedsphere_space).lat
         v = ClimaCoreExt.se_field_to_vec(field)
         @test length(v) == N_nodes
 

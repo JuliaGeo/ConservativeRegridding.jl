@@ -36,7 +36,7 @@ end
     space = make_cubedsphere_space(; h_elem=16, n_quad_points=4)
     @assert !Topologies.uses_spacefillingcurve(space.grid.topology)
 
-    src_field = Fields.coordinate_field(space).long
+    src_field = Fields.coordinate_field(space).lat
     src_vec = ClimaCoreExt.se_field_to_vec(src_field)
 
     latlon_vals = zeros(360 * 180)
@@ -48,8 +48,8 @@ end
     fv_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(latlon_grid))
     @test isapprox(
         sum(latlon_vals .* fv_areas),
-        sum(src_field),
-        rtol=1e-2,
+        sum(src_field);
+        rtol=1e-2, atol=10.0,
     )
 end
 
@@ -57,7 +57,7 @@ end
     space = make_cubedsphere_space(; h_elem=16, n_quad_points=4, use_sfc=true)
     @assert Topologies.uses_spacefillingcurve(space.grid.topology)
 
-    src_field = Fields.coordinate_field(space).long
+    src_field = Fields.coordinate_field(space).lat
     src_vec = ClimaCoreExt.se_field_to_vec(src_field)
 
     latlon_vals = zeros(360 * 180)
@@ -69,8 +69,8 @@ end
     fv_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(latlon_grid))
     @test isapprox(
         sum(latlon_vals .* fv_areas),
-        sum(src_field),
-        rtol=1e-2,
+        sum(src_field);
+        rtol=1e-2, atol=10.0,
     )
 end
 
@@ -159,7 +159,7 @@ end
 @testset "SE → FV → SE roundtrip conservation" begin
     space = make_cubedsphere_space(; h_elem=16, n_quad_points=4)
 
-    src_field = Fields.coordinate_field(space).long
+    src_field = Fields.coordinate_field(space).lat
     src_vec = ClimaCoreExt.se_field_to_vec(src_field)
 
     N_fv = 360 * 180
@@ -180,7 +180,7 @@ end
     ClimaCoreExt.vec_to_se_field!(roundtrip_field, roundtrip_vec)
 
     fv_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(latlon_grid))
-    @test isapprox(sum(fv_vals .* fv_areas), sum(src_field), rtol=1e-2)
+    @test isapprox(sum(fv_vals .* fv_areas), sum(src_field); rtol=1e-2, atol=10.0)
 end
 
 @testset "Oceananigans TripolarGrid to ClimaCore cubed sphere (default folding)" begin

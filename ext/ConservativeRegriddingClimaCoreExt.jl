@@ -146,6 +146,31 @@ function se_node_weights(space)
 end
 
 """
+    _unique_node_weights(space) → Vector{Float64}
+
+Return the assembled Jacobian integration weight for each unique SE node,
+in the same iteration order as `Spaces.unique_nodes(space)`.
+
+For a node shared by `k` elements, the per-element `WJ` represents only `1/k` of
+the physical node's total contribution.  Dividing by the precomputed DSS weight
+(`J / sum(collocated J)`, stored in `space.grid.dss_weights`) recovers the full
+assembled value across all elements for a shared node:
+
+    assembled_WJ[e,i,j] = WJ[e,i,j] / dss_weight[e,i,j]
+
+Summing this assembled WJ over all unique nodes gives the total quadrature weight
+(≈ sphere area), ensuring global conservation.
+"""
+function _unique_node_weights(space)
+    wj_data  = parent(Spaces.weighted_jacobian(space))
+    dss_data = parent(space.grid.dss_weights)
+    return Float64[
+        wj_data[i, j, 1, elem_idx] / dss_data[i, j, 1, elem_idx]
+        for ((i, j), elem_idx) in Spaces.unique_nodes(space)
+    ]
+end
+
+"""
     se_field_to_vec(field)
 
 Convert a ClimaCore field to a flat vector of nodal values.
@@ -244,13 +269,17 @@ end
     _find_nodes_in_cells(candidate_pairs, cell_tree, node_positions, Nq)
 
 For each candidate (SE element, cell) pair, check which SE nodes lie inside the
-cell polygon.
+cell polygon. Iterates over ALL `Nq²` nodes of each element.  Each flat node index
+is matched to at most one cell (the first match wins).
 
-Returns a `Vector{Tuple{Int,Int}}` of `(node_idx, cell_idx)` pairs — one entry per
-SE node that falls inside a destination cell.
+Returns a `Vector{Tuple{Int,Int}}` of `(node_idx, cell_idx)` pairs.
+
+Used for FV→SE regridding, where every node occurrence (including shared boundary
+nodes) should independently receive the containing FV cell's value.
 """
-function _find_nodes_in_cells(candidate_pairs, cell_tree, node_positions, Nq)
+function _find_nodes_in_cells(candidate_pairs, cell_tree, node_positions, Nq::Int)
     pairs = Tuple{Int,Int}[]
+    matched = Set{Int}()
 
     for (se_elem_idx, cell_idx) in candidate_pairs
         cell_polygon = Trees.getcell(cell_tree, cell_idx)
@@ -259,8 +288,10 @@ function _find_nodes_in_cells(candidate_pairs, cell_tree, node_positions, Nq)
         node_offset = (se_elem_idx - 1) * Nq^2
         for jj in 1:Nq, ii in 1:Nq
             node_idx = node_offset + (jj - 1) * Nq + ii
+            node_idx in matched && continue
             if _point_in_convex_spherical_polygon(node_positions[node_idx], ring)
                 push!(pairs, (node_idx, cell_idx))
+                push!(matched, node_idx)
             end
         end
     end
@@ -332,9 +363,9 @@ function ConservativeRegridding.Regridder(
     se_tree = Trees.treeify(manifold, src)
     fv_tree = Trees.treeify(manifold, dst)
 
-    # Get the SE node positions and weights as flat vectors
     node_positions = se_node_positions(src)
-    node_weights = se_node_weights(src)
+    unique_wj = _unique_node_weights(src)
+    per_elem_weights = se_node_weights(src)
 
     # Get the number of SE nodes and FV cells
     Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(src))
@@ -344,20 +375,34 @@ function ConservativeRegridding.Regridder(
 
     # Get all source SE nodes that lie in the FV cells we're remapping to
     candidate_pairs = _get_candidate_pairs(manifold, se_tree, fv_tree, threaded)
-    node_cell_pairs = _find_nodes_in_cells(candidate_pairs, fv_tree, node_positions, Nq)
-    node_idxs = first.(node_cell_pairs)
-    cell_idxs  = last.(node_cell_pairs)
+    elem_to_cells = Dict{Int, Vector{Int}}()
+    for (se_elem_idx, cell_idx) in candidate_pairs
+        push!(get!(elem_to_cells, se_elem_idx, Int[]), cell_idx)
+    end
 
     # The weights are the SE node weights for the SE nodes in the FV cells we're remapping to
-    vals = [node_weights[n] for n in node_idxs]
-    weight_matrix = SparseArrays.sparse(cell_idxs, node_idxs, vals, N_fv, N_nodes)
+    rows, cols, vals = Int[], Int[], Float64[]
+    for (k, ((i, j), elem_idx)) in enumerate(Spaces.unique_nodes(src))
+        flat_idx = (elem_idx - 1) * Nq^2 + (j - 1) * Nq + i
+        pos = node_positions[flat_idx]
+        wj  = unique_wj[k]
+        for cell_idx in get(elem_to_cells, elem_idx, Int[])
+            if _point_in_convex_spherical_polygon(pos, GI.getexterior(Trees.getcell(fv_tree, cell_idx)))
+                push!(rows, cell_idx)
+                push!(cols, flat_idx)
+                push!(vals, wj)
+                break
+            end
+        end
+    end
+    weight_matrix = SparseArrays.sparse(rows, cols, vals, N_fv, N_nodes)
 
     # Find all rows of the weight matrix that have zero sum (i.e. no SE nodes in the FV cell)
     # and add the fallback intersection-area-weighted element averages to those rows
     zero_rows = findall(iszero, vec(sum(weight_matrix; dims=2)))
     weight_matrix = _add_intersection_fallback!(
         weight_matrix, candidate_pairs, zero_rows,
-        manifold, se_tree, fv_tree, node_weights, Nq, N_fv, N_nodes
+        manifold, se_tree, fv_tree, per_elem_weights, Nq, N_fv, N_nodes
     )
 
     # Get the areas of the FV cells, which are used for normalization
@@ -421,8 +466,9 @@ function ConservativeRegridding.Regridder(
 
     # Get the SE node positions and weights as flat vectors
     src_node_positions = se_node_positions(src)
-    src_node_weights   = se_node_weights(src)
-    dst_node_weights   = se_node_weights(dst)
+    unique_src_wj = _unique_node_weights(src)
+    per_elem_src_weights = se_node_weights(src)
+    dst_node_weights = se_node_weights(dst)
 
     # Get the number of SE source and destination nodes
     Nq_src = Quadratures.degrees_of_freedom(Spaces.quadrature_style(src))
@@ -435,23 +481,33 @@ function ConservativeRegridding.Regridder(
 
     # Get all source SE nodes that lie in the destination SE elements we're remapping to
     candidate_pairs = _get_candidate_pairs(manifold, src_se_tree, dst_se_tree, threaded)
-    node_elem_pairs = _find_nodes_in_cells(
-        candidate_pairs, dst_se_tree, src_node_positions, Nq_src
-    )
-    node_idxs = first.(node_elem_pairs)
-    elem_idxs  = last.(node_elem_pairs)
+    src_elem_to_dst_elems = Dict{Int, Vector{Int}}()
+    for (src_elem_idx, dst_elem_idx) in candidate_pairs
+        push!(get!(src_elem_to_dst_elems, src_elem_idx, Int[]), dst_elem_idx)
+    end
 
     # The weights are the source SE node weights for the source SE nodes in the destination
     # SE elements we're remapping to
-    vals = [src_node_weights[n] for n in node_idxs]
-    weight_matrix = SparseArrays.sparse(elem_idxs, node_idxs, vals, Nh_dst, N_src_nodes)
+    rows, cols, vals = Int[], Int[], Float64[]
+    for (k, ((i, j), elem_idx)) in enumerate(Spaces.unique_nodes(src))
+        flat_idx = (elem_idx - 1) * Nq_src^2 + (j - 1) * Nq_src + i
+        pos = src_node_positions[flat_idx]
+        wj  = unique_src_wj[k]
+        for dst_elem_idx in get(src_elem_to_dst_elems, elem_idx, Int[])
+            if _point_in_convex_spherical_polygon(pos, GI.getexterior(Trees.getcell(dst_se_tree, dst_elem_idx)))
+                push!(rows, dst_elem_idx); push!(cols, flat_idx); push!(vals, wj)
+                break
+            end
+        end
+    end
+    weight_matrix = SparseArrays.sparse(rows, cols, vals, Nh_dst, N_src_nodes)
 
     # Find all rows of the weight matrix that have zero sum (i.e. no source SE nodes in the dest SE element)
     # and add the fallback intersection-area-weighted element averages to those rows
     zero_rows = findall(iszero, vec(sum(weight_matrix; dims=2)))
     weight_matrix = _add_intersection_fallback!(
         weight_matrix, candidate_pairs, zero_rows,
-        manifold, src_se_tree, dst_se_tree, src_node_weights, Nq_src, Nh_dst, N_src_nodes
+        manifold, src_se_tree, dst_se_tree, per_elem_src_weights, Nq_src, Nh_dst, N_src_nodes
     )
 
     # Get the areas of the destination SE elements, which are used for normalization
