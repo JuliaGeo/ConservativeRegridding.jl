@@ -102,17 +102,18 @@ The extension provides helpers to bridge ClimaCore's data layout with the flat
 nodal vectors expected by `regrid!`:
 
 ```julia
-const Ext = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingClimaCoreExt)
+using ClimaCore: Fields
+const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingClimaCoreExt)
 
 # ClimaCore field → flat vector
-src_vec = Ext.se_field_to_vec(field)
+src_vec = ClimaCoreExt.se_field_to_vec(field)
 
 # Flat vector → ClimaCore field
 dst_field = Fields.zeros(space)
-Ext.vec_to_se_field!(dst_field, dst_vec)
+ClimaCoreExt.vec_to_se_field!(dst_field, dst_vec)
 
 # Node positions and weights (for diagnostics / verification)
-positions = Ext.se_node_positions(space)   # Vector{UnitSphericalPoint}
+positions = ClimaCoreExt.se_node_positions(space)   # Vector{UnitSphericalPoint}
 weights   = Ext.se_node_weights(space)     # Vector{Float64}
 ```
 
