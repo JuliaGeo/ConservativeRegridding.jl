@@ -1,14 +1,23 @@
 """$(TYPEDSIGNATURES)
 Regrid data on `src_field` onto `dst_field` conservatively (mean-preserving) using the `regridder` matrix.
-`dst_area` is the area of each grid cell in `dst_field` and is used to normalize the result,
-if not provided, will recompute this from `regridder`. `src_field` and `dst_field` can be any n-dimensional array,
-in which case the regridding of the 1st dimension is broadcast to additional dimensions.
+`dst_area` is the area of each grid cell in `dst_field` and is used to normalize the result;
+if not provided, it will be recomputed from `regridder`.
 
-Mathematics of regridding: if A are the intersection areas between the respective grids of the fields d (dst) and s (src),
-and aˢ and aᵈ are the areas of the source and destination grid cells, then ``d`` is computed via
+For n-dimensional arrays, regridding is applied along a single spatial dimension and
+broadcast over all remaining dimensions.  Use the `dims` keyword (default `1`) to select
+which dimension is the spatial (regridding) dimension — analogous to `eachslice(A; dims)`.
+
+For example, with a `(ncells, ntimes, nlevels)` array and `dims=1`, regridding operates
+along the first axis while iterating over times and levels.  With `dims=2`, it would
+operate along the second axis instead.
+
+## Mathematics
+
+If ``A`` are the intersection areas between the respective grids of the fields ``d`` (dst) and ``s`` (src),
+and ``aˢ`` and ``aᵈ`` are the areas of the source and destination grid cells, then ``d`` is computed via
 
 ```math
-d = (A s) / aˢ 
+d = (A s) / aˢ
 ```
 
 Note that by construction,
@@ -46,14 +55,30 @@ function regrid!(dst_field::AbstractVector, regridder::Regridder, src_field::Den
     return dst_field
 end
 
-# For n-dimensional arrays, iterate over slices of the first dimension
-function regrid!(dst_field::AbstractArray, regridder::Regridder, src_field::AbstractArray)
+# For n-dimensional arrays, iterate over slices along dimension `dims` (default: 1).
+# Like `eachslice`, `dims` specifies the spatial dimension that the regridder operates on;
+# all other dimensions are iterated over.
+function regrid!(dst_field::AbstractArray, regridder::Regridder, src_field::AbstractArray; dims::Int=1)
     if ndims(src_field) == 1
         return regrid!(vec(dst_field), regridder, vec(src_field))
     end
-    for I in CartesianIndices(axes(src_field)[2:end])
-        src_slice = view(src_field, :, I)
-        dst_slice = view(dst_field, :, I)
+    N = ndims(src_field)
+    @assert 1 <= dims <= N "dims=$dims is out of range for a $(N)-dimensional array"
+    # Collect axes for all dimensions except `dims`
+    other_axes = ntuple(i -> axes(src_field, i < dims ? i : i + 1), N - 1)
+    for I in CartesianIndices(other_axes)
+        # Build full index tuple: Colon() at position `dims`, indices elsewhere
+        idx = ntuple(N) do d
+            if d == dims
+                Colon()
+            elseif d < dims
+                I[d]
+            else
+                I[d - 1]
+            end
+        end
+        src_slice = view(src_field, idx...)
+        dst_slice = view(dst_field, idx...)
         regrid!(dst_slice, regridder, src_slice)
     end
     return dst_field
