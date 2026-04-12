@@ -76,4 +76,34 @@ import GeometryOpsCore
         ConservativeRegridding.regrid!(dst_3d, r, src_3d)
         @test all(dst_3d .≈ 1.0)
     end
+
+    @testset "dims keyword" begin
+        @testset "dims=1 (default)" begin
+            src_mat = ones(4, 3)
+            dst_mat = zeros(9, 3)
+            ConservativeRegridding.regrid!(dst_mat, r, src_mat; dims=1)
+            @test all(dst_mat .≈ 1.0)
+        end
+
+        @testset "dims=2 (spatial dimension last)" begin
+            src_mat = ones(3, 4)
+            dst_mat = zeros(3, 9)
+            ConservativeRegridding.regrid!(dst_mat, r, src_mat; dims=2)
+            @test all(dst_mat .≈ 1.0)
+        end
+
+        @testset "dims=2 on 3D array (spatial in the middle)" begin
+            src_3d = ones(2, 4, 3)
+            dst_3d = zeros(2, 9, 3)
+            ConservativeRegridding.regrid!(dst_3d, r, src_3d; dims=2)
+            @test all(dst_3d .≈ 1.0)
+        end
+
+        @testset "dims=3 on 3D array (spatial dimension last)" begin
+            src_3d = ones(3, 2, 4)
+            dst_3d = zeros(3, 2, 9)
+            ConservativeRegridding.regrid!(dst_3d, r, src_3d; dims=3)
+            @test all(dst_3d .≈ 1.0)
+        end
+    end
 end
