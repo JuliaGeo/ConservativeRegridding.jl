@@ -55,6 +55,61 @@ treeify(manifold::GO.Spherical, grid::AbstractMatrix{<: GO.UnitSpherical.UnitSph
 GOCore.best_manifold(grid::NTuple{2, <: AbstractVector{<: Real}}) = GO.Planar()
 treeify(manifold::GOCore.Manifold, grid::NTuple{2, <: AbstractVector{<: Real}}) = TopDownQuadtreeCursor(RegularGrid(manifold, grid...))
 
+# 6-face cubed sphere from raw corner-point matrices (no ClimaCore dependency).
+#
+# Each element of the NTuple is a (Nc+1)×(Nc+1) matrix of UnitSphericalPoints
+# representing the cell-face corners of one cube face. The faces are assembled
+# into a CubedSphereToplevelTree with IndexOffsetQuadtreeCursor per face, so
+# that global cell indices span 1 : 6·Nc².
+#
+# This is the general-purpose entry point for any cubed-sphere grid where you
+# have the corner coordinates — the ClimaCore extension (ClimaCoreExt) does
+# the same thing but extracts corners from a ClimaCore Topology2D.
+
+"""
+    treeify(manifold::Spherical, faces::NTuple{6, <:AbstractMatrix{<:UnitSphericalPoint}})
+
+Build a `CubedSphereToplevelTree` from 6 per-face corner-point matrices.
+
+Each matrix must have shape `(Nc+1, Nc+1)` where `Nc` is the number of cells
+per panel edge. Corner `(i, j)` is the vertex shared by up to 4 adjacent cells.
+`CellBasedGrid` builds cell polygons as quadrilaterals from 4 adjacent corners:
+`(i,j)`, `(i+1,j)`, `(i+1,j+1)`, `(i,j+1)`.
+
+Global cell indexing is column-major per face, faces concatenated:
+`global_idx = (face-1) * Nc² + i + (j-1) * Nc`, where `i` is the first
+(fastest-varying) index within each face.
+
+## Example
+
+```julia
+using GeometryOps: UnitSphereFromGeographic, UnitSphericalPoint
+# Build 6 face corner matrices from some projection...
+faces = ntuple(6) do f
+    [UnitSphereFromGeographic()((lon, lat)) for lon in lon_faces, lat in lat_faces]
+end
+tree = Trees.treeify(GO.Spherical(), faces)
+regridder = Regridder(other_grid, tree)
+```
+"""
+function treeify(manifold::GO.Spherical, faces::NTuple{6, <: AbstractMatrix{<: GO.UnitSpherical.UnitSphericalPoint}})
+    Nc = size(faces[1], 1) - 1
+    for (f, mat) in enumerate(faces)
+        size(mat) == (Nc + 1, Nc + 1) ||
+            error("face $f has size $(size(mat)), expected ($((Nc+1, Nc+1)))")
+    end
+    quadtrees = [
+        IndexOffsetQuadtreeCursor(
+            CellBasedGrid(manifold, faces[p]),
+            (p - 1) * Nc * Nc,
+        )
+        for p in 1:6
+    ]
+    return CubedSphereToplevelTree(quadtrees)
+end
+
+GOCore.best_manifold(::NTuple{6, <: AbstractMatrix{<: GO.UnitSpherical.UnitSphericalPoint}}) = GO.Spherical()
+
 #=
 ## AbstractCurvilinearGrid
 
