@@ -41,7 +41,7 @@ ConservativeRegriddingSpeedyWeatherExt = ["RingGrids", "SpeedyWeather"]
 [compat]
 ChunkSplitters = "3"
 ClimaCore = "0.14.49"
-Oceananigans = "0.106"
+Oceananigans = "0.106, 0.107"
 DocStringExtensions = "0.8, 0.9"
 Extents = "0.1"
 GeoInterface = "1"
