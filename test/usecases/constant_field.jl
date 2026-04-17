@@ -20,7 +20,7 @@ using ClimaCore:
 #   - non-global source: undershoot is expected (uncovered regions),
 #                        but overshoot (value > 1 + atol) indicates a bug
 # ---------------------------------------------------------------------------
-function test_constant_regrid(R, src_global, dst_global; atol=1e-2)
+function test_constant_regrid(R::ConservativeRegridding.Regridder, src_global, dst_global; atol=1e-4)
     n_dst, n_src = size(R)
     A = R.intersections
 
@@ -58,6 +58,49 @@ function test_constant_regrid(R, src_global, dst_global; atol=1e-2)
 end
 
 # ---------------------------------------------------------------------------
+# SE regridder constant-field tests (forward direction only; no transpose).
+#
+# src_global / dst_global are accepted for API compatibility but ignored:
+# ClimaCore cubed-sphere spaces always cover the full sphere.
+# ---------------------------------------------------------------------------
+
+# SE → FV: global conservation — area-weighted mean of destination ≈ 1.0.
+function test_constant_regrid(R::ConservativeRegridding.SEtoFVRegridder, src_global, dst_global; rtol=2e-2)
+    N_fv, N_se_nodes = size(R)
+    @testset let direction = :forward
+        src_vals = ones(N_se_nodes)
+        dst_vals = zeros(N_fv)
+        ConservativeRegridding.regrid!(dst_vals, R, src_vals)
+        @test isapprox(sum(dst_vals .* R.dst_areas) / sum(R.dst_areas), 1.0; rtol)
+    end
+end
+
+# FV → SE: every covered SE node should be exactly 1.0.
+function test_constant_regrid(R::ConservativeRegridding.FVtoSERegridder, src_global, dst_global; atol=1e-4)
+    N_se_nodes, N_fv = size(R)
+    @testset let direction = :forward
+        src_vals = ones(N_fv)
+        dst_vals = zeros(N_se_nodes)
+        ConservativeRegridding.regrid!(dst_vals, R, src_vals)
+        covered = vec(sum(R.weight_matrix, dims=2)) .> 0
+        @test maximum(abs.(dst_vals[covered] .- 1.0); init=0.0) < atol
+    end
+end
+
+# SE → SE: global conservation — area-weighted mean of destination elements ≈ 1.0.
+function test_constant_regrid(R::ConservativeRegridding.SEtoSERegridder, src_global, dst_global; rtol=2e-2)
+    N_dst_nodes, N_src_nodes = size(R)
+    Nq2 = R.Nq_dst^2
+    @testset let direction = :forward
+        src_vals = ones(N_src_nodes)
+        dst_vals = zeros(N_dst_nodes)
+        ConservativeRegridding.regrid!(dst_vals, R, src_vals)
+        elem_vals = [dst_vals[(e-1)*Nq2 + 1] for e in 1:length(R.dst_element_areas)]
+        @test isapprox(sum(elem_vals .* R.dst_element_areas) / sum(R.dst_element_areas), 1.0; rtol)
+    end
+end
+
+# ---------------------------------------------------------------------------
 # Grid construction
 # ---------------------------------------------------------------------------
 
@@ -80,7 +123,7 @@ healpix_r = Healpix.HealpixMap{Float64, Healpix.RingOrder}(16)
 
 # ClimaCore – regular ordering
 climacore_r = CommonSpaces.CubedSphereSpace(;
-    radius=GO.Spherical().radius, n_quad_points=2, h_elem=16,
+    radius=GO.Spherical().radius, n_quad_points=4, h_elem=16,
 )
 
 # ClimaCore – Gilbert (space-filling curve) ordering
@@ -89,7 +132,7 @@ _context  = ClimaComms.context(_device)
 _h_mesh   = Meshes.EquiangularCubedSphere(Domains.SphereDomain{Float64}(GO.Spherical().radius), 16)
 _h_topo   = Topologies.Topology2D(_context, _h_mesh, Topologies.spacefillingcurve(_h_mesh))
 climacore_g = CommonSpaces.CubedSphereSpace(;
-    radius=_h_mesh.domain.radius, n_quad_points=2, h_elem=16,
+    radius=_h_mesh.domain.radius, n_quad_points=4, h_elem=16,
     h_mesh=_h_mesh, h_topology=_h_topo,
 )
 
