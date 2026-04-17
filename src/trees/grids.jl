@@ -173,21 +173,58 @@ Since we know our grids are curvilinear, this is broadly okay.  It's not perfect
 =#
 
 using LinearAlgebra
+
+# Convert geographic (lon, lat) points to unit-sphere Cartesian, but pass
+# through points that are already UnitSphericalPoints (avoids a
+# double-conversion that produces NaN when CellBasedGrid stores
+# UnitSphericalPoint vertices directly).
+_to_unit_sphere(pt::GO.UnitSpherical.UnitSphericalPoint) = pt
+_to_unit_sphere(pt) = GO.UnitSphereFromGeographic()(pt)
+
 function circle_from_four_corners(corner_points, other_points)
-    raw = GO.UnitSphereFromGeographic().(corner_points)
+    raw = map(_to_unit_sphere, corner_points)
     # corner_points arrive as (BL, TL, BR, TR); reorder to CCW (BL, BR, TR, TL)
     # so that consecutive slerps give bottom, right, top, left edge midpoints.
     p1, p2, p3, p4 = raw[1], raw[3], raw[4], raw[2]
-    center = LinearAlgebra.normalize((p1 .+ p2 .+ p3 .+ p4) ./ 4)
-    # Midpoints of edges (bottom, right, top, left)
-    p12 = GO.UnitSpherical.slerp(p1, p2, 0.5)
-    p23 = GO.UnitSpherical.slerp(p2, p3, 0.5)
-    p34 = GO.UnitSpherical.slerp(p3, p4, 0.5)
-    p41 = GO.UnitSpherical.slerp(p4, p1, 0.5)
+    raw_center = (p1 .+ p2 .+ p3 .+ p4) ./ 4
+    nrm = LinearAlgebra.norm(raw_center)
+    # When the four corners are (anti)symmetrically placed around the origin
+    # (e.g., a latitude band straddling the equator with exactly half the
+    # sphere in longitude), their sum cancels to near-zero. In that case,
+    # fall back to using ALL points (corners + borders) to find a non-
+    # degenerate centroid, or if that also cancels, use an arbitrary axis.
+    if nrm < 1e-12
+        other_raw = map(_to_unit_sphere, other_points)
+        all_pts = vcat(collect(raw), collect(other_raw))
+        raw_center = sum(all_pts) ./ length(all_pts)
+        nrm = LinearAlgebra.norm(raw_center)
+    end
+    center = nrm < 1e-14 ?
+        GO.UnitSpherical.UnitSphericalPoint(0.0, 0.0, 1.0) :   # arbitrary fallback
+        LinearAlgebra.normalize(raw_center)
+    # Midpoints of edges (bottom, right, top, left) — skip slerp if
+    # the two endpoints are nearly antipodal (angle > 170°), since
+    # slerp is ill-defined there. Use the Euclidean midpoint
+    # (normalized) as a cheaper alternative.
+    function _safe_midpoint(a, b)
+        d = LinearAlgebra.dot(a, b)
+        if d > -0.985  # angle < ~170°, slerp is safe
+            return GO.UnitSpherical.slerp(a, b, 0.5)
+        else
+            mid = (a .+ b) ./ 2
+            n = LinearAlgebra.norm(mid)
+            return n < 1e-14 ? a : LinearAlgebra.normalize(mid)
+        end
+    end
+    p12 = _safe_midpoint(p1, p2)
+    p23 = _safe_midpoint(p2, p3)
+    p34 = _safe_midpoint(p3, p4)
+    p41 = _safe_midpoint(p4, p1)
     # Distance to the furthest corner or edge midpoint
     corner_distance = maximum(p -> GO.spherical_distance(center, p), (p1, p2, p3, p4, p12, p23, p34, p41))
     # Distance to the furthest other point
-    other_distance = maximum(p -> GO.spherical_distance(center, p), GO.UnitSphereFromGeographic().(other_points); init = corner_distance)
+    other_raw_pts = map(_to_unit_sphere, other_points)
+    other_distance = maximum(p -> GO.spherical_distance(center, p), other_raw_pts; init = corner_distance)
     # Distance to the furthest point
     distance = max(corner_distance, other_distance)
     #The `*1.0001` is done to not miss intersections through numerical inaccuracies
