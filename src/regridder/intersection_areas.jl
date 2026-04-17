@@ -32,7 +32,7 @@ function compute_intersection_areas(
 end
 
 _area_criterion(cap::GO.UnitSpherical.SphericalCap) = (2pi * (1-cos(cap.radius))) < pi # degree cap - easy enough.  generates quite a few threads anyway.
-_area_criterion(cap::Extents.Extent) = error("Area criterion for multithreading has to be customizable, for 2D planar extents - this needs to be implemented!")
+_area_criterion(cap::Extents.Extent) = true # Always allow task spawning for planar extents; the tree structure itself controls granularity.
 
 function get_all_candidate_pairs(threaded::True, predicate_f::F, src_tree::T1, dst_tree::T2) where {F, T1, T2}
     # TODO: Threaded dual dfs via chunking.
