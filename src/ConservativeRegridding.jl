@@ -37,4 +37,15 @@ include("regridder/intersection_areas.jl")
 @public Regridder, regrid, regrid!
 @public areas
 
+"""
+    save_esmf_weights(path, regridder; kwargs...)
+
+Export regridder weights to an ESMF offline-weights NetCDF file.
+Requires `NCDatasets.jl` to be loaded (triggers the NCDatasets extension).
+
+See the extension docstring for full details on the format, variables,
+and normalization convention.
+"""
+function save_esmf_weights end
+
 end
