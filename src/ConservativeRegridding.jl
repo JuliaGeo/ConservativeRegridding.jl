@@ -38,13 +38,33 @@ include("regridder/intersection_areas.jl")
 @public areas
 
 """
-    save_esmf_weights(path, regridder; kwargs...)
+    save_esmf_weights(path, regridder;
+        src_grid_name="source", dst_grid_name="destination",
+        src_shape=nothing, dst_shape=nothing) -> path
 
-Export regridder weights to an ESMF offline-weights NetCDF file.
-Requires `NCDatasets.jl` to be loaded (triggers the NCDatasets extension).
+Write `regridder`'s sparse weights to an ESMF offline-weights NetCDF file at `path`.
+Requires `NCDatasets.jl` to be loaded (activates the extension).
 
-See the extension docstring for full details on the format, variables,
-and normalization convention.
+## Format (ESMF convention)
+
+| Variable  | Dim      | Description |
+|-----------|----------|-------------|
+| `S`       | `(n_s,)` | Weight: `intersection_area / dst_cell_area` |
+| `row`     | `(n_s,)` | Destination cell index (1-based) |
+| `col`     | `(n_s,)` | Source cell index (1-based) |
+| `frac_a`  | `(n_a,)` | Fraction of source cell area covered by destination grid |
+| `frac_b`  | `(n_b,)` | Fraction of destination cell area covered by source grid |
+| `area_a`  | `(n_a,)` | Source cell areas |
+| `area_b`  | `(n_b,)` | Destination cell areas |
+
+Uses **destarea** normalization (the ESMF/xESMF default). The `Regridder`
+must be built with `normalize=false`; `normalize=true` rescales the
+intersection matrix and the exported weights will not match ESMF conventions.
+For full-sphere-to-full-sphere pairs, `frac_a` and `frac_b` should be 1.0
+to machine precision.
+
+`src_shape`/`dst_shape` (e.g. `(720, 361)`, `(90, 90, 6)`) and the grid
+name strings are stored as global attributes for provenance.
 """
 function save_esmf_weights end
 

@@ -13,44 +13,6 @@ using NCDatasets
 using SparseArrays: rowvals, nonzeros, nzrange
 using Dates: now
 
-"""
-    ConservativeRegridding.save_esmf_weights(path, regridder;
-        src_grid_name="source", dst_grid_name="destination",
-        src_shape=nothing, dst_shape=nothing) -> path
-
-Export regridder weights to an ESMF offline-weights NetCDF file.
-
-## Format (ESMF convention)
-
-| Variable  | Dim      | Description |
-|-----------|----------|-------------|
-| `S`       | `(n_s,)` | Weight: `intersection_area / dst_cell_area` |
-| `row`     | `(n_s,)` | Destination cell index (1-based) |
-| `col`     | `(n_s,)` | Source cell index (1-based) |
-| `frac_a`  | `(n_a,)` | Fraction of source cell area covered by destination grid |
-| `frac_b`  | `(n_b,)` | Fraction of destination cell area covered by source grid |
-| `area_a`  | `(n_a,)` | Source cell areas |
-| `area_b`  | `(n_b,)` | Destination cell areas |
-
-## Normalization
-
-Uses **destarea** normalization (the ESMF/xESMF default):
-`S[k] = intersections[row[k], col[k]] / dst_areas[row[k]]`.
-
-**Important:** Expects a `Regridder` built with `normalize=false`
-(raw intersection areas). If `normalize=true` was used, the
-intersection matrix has been scaled by `max(intersections)` and the
-exported weights will NOT match xESMF conventions.
-
-## Optional attributes
-
-`src_shape` / `dst_shape` tuples (e.g. `(720, 361)`, `(90, 90, 6)`)
-and grid name strings are stored as global NetCDF attributes for
-provenance.
-
-For full-sphere-to-full-sphere grid pairs, `frac_a` and `frac_b`
-should be 1.0 to machine precision.
-"""
 function ConservativeRegridding.save_esmf_weights(
         path::AbstractString, r::Regridder;
         src_grid_name::AbstractString = "source",
