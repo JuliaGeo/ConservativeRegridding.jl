@@ -40,7 +40,8 @@ include("regridder/intersection_areas.jl")
 """
     save_esmf_weights(path, regridder;
         src_grid_name="source", dst_grid_name="destination",
-        src_shape=nothing, dst_shape=nothing) -> path
+        src_shape=nothing, dst_shape=nothing,
+        created_at=nothing) -> path
 
 Write `regridder`'s sparse weights to an ESMF offline-weights NetCDF file at `path`.
 Requires `NCDatasets.jl` to be loaded (activates the extension).
@@ -64,7 +65,9 @@ For full-sphere-to-full-sphere pairs, `frac_a` and `frac_b` should be 1.0
 to machine precision.
 
 `src_shape`/`dst_shape` (e.g. `(720, 361)`, `(90, 90, 6)`) and the grid
-name strings are stored as global attributes for provenance.
+name strings are stored as global attributes for provenance. Pass
+`created_at` (e.g. `string(Dates.now())`) to stamp a creation timestamp;
+omit for reproducible (byte-identical) output.
 """
 function save_esmf_weights end
 

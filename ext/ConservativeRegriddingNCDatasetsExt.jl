@@ -11,7 +11,6 @@ using ConservativeRegridding
 using ConservativeRegridding: Regridder
 using NCDatasets
 using SparseArrays: findnz
-using Dates: now
 
 function ConservativeRegridding.save_esmf_weights(
         path::AbstractString, r::Regridder;
@@ -19,6 +18,7 @@ function ConservativeRegridding.save_esmf_weights(
         dst_grid_name::AbstractString = "destination",
         src_shape::Union{Nothing, Tuple} = nothing,
         dst_shape::Union{Nothing, Tuple} = nothing,
+        created_at::Union{Nothing, AbstractString} = nothing,
     )
     A         = r.intersections
     src_areas = Float64.(r.src_areas)
@@ -45,13 +45,13 @@ function ConservativeRegridding.save_esmf_weights(
 
         ds.attrib["title"]            = "ConservativeRegridding.jl weights (ESMF format)"
         ds.attrib["created_by"]       = "ConservativeRegridding.save_esmf_weights"
-        ds.attrib["created_at"]       = string(now())
         ds.attrib["source_grid"]      = String(src_grid_name)
         ds.attrib["destination_grid"] = String(dst_grid_name)
         ds.attrib["normalization"]    = "destarea"
         ds.attrib["map_method"]       = "Conservative remapping"
-        src_shape === nothing || (ds.attrib["source_grid_shape"]      = collect(Int64.(src_shape)))
-        dst_shape === nothing || (ds.attrib["destination_grid_shape"] = collect(Int64.(dst_shape)))
+        created_at === nothing || (ds.attrib["created_at"]            = String(created_at))
+        src_shape  === nothing || (ds.attrib["source_grid_shape"]      = collect(Int64.(src_shape)))
+        dst_shape  === nothing || (ds.attrib["destination_grid_shape"] = collect(Int64.(dst_shape)))
     end
     return path
 end
