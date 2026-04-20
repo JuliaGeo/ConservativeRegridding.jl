@@ -1,7 +1,7 @@
 name = "ConservativeRegridding"
 uuid = "8e50ac2c-eb48-49bc-a402-07c87b949343"
 license = "MIT"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Anshul Singhvi <anshulsinghvi@gmail.com>", "Milan Kloewer <milankloewer@gmx.de>", "Simone Silvestri <silvestri.simone0@gmail.com>", "and contributors"]
 
 [workspace]
@@ -41,7 +41,7 @@ ConservativeRegriddingSpeedyWeatherExt = ["RingGrids", "SpeedyWeather"]
 [compat]
 ChunkSplitters = "3"
 ClimaCore = "0.14.49"
-Oceananigans = "0.104"
+Oceananigans = "0.106, 0.107"
 DocStringExtensions = "0.8, 0.9"
 Extents = "0.1"
 GeoInterface = "1"

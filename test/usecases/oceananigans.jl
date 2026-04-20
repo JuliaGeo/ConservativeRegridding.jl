@@ -78,6 +78,86 @@ end
     @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
 end
 
+@testset "RotatedLatitudeLongitudeGrid to lat-long" begin
+    dst_grid = LatitudeLongitudeGrid(size=(90, 45, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+    src_grid = RotatedLatitudeLongitudeGrid(size=(90, 40, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1), north_pole=(70, 55))
+
+    dst = CenterField(dst_grid)
+    src = CenterField(src_grid)
+
+    regridder = ConservativeRegridding.Regridder(dst, src)
+
+    set!(src, (x, y, z) -> abs(x))
+    set!(dst, (x, y, z) -> 0)
+
+    ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-10
+
+    set!(src, (x, y, z) -> rand())
+    ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+end
+
+@testset "Lat-long to RotatedLatitudeLongitudeGrid" begin
+    src_grid = LatitudeLongitudeGrid(size=(90, 45, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+    dst_grid = RotatedLatitudeLongitudeGrid(size=(90, 40, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1), north_pole=(70, 55))
+
+    dst = CenterField(dst_grid)
+    src = CenterField(src_grid)
+
+    regridder = ConservativeRegridding.Regridder(dst, src)
+
+    set!(src, (x, y, z) -> abs(x))
+    set!(dst, (x, y, z) -> 0)
+
+    ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-10
+
+    set!(src, (x, y, z) -> rand())
+    ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+end
+
+@testset "Tripolar (FPivot) to RotatedLatitudeLongitudeGrid" begin
+    src_grid = TripolarGrid(size=(120, 60, 1), fold_topology = RightFaceFolded)
+    dst_grid = RotatedLatitudeLongitudeGrid(size=(90, 40, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1), north_pole=(70, 55))
+
+    dst = CenterField(dst_grid)
+    src = CenterField(src_grid)
+
+    regridder = ConservativeRegridding.Regridder(dst, src)
+
+    set!(src, (x, y, z) -> abs(x))
+    set!(dst, (x, y, z) -> 0)
+
+    ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+
+    set!(src, (x, y, z) -> rand())
+    ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+end
+
+@testset "Tripolar (UPivot) to RotatedLatitudeLongitudeGrid" begin
+    src_grid = TripolarGrid(size=(120, 60, 1), fold_topology = RightCenterFolded)
+    dst_grid = RotatedLatitudeLongitudeGrid(size=(90, 40, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1), north_pole=(70, 55))
+
+    dst = CenterField(dst_grid)
+    src = CenterField(src_grid)
+
+    regridder = ConservativeRegridding.Regridder(dst, src)
+
+    set!(src, (x, y, z) -> abs(x))
+    set!(dst, (x, y, z) -> 0)
+
+    ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+
+    set!(src, (x, y, z) -> rand())
+    ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
+    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+end
+
 @testset "Rectilinear (planar) upscaling" begin
     large_domain_grid = RectilinearGrid(size=(100, 100), x=(0, 2), y=(0, 2), topology=(Periodic, Periodic, Flat))
     small_domain_grid = RectilinearGrid(size=(200, 200), x=(0, 1), y=(0, 1), topology=(Periodic, Periodic, Flat))
