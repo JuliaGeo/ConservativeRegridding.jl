@@ -20,14 +20,16 @@ function ConservativeRegridding.save_esmf_weights(
         dst_shape::Union{Nothing, Tuple} = nothing,
         created_at::Union{Nothing, AbstractString} = nothing,
     )
+    # Materialize to CPU arrays: NCDatasets expects host memory, and A /
+    # src_areas / dst_areas may live on a GPU. `Array(::Array)` is a no-op.
     A         = r.intersections
-    src_areas = Float64.(r.src_areas)
-    dst_areas = Float64.(r.dst_areas)
+    src_areas = Float64.(Array(r.src_areas))
+    dst_areas = Float64.(Array(r.dst_areas))
 
-    row, col, vals = findnz(A)
+    row, col, vals = map(Array, findnz(A))
     S      = Float64.(vals) ./ dst_areas[row]
-    frac_a = vec(sum(A; dims = 1)) ./ src_areas
-    frac_b = vec(sum(A; dims = 2)) ./ dst_areas
+    frac_a = Array(vec(sum(A; dims = 1))) ./ src_areas
+    frac_b = Array(vec(sum(A; dims = 2))) ./ dst_areas
 
     mkpath(dirname(path))
     NCDataset(path, "c") do ds
