@@ -29,7 +29,6 @@ Interfaces = "85a1e053-f937-4924-92a5-1367d23b7b87"
 NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 RingGrids = "d1845624-ad4f-453b-8ff4-a8db365bf3a7"
-SpeedyWeather = "9e226e20-d153-4fed-8a5b-493def4f21a9"
 
 [extensions]
 ConservativeRegriddingClimaCoreExt = "ClimaCore"
@@ -38,18 +37,17 @@ ConservativeRegriddingInterfacesExt = "Interfaces"
 ConservativeRegriddingNCDatasetsExt = "NCDatasets"
 ConservativeRegriddingOceananigansExt = "Oceananigans"
 ConservativeRegriddingRingGridsExt = "RingGrids"
-ConservativeRegriddingSpeedyWeatherExt = ["RingGrids", "SpeedyWeather"]
 
 [compat]
 ChunkSplitters = "3"
 ClimaCore = "0.14.49"
-Oceananigans = "0.106, 0.107"
 DocStringExtensions = "0.8, 0.9"
 Extents = "0.1"
 GeoInterface = "1"
 GeometryOps = "0.1.33"
 GeometryOpsCore = "0.1.9"
 LinearAlgebra = "1"
+Oceananigans = "0.106, 0.107"
 ProgressMeter = "1"
 SciMLPublic = "1"
 SortTileRecursiveTree = "0.1"

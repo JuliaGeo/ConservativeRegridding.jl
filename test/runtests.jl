@@ -19,5 +19,6 @@ using Test, SafeTestsets
     @safetestset "Integration: Constant Field" begin include("usecases/constant_field.jl") end
     # This test is erroring so it's commented out for now
     # @safetestset "Integration: SpeedyWeather" begin include("usecases/speedyweather.jl") end
+    @safetestset "Integration: FullClenshaw / AbstractFullGrid" begin include("usecases/fullclenshaw.jl") end
     @safetestset "Integration: Full sweat test" begin include("sweat.jl") end
 end

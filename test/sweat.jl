@@ -5,12 +5,13 @@ using ConservativeRegridding: ConservativeRegridding as CR, Trees
 using Test
 import GeometryOps as GO, GeoInterface as GI
 
-import ClimaCore, Oceananigans, Healpix, RingGrids
+import ClimaCore, Oceananigans, Healpix, RingGrids, SpeedyWeather
 
 const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingClimaCoreExt)
 const OceananigansExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingOceananigansExt)
 const HealpixExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingHealpixExt)
 const RingGridsExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingRingGridsExt)
+const SpeedyWeatherExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingSpeedyWeatherExt)
 
 function test_integral_is_conserved(regridder, tree1, values1, tree2, values2, final_values; rtol = sqrt(eps(Float64)))
     tree1_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(tree1))
@@ -54,7 +55,6 @@ end
 
 #     values .= vals
 # end
-
 
 import SimplexQuad
 using LinearAlgebra: cross, dot, norm
@@ -148,6 +148,11 @@ healpix_nested_order_vals = healpix_nested_order_field.pixels
 healpix_ring_order_field = Healpix.HealpixMap{Float64, Healpix.RingOrder}(64)
 healpix_ring_order_vals = healpix_ring_order_field.pixels
 
+speedyweather_full_clenshaw_field = rand(SpeedyWeather.FullClenshawGrid, 48)
+speedyweather_full_clenshaw_vals = zeros(Float64, length(speedyweather_full_clenshaw_field))
+speedyweather_full_gaussian_field = rand(SpeedyWeather.FullGaussianGrid, 48)
+speedyweather_full_gaussian_vals = zeros(Float64, length(speedyweather_full_gaussian_field))
+
 oceananigans_fields = [
     ("Oceananigans longitude-latitude grid", oceananigans_latlong_field, oceananigans_latlong_vals),
     ("Oceananigans tripolar grid", oceananigans_tripolar_field, oceananigans_tripolar_vals),
@@ -164,7 +169,12 @@ climacore_fields = [
     ("ClimaCore cubed sphere grid (Gilbert ordered)", climacore_cubedsphere_gilbert_ordered_field, climacore_cubedsphere_gilbert_ordered_vals),
 ]
 
-fields = [oceananigans_fields..., climacore_fields..., healpix_fields...]
+speedyweather_fields = [
+    ("SpeedyWeather full Clenshaw-Curtis grid", speedyweather_full_clenshaw_field, speedyweather_full_clenshaw_vals),
+    ("SpeedyWeather full Gaussian grid", speedyweather_full_gaussian_field, speedyweather_full_gaussian_vals),
+]
+
+fields = [oceananigans_fields..., climacore_fields..., healpix_fields..., speedyweather_fields...]
 
 regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
 @testset "Sweat test" begin
@@ -235,10 +245,15 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
                     # Tripolar and rotated lat-lon grid cells near the "north poles" straddle
                     # the date line, causing the longitude field's 0°/360° discontinuity to
                     # produce inaccurate cell-averaged integrals. Loosen tolerance for that case.
-                    is_dateline_straddling_source = field1 isa Oceananigans.Field && (
-                        field1.grid isa Oceananigans.TripolarGrid ||
-                        field1.grid isa Oceananigans.RotatedLatitudeLongitudeGrid
-                    )
+                    # RingGrids full grids (SpeedyWeather's FullClenshaw/FullGaussian) have the
+                    # same issue by a different route: cell centers sit at lond[1] = 0°, so the
+                    # first ring cell spans [-Δλ/2, +Δλ/2] and straddles the seam directly.
+                    is_dateline_straddling_source =
+                        (field1 isa Oceananigans.Field && (
+                            field1.grid isa Oceananigans.TripolarGrid ||
+                            field1.grid isa Oceananigans.RotatedLatitudeLongitudeGrid
+                        )) ||
+                        (field1 isa RingGrids.AbstractField && field1.grid isa RingGrids.AbstractFullGrid)
                     tol = (is_dateline_straddling_source && fun_to_test isa ConservativeRegridding.LongitudeField) ? 5e-2 : 1e-2
                     @test sum(abs.(vals2_regridded) .* regridder.dst_areas) ≈ sum(abs.(vals2_analytical) .* regridder.dst_areas) rtol=tol
                 end
