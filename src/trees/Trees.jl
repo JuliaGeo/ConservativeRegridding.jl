@@ -7,6 +7,7 @@ import GeometryOps as GO
 import GeometryOps: UnitSpherical as US, SpatialTreeInterface as STI
 
 include("interfaces.jl")
+include("neighbours_interface.jl")
 include("wrappers.jl")
 include("grids.jl")
 
