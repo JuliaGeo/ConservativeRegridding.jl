@@ -64,6 +64,41 @@ Base.parent(w::KnownFullSphereExtentWrapper) = w.tree
 # since we don't have a great way to represent a `POLYGON FULL` (in WKT parlance).
 STI.node_extent(w::KnownFullSphereExtentWrapper) = GO.UnitSpherical.SphericalCap(GO.UnitSphericalPoint((0.,0.,1.)), Float64(pi) |> nextfloat)
 
+#=
+## WithParallelizePolicy
+
+Wraps any spatial tree so that [`should_parallelize`](@ref) for it dispatches
+to a user-supplied callable instead of the default(s) for the inner tree's
+type. This is the instance-level counterpart to defining a tree-type-specific
+`should_parallelize` method — useful for one-off tuning without subtyping.
+=#
+
+"""
+    WithParallelizePolicy(tree, policy)
+
+Wrap `tree` so [`should_parallelize`](@ref) for it calls
+`policy(node, extent) -> Bool` instead of falling back to the default(s)
+for the inner tree's type.
+
+`policy` returns `true` to spawn a parallel task at `node` and stop
+recursing single-threaded, `false` to keep descending. All other
+SpatialTreeInterface methods forward to the wrapped tree.
+
+Use this when you want to tune the multithreading granularity for a
+single regridding call without defining a Julia method on the tree's
+type. For per-type policies, define a `should_parallelize` method on
+the tree type directly.
+"""
+struct WithParallelizePolicy{T, F} <: AbstractTreeWrapper
+    tree::T
+    policy::F
+end
+Base.parent(w::WithParallelizePolicy) = w.tree
+# Disambiguate against the extent-typed defaults in interfaces.jl by defining
+# the wrapper method for each shipped extent type. The wrapper's policy wins.
+should_parallelize(w::WithParallelizePolicy, node, extent::Extents.Extent) = w.policy(node, extent)
+should_parallelize(w::WithParallelizePolicy, node, extent::GO.UnitSpherical.SphericalCap) = w.policy(node, extent)
+
 struct GeometryMaintainingTreeWrapper{Geoms, Tree}
     geoms::Geoms
     tree::Tree

@@ -40,12 +40,15 @@ node.
 
 - `extent::SphericalCap`: spawns once the cap covers less than ¼ of the
   unit sphere — a heuristic that avoids spawning a single task at the
-  root.
-- `extent::Extents.Extent`: errors. Planar trees must define a method
-  specific to their tree type, e.g.
-  `Trees.should_parallelize(::MyTree, node, extent::Extents.Extent) = ...`,
-  because there is no manifold-agnostic notion of "small enough" for
-  planar extents.
+  root. This works because spherical caps have a natural upper bound
+  (the full unit sphere is ~4π steradians) against which "small enough"
+  has a fixed meaning.
+- `extent::Extents.Extent`: errors. Planar extents have no canonical
+  scale — a "unit square" might be 1 metre, 1 degree, or 10⁹ metres —
+  and there is no upper or lower bound on the magnitude of an `Extent`,
+  so no manifold-agnostic default can decide "small enough" without
+  knowing the tree's own notion of size. Tree authors must supply
+  their own method.
 
 # Customization
 
@@ -55,6 +58,13 @@ Override per tree type by adding a more-specific method:
 ConservativeRegridding.Trees.should_parallelize(
     tree::MyTree, node, extent::Extents.Extent,
 ) = prod(ncells(node)) ≤ prod(ncells(getgrid(tree))) ÷ (Threads.nthreads() * 4)
+```
+
+…or wrap any tree at construction time with [`WithParallelizePolicy`](@ref)
+to supply an instance-level callable without defining a method:
+
+```julia
+tree_with_policy = WithParallelizePolicy(my_tree, (node, extent) -> ...)
 ```
 """
 function should_parallelize end

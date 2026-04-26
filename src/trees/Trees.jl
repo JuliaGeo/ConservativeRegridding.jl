@@ -18,6 +18,6 @@ include("specialized_quadtree_cursors.jl")
 export AbstractCurvilinearGrid, ncells, getcell
 export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
 export QuadtreeCursor, TopDownQuadtreeCursor
-export should_parallelize
+export should_parallelize, WithParallelizePolicy
 
 end

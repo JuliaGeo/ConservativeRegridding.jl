@@ -154,3 +154,36 @@ end
     A = r.intersections
     @test sum(A) > 0
 end
+
+# Verifies the instance-level WithParallelizePolicy wrapper: dispatching
+# on the wrapper short-circuits the type-level default and calls the
+# user-supplied closure instead.
+@testset "WithParallelizePolicy wrapper" begin
+    function make_grid(nx, ny)
+        polys = Matrix{GI.Polygon}(undef, nx, ny)
+        for j in 1:ny, i in 1:nx
+            x0, x1 = (i-1)/nx, i/nx
+            y0, y1 = (j-1)/ny, j/ny
+            ring = GI.LinearRing([(x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0)])
+            polys[i,j] = GI.Polygon([ring])
+        end
+        polys
+    end
+
+    src_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), make_grid(8, 8))
+    dst_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), make_grid(16, 16))
+
+    policy_calls = Ref(0)
+    src_wrapped = ConservativeRegridding.Trees.WithParallelizePolicy(
+        src_tree, (node, extent) -> (policy_calls[] += 1; true),
+    )
+    dst_wrapped = ConservativeRegridding.Trees.WithParallelizePolicy(
+        dst_tree, (node, extent) -> (policy_calls[] += 1; true),
+    )
+
+    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_wrapped, src_wrapped; threaded=true)
+    @test policy_calls[] > 0
+    @test r isa ConservativeRegridding.Regridder
+    @test size(r) == (16*16, 8*8)
+    @test sum(r.intersections) > 0
+end
