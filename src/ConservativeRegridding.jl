@@ -28,6 +28,7 @@ using .Trees
 export AbstractCurvilinearGrid, ncells, getcell
 export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
 export QuadtreeCursor, TopDownQuadtreeCursor
+export should_parallelize
 
 include("regridder/regridder.jl")
 include("regridder/regrid.jl")

@@ -15,7 +15,59 @@ thing that is returned implements the `SpatialTreeInterface` methods.
 import GeometryOpsCore as GOCore
 import GeometryOps as GO
 import GeometryOps: SpatialTreeInterface as STI
+import Extents
 import SortTileRecursiveTree # in order to implement the `getcell/ncell` interface
+
+"""
+    should_parallelize(tree, node, extent) -> Bool
+
+Decide whether to spawn a parallel task at `node` of `tree` during the
+multithreaded dual-tree traversal used to find candidate intersecting
+cell pairs.
+
+Returning `true` means *this node is the granularity at which a task is
+spawned*: the dual DFS stops descending recursively into children for
+the purpose of further parallelism and runs the subtree as a single
+parallel unit. Returning `false` means *keep descending* — the node is
+still too coarse and a task at this level would create unbalanced work.
+
+`extent` is the bounding region of `node` (e.g. an `Extents.Extent` for
+planar grids or a `SphericalCap` for spherical grids). It is passed
+explicitly so implementations and the dual DFS share one computation per
+node.
+
+# Defaults
+
+- `extent::SphericalCap`: spawns once the cap covers less than ¼ of the
+  unit sphere — a heuristic that avoids spawning a single task at the
+  root.
+- `extent::Extents.Extent`: errors. Planar trees must define a method
+  specific to their tree type, e.g.
+  `Trees.should_parallelize(::MyTree, node, extent::Extents.Extent) = ...`,
+  because there is no manifold-agnostic notion of "small enough" for
+  planar extents.
+
+# Customization
+
+Override per tree type by adding a more-specific method:
+
+```julia
+ConservativeRegridding.Trees.should_parallelize(
+    tree::MyTree, node, extent::Extents.Extent,
+) = prod(ncells(node)) ≤ prod(ncells(getgrid(tree))) ÷ (Threads.nthreads() * 4)
+```
+"""
+function should_parallelize end
+
+should_parallelize(tree, node, extent::GO.UnitSpherical.SphericalCap) =
+    (2π * (1 - cos(extent.radius))) < π
+
+should_parallelize(tree, node, extent::Extents.Extent) = error(
+    "`Trees.should_parallelize` has no method for planar `Extents.Extent` on tree of type `$(typeof(tree))`. " *
+    "Planar trees must define a tree-type-specific method, e.g. " *
+    "`ConservativeRegridding.Trees.should_parallelize(::$(typeof(tree)), node, extent::Extents.Extent) = ...` " *
+    "to control multithreading granularity."
+)
 
 # Generic method to treeify "anything"
 function treeify(manifold, grid)

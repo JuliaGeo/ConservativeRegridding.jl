@@ -3,6 +3,7 @@ using Test
 
 import GeometryOps as GO, GeoInterface as GI
 import GeometryOpsCore
+import Extents
 using SparseArrays
 
 @testset "Custom intersection_operator" begin
@@ -107,8 +108,12 @@ end
     end
 end
 
-# Regression test for GitHub issue #66:
-# Planar grids with threaded=true should work (previously errored in _area_criterion).
+# Regression test for GitHub issue #66 + verifies the `should_parallelize` dispatch hook:
+# Planar grids ship no default policy, so threaded regridding requires the tree author
+# to define `should_parallelize` for their tree type. Here we override on the package's
+# own TopDownQuadtreeCursor (acting as the "tree author") and verify that:
+#   1. the override is actually invoked during the dual DFS, and
+#   2. threaded planar regridding produces correct results.
 @testset "Planar grid threaded regridding (#66)" begin
     function make_grid(nx, ny)
         polys = Matrix{GI.Polygon}(undef, nx, ny)
@@ -120,14 +125,32 @@ end
         end
         polys
     end
-    src = make_grid(2, 2)
-    dst = make_grid(3, 3)
+
+    # The planar default errors when no tree-type-specific method is defined.
+    # Test with a synthetic tree type so the assertion is independent of any
+    # method later added in this session.
+    struct _UnsupportedPlanarTree end
+    @test_throws ErrorException ConservativeRegridding.Trees.should_parallelize(
+        _UnsupportedPlanarTree(), nothing, Extents.Extent(X=(0.0, 1.0), Y=(0.0, 1.0)),
+    )
+
+    # Grids must be large enough that neither tree's top-level cursor is already a
+    # leaf — otherwise the dual DFS short-circuits before consulting `should_parallelize`.
+    src = make_grid(8, 8)
+    dst = make_grid(16, 16)
+
+    # Define a tree-type-specific policy and confirm it's called during construction.
+    call_count = Ref(0)
+    ConservativeRegridding.Trees.should_parallelize(
+        tree::ConservativeRegridding.Trees.TopDownQuadtreeCursor,
+        node,
+        extent::Extents.Extent,
+    ) = (call_count[] += 1; true)
+
     r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst, src; threaded=true)
+    @test call_count[] > 0
     @test r isa ConservativeRegridding.Regridder
-    # Verify that the regridder has the correct dimensions
-    @test size(r) == (9, 4)
-    # Verify areas are conserved: total area of all intersections should equal
-    # the total area of the smaller grid (both grids cover [0,1]x[0,1])
+    @test size(r) == (16*16, 8*8)
     A = r.intersections
     @test sum(A) > 0
 end
