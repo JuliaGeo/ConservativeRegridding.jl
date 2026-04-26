@@ -76,8 +76,8 @@ type. This is the instance-level counterpart to defining a tree-type-specific
 """
     WithParallelizePolicy(tree, policy)
 
-Wrap `tree` so [`should_parallelize`](@ref) for it calls
-`policy(node, extent) -> Bool` instead of falling back to the default(s)
+Wrap `tree` so [`Trees.should_parallelize`](@ref) for it calls
+`policy(tree, node, extent) -> Bool` instead of falling back to the default(s)
 for the inner tree's type.
 
 `policy` returns `true` to spawn a parallel task at `node` and stop
@@ -96,9 +96,17 @@ end
 Base.parent(w::WithParallelizePolicy) = w.tree
 # Disambiguate against the extent-typed defaults in interfaces.jl by defining
 # the wrapper method for each shipped extent type. The wrapper's policy wins.
-should_parallelize(w::WithParallelizePolicy, node, extent::Extents.Extent) = w.policy(node, extent)
-should_parallelize(w::WithParallelizePolicy, node, extent::GO.UnitSpherical.SphericalCap) = w.policy(node, extent)
+should_parallelize(w::WithParallelizePolicy, node, extent::Extents.Extent) = w.policy(w.tree, node, extent)
+should_parallelize(w::WithParallelizePolicy, node, extent::GO.UnitSpherical.SphericalCap) = w.policy(w.tree, node, extent)
 
+
+"""
+    GeometryMaintainingTreeWrapper(geoms, tree)
+
+A tree that stores the geometry data along with the tree (which, per the SpatialTreeInterface, should only store integer indices).
+
+This is mostly useful to wrap if you want to define a descent method that also requires the geometry data passed _alongside_ the tree.
+"""
 struct GeometryMaintainingTreeWrapper{Geoms, Tree}
     geoms::Geoms
     tree::Tree

@@ -175,10 +175,10 @@ end
 
     policy_calls = Ref(0)
     src_wrapped = ConservativeRegridding.Trees.WithParallelizePolicy(
-        src_tree, (node, extent) -> (policy_calls[] += 1; true),
+        src_tree, (tree, node, extent) -> (policy_calls[] += 1; true),
     )
     dst_wrapped = ConservativeRegridding.Trees.WithParallelizePolicy(
-        dst_tree, (node, extent) -> (policy_calls[] += 1; true),
+        dst_tree, (tree, node, extent) -> (policy_calls[] += 1; true),
     )
 
     r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_wrapped, src_wrapped; threaded=true)
