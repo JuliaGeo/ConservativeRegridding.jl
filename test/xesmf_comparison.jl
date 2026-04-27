@@ -521,36 +521,45 @@ end
         @test_skip "Python ESMF stack unavailable"
     else
         # ----------------------------------------------------------------
-        # (a) Global lon/lat: 36×18 → 24×12, periodic, with pole fold.
-        # `build_esmpy_grid` passes `num_peri_dims = 1` so ESMF's stencil
-        # topology matches CR's `LonLatConnectivityWrapper` auto-detected
-        # `pole_top/bottom_fold = true`: 1st-order weights agree to ~5e-15
-        # (observed 4e-15 matrix, 1e-15 field on 2026-04-27).
+        # (a) Global lon/lat: 36×18 → 24×12, periodic.
+        # `build_esmpy_grid` passes `num_peri_dims = 1`. ESMF's `pole_kind =
+        # MONOPOLE` adds the across-pole connection in the *Grid* but, at
+        # `Grid → Mesh` conversion time, polar corner nodes (lon_a, 90°)
+        # and (lon_b, 90°) are *not* deduplicated — they get distinct
+        # global IDs. So ESMF's 2nd-order gradient stencil for a polar src
+        # cell is just 5 neighbours (2 same-row + 3 row-below); the
+        # across-pole nlon/2 fold does not enter.
         #
-        # 2nd-order tolerances are looser than the plan's 5e-9. The bulk of
-        # the residual comes from ESMF's `pole_kind = MONOPOLE` collapsing
-        # the polar row to a single mesh node: through that shared node, in
-        # ESMF every top-row cell becomes a node-neighbour of every other
-        # top-row cell. ESMF's polar gradient stencil is therefore the full
-        # ~36-cell polar ring; CR's `LonLatConnectivityWrapper` uses the
-        # 8-cell Moore + nlon/2 fold. Matching this would require expanding
-        # the polar stencil — deferred. ESMF's analytical spherical centroid
-        # vs CR's vertex-mean (deduplicated to handle the polar triangle
-        # case correctly) is a smaller secondary effect. Observed
-        # 2026-04-27: matrix rel ~1.0e-2 (~3.6% nnz mismatch from the polar
-        # rows; the missing entries are the additional polar-ring cells
-        # ESMF includes in its gradient stencil), field rel ~6.4e-3.
+        # `LonLatConnectivityWrapper`'s `pole_top/bottom_fold = true`
+        # *does* fold across the pole. To match ESMF's mesh stencil
+        # exactly we therefore disable the fold (`allow_pole_fold = false`)
+        # for this comparison. The fold is still useful as a default —
+        # geometrically the pole *is* a single point — and users who want
+        # cross-pole gradient information can keep the auto-detected fold.
         # ----------------------------------------------------------------
+        # With `allow_pole_fold = false`:
+        #   - nnz matches ESMF *exactly* (5088 = 5088).
+        #   - Mid-latitude bands (8 of 12) agree to ~5e-10 (machine precision).
+        #   - The two next-to-pole bands disagree by ~1.7e-3.
+        #   - The two polar bands disagree by ~2.5e-3.
+        # Polar src cells have a 5-neighbour stencil whose centroid polygon
+        # does not enclose `r_n`, so CR's gradient falls back to zero
+        # (1st-order weights only) for those rows. ESMF appears to do
+        # something subtly different at the poles. The non-polar disagreement
+        # is bounded by the centroid-algorithm residual already documented
+        # for the regional case (~1.6e-5) — our regional test confirms the
+        # mid-latitude algorithm matches.
         @testset "Global lon/lat 36×18 → 24×12" begin
             src_x = collect(range(0.0, 360.0; length = 37))
             src_y = collect(range(-90.0, 90.0; length = 19))
             dst_x = collect(range(0.0, 360.0; length = 25))
             dst_y = collect(range(-90.0, 90.0; length = 13))
             run_lonlat_pair("global", src_x, src_y, dst_x, dst_y, true;
-                             rtol_1st_mat   = 5e-12,
-                             rtol_1st_field = 1e-12,
-                             rtol_2nd_mat   = 2e-2,
-                             rtol_2nd_field = 1e-2)
+                             rtol_1st_mat    = 5e-12,
+                             rtol_1st_field  = 1e-12,
+                             rtol_2nd_mat    = 5e-3,
+                             rtol_2nd_field  = 2e-3,
+                             allow_pole_fold = false)
         end
 
         # ----------------------------------------------------------------
