@@ -87,6 +87,29 @@ getcell(wrapper::GeometryMaintainingTreeWrapper{G, T}, i::Integer) where {G <: A
 
 
 #=
+## CubeFaceConnectivity
+
+Static connectivity table that records, for each cube edge of each face, which
+neighbouring face/edge it joins and whether the parameterizations along the
+shared edge run in opposite directions.
+
+Edge IDs follow ClimaCore's element-local face numbering:
+1 = south (j_min), 2 = east (i_max), 3 = north (j_max), 4 = west (i_min).
+
+The `ne` field is bundled here so that decoding global indices for a cubed
+sphere only requires the connectivity object.
+=#
+struct CubeFaceConnectivity
+    # indexed [edge, face]; entries are (neighbour_face, neighbour_edge, reversed)
+    table::Matrix{Tuple{Int8, Int8, Bool}}
+    ne::Int
+    function CubeFaceConnectivity(table::Matrix{Tuple{Int8, Int8, Bool}}, ne::Integer)
+        size(table) == (4, 6) || throw(ArgumentError("Connectivity table must be 4×6 (edges × faces); got $(size(table))"))
+        return new(table, Int(ne))
+    end
+end
+
+#=
 ## CubedSphereToplevelTree
 
 A wrapper around a vector of quadtree cursors that represents a cubed sphere.
@@ -96,6 +119,7 @@ It might be replaced by something more general later.
 =#
 struct CubedSphereToplevelTree{V <: AbstractVector{<: Union{<: AbstractTreeWrapper, <: AbstractQuadtreeCursor}}}
     quadtrees::V
+    connectivity::CubeFaceConnectivity
 end
 
 STI.isspatialtree(::Type{<: CubedSphereToplevelTree}) = true

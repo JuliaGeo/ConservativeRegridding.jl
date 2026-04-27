@@ -2,16 +2,17 @@ import GeometryOps as GO
 using GeometryOps: SpatialTreeInterface as STI
 
 function compute_intersection_areas(
-        manifold::M, 
+        manifold::M,
         intersection_operator::F,
-        dst_tree::D, 
-        src_tree::S, 
-        idxs::AbstractVector{Tuple{Int, Int}}, 
-    ) where {M <: Manifold, F, D, S}
+        dst_tree::D,
+        src_tree::S,
+        idxs::AbstractVector{Tuple{Int, Int}},
+        ::Type{T} = Float64,
+    ) where {M <: Manifold, F, D, S, T <: AbstractFloat}
 
     ret_i1 = Int[]
     ret_i2 = Int[]
-    ret_area = Float64[]
+    ret_area = T[]
     sizehint!(ret_i1, length(idxs))
     sizehint!(ret_i2, length(idxs))
     sizehint!(ret_area, length(idxs))
@@ -24,7 +25,7 @@ function compute_intersection_areas(
         if area_of_intersection > 0
             push!(ret_i1, i1)
             push!(ret_i2, i2)
-            push!(ret_area, area_of_intersection)
+            push!(ret_area, T(area_of_intersection))
         end
     end
 
@@ -56,6 +57,7 @@ function intersection_areas(
         intersection_operator::F = DefaultIntersectionOperator(manifold),
         npartitions::Int = Threads.nthreads() * 4,
         progress = false,
+        T::Type{<:AbstractFloat} = Float64,
     ) where {M <: Manifold,F, T1, T2}
 
     predicate_f = if M <: Spherical
@@ -65,7 +67,7 @@ function intersection_areas(
     end
     # TODO: Threaded dual dfs via chunking.
     # For now this is just serial, and is the big bottleneck for larger grids.
-    # First, run the dual depth first search to get all candidate pairs of 
+    # First, run the dual depth first search to get all candidate pairs of
     # cells that may intersect.
     candidate_idxs = get_all_candidate_pairs(threaded, predicate_f, src_tree, dst_tree)
 
@@ -80,18 +82,19 @@ function intersection_areas(
     result_tasks = [
         StableTasks.@spawn begin
             ret = compute_intersection_areas(
-                $manifold, 
+                $manifold,
                 $intersection_operator,
-                $dst_tree, 
-                $src_tree, 
-                partition, 
-            ) 
+                $dst_tree,
+                $src_tree,
+                partition,
+                $T,
+            )
             $(progress ? :(ProgressMeter.next!(progress_meter)) : :())
             ret
         end
         for partition in partitions
     ]
-    
+
     # Fetch the results of `result_tasks`
     all_results = map(fetch, result_tasks)
     # Concatenate the results into single vectors
@@ -100,10 +103,10 @@ function intersection_areas(
     areas = reduce(vcat, getindex.(all_results, 3))
     # Assemble a sparse matrix from the results.
     return SparseArrays.sparse(
-        i2s, 
-        i1s, 
-        areas, 
-        prod(Trees.ncells(dst_tree)), 
+        i2s,
+        i1s,
+        areas,
+        prod(Trees.ncells(dst_tree)),
         prod(Trees.ncells(src_tree)),
     )
 end
@@ -114,6 +117,7 @@ function intersection_areas(
         intersection_operator::F = DefaultIntersectionOperator(manifold),
         npartitions::Int = Threads.nthreads() * 4,
         progress = false,
+        T::Type{<:AbstractFloat} = Float64,
     ) where {M <: Manifold,F, T1, T2}
 
     predicate_f = if M <: Spherical
@@ -128,18 +132,19 @@ function intersection_areas(
     #     progress_meter = ProgressMeter.Progress(length(candidate_idxs); desc = "Computing intersection areas")
     # end
     i1s, i2s, areas = compute_intersection_areas(
-        manifold, 
+        manifold,
         intersection_operator,
-        dst_tree, 
-        src_tree, 
-        candidate_idxs
-    ) 
+        dst_tree,
+        src_tree,
+        candidate_idxs,
+        T,
+    )
     # Assemble a sparse matrix from the results.
     return SparseArrays.sparse(
-        i2s, 
-        i1s, 
-        areas, 
-        prod(Trees.ncells(dst_tree)), 
+        i2s,
+        i1s,
+        areas,
+        prod(Trees.ncells(dst_tree)),
         prod(Trees.ncells(src_tree)),
     )
 end
