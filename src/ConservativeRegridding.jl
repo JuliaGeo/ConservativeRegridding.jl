@@ -33,9 +33,11 @@ export should_parallelize, WithParallelizePolicy
 include("regridder/regridder.jl")
 include("regridder/regrid.jl")
 include("regridder/intersection_areas.jl")
+include("regridder/se_regridder.jl")
 
 
 @public Regridder, regrid, regrid!
+@public SEtoFVRegridder, FVtoSERegridder, SEtoSERegridder
 @public areas
 
 """
