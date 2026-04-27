@@ -16,7 +16,7 @@ using Test, SafeTestsets
     @safetestset "Extensions: Healpix" begin include("extensions/healpix.jl") end
     @safetestset "Extensions: NCDatasets" begin include("extensions/ncdatasets.jl") end
   
-    @safetestset "Comparison: XESMF" begin include("usecases/xesmf_comparison.jl") end
+    @safetestset "Comparison: XESMF/ESMF" begin include("xesmf_comparison.jl") end
 
     @safetestset "Integration: Simple Regridding" begin include("usecases/simple.jl") end
     @safetestset "Integration: Oceananigans" begin include("usecases/oceananigans.jl") end
