@@ -73,10 +73,12 @@ should_parallelize(tree, node, extent::GO.UnitSpherical.SphericalCap) =
     (2π * (1 - cos(extent.radius))) < π
 
 should_parallelize(tree, node, extent::Extents.Extent) = error(
-    "`Trees.should_parallelize` has no method for planar `Extents.Extent` on tree of type `$(typeof(tree))`. " *
-    "Planar trees must define a tree-type-specific method, e.g. " *
-    "`ConservativeRegridding.Trees.should_parallelize(::$(typeof(tree)), node, extent::Extents.Extent) = ...` " *
-    "to control multithreading granularity."
+    """
+    `Trees.should_parallelize` has no method for planar `Extents.Extent` on tree of type `$(typeof(tree))`.
+    Planar trees must define a tree-type-specific method, e.g. 
+    `ConservativeRegridding.Trees.should_parallelize(::$(typeof(tree)), node, extent::Extents.Extent) = ...`
+    to control multithreading granularity.
+    """
 )
 
 # Generic method to treeify "anything"
