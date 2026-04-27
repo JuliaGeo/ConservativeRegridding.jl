@@ -13,11 +13,13 @@ include("grids.jl")
 
 include("quadtree_cursors.jl")
 include("specialized_quadtree_cursors.jl")
+include("neighbours.jl")
 
-# private IndexOffsetQuadtreeCursor, CubedSphereToplevelTree
+# private IndexOffsetQuadtreeCursor, CubedSphereToplevelTree, CubeFaceConnectivity
 
 export AbstractCurvilinearGrid, ncells, getcell
 export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
 export QuadtreeCursor, TopDownQuadtreeCursor
+export LonLatConnectivityWrapper
 
 end

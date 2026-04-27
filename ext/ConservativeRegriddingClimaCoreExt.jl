@@ -35,6 +35,57 @@ function coords_for_face(mesh::Meshes.AbstractCubedSphere, face_idx)
     return coords
 end
 
+"""
+    edge_representative(edge, ne) -> (i, j)
+
+Pick a representative element on the given cube edge of a face that is
+*interior* to the edge (i.e. not at a face corner). Used by
+[`build_cube_connectivity`](@ref) so that the queried element-local face is
+unambiguously the cube-edge crossing.
+"""
+function edge_representative(edge::Integer, ne::Integer)
+    s = max(ne ÷ 2, 1)
+    if edge == 1        # south
+        return (s, 1)
+    elseif edge == 2    # east
+        return (ne, s)
+    elseif edge == 3    # north
+        return (s, ne)
+    else                # west
+        return (1, s)
+    end
+end
+
+"""
+    build_cube_connectivity(topology, ne) -> Trees.CubeFaceConnectivity
+
+Build the cube-face connectivity table used by `neighbours` on a
+`CubedSphereToplevelTree`. For each `(face F, edge edge_id)`, query
+`Topologies.opposing_face` on a representative element interior to that edge,
+and decode the result into `(neighbour_face, neighbour_edge, reversed)`.
+
+This relies on two ClimaCore conventions that hold for `Topology2D` on the
+default cubed-sphere mesh:
+
+- `topology.elemorder == CartesianIndices((ne, ne, 6))`, so the global element
+  index is `i + (j-1)*ne + (F-1)*ne²` (the same scheme used by
+  `IndexOffsetQuadtreeCursor`).
+- Element-local face IDs (1=south, 2=east, 3=north, 4=west) match our cube-edge
+  IDs.
+"""
+function build_cube_connectivity(topology, ne::Integer)
+    table = Array{Tuple{Int8, Int8, Bool}, 2}(undef, 4, 6)
+    ne2 = ne * ne
+    for F in 1:6, edge in 1:4
+        i, j = edge_representative(edge, ne)
+        elem = i + (j - 1) * ne + (F - 1) * ne2
+        opelem, opface, reversed = Topologies.opposing_face(topology, elem, edge)
+        F_prime = ((opelem - 1) ÷ ne2) + 1
+        table[edge, F] = (Int8(F_prime), Int8(opface), Bool(reversed))
+    end
+    return Trees.CubeFaceConnectivity(table, Int(ne))
+end
+
 function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology2D{<: ClimaComms.AbstractCommsContext, <: Meshes.AbstractCubedSphere})
     mesh = topology.mesh
     ne = mesh.ne
@@ -85,7 +136,8 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
         error("Unknown spacefillingcurve type: $(typeof(topology.spacefillingcurve))\nExpected a CartesianIndices or a Vector{CartesianIndex{3}}")
     end
 
-    return Trees.CubedSphereToplevelTree(quadtrees)
+    connectivity = build_cube_connectivity(topology, ne)
+    return Trees.CubedSphereToplevelTree(quadtrees, connectivity)
 end
 
 Trees.treeify(manifold::GOCore.Spherical, space::ClimaCore.Spaces.AbstractSpectralElementSpace) = Trees.treeify(manifold, Spaces.topology(space))
