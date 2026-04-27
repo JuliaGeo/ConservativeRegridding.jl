@@ -5,20 +5,34 @@ using GeometryOps.LoopStateMachine: @controlflow
 import ProgressMeter
 import StableTasks
 
-# Walk through both trees and kick off a task whenever you hit a node that satisfies the area criterion.
-function multithreaded_dual_depth_first_search(inner_dfs_f::IF, predicate::P, area_criterion::A, tasks::V, node1::N1, node2::N2) where {P, IF, A, V <: Vector{<: StableTasks.StableTask}, N1, N2}
+# Walk through both trees and kick off a task whenever both nodes' parallelize
+# predicates fire. Each parallelize_k closure is `(node, extent) -> Bool` and is
+# pre-bound to its tree by the caller. Extents are computed exactly once per
+# node and threaded through the recursion.
+function multithreaded_dual_depth_first_search(
+    inner_dfs_f::IF, predicate::P,
+    parallelize1::A1, parallelize2::A2,
+    tasks::V,
+    node1::N1, ext1::E1,
+    node2::N2, ext2::E2,
+) where {IF, P, A1, A2, V <: Vector{<: StableTasks.StableTask}, N1, E1, N2, E2}
     if STI.isleaf(node1) || STI.isleaf(node2)
-        # both nodes are leaves, so we want to run the inner dfs function on the nodes themselves.
+        # one or both nodes are leaves, so we want to run the inner dfs function on the nodes themselves.
         push!(tasks, StableTasks.@spawn $inner_dfs_f($predicate, node1, node2))
     else
         # neither node is a leaf, recurse into both children
-        if area_criterion(STI.node_extent(node1)) && area_criterion(STI.node_extent(node2))
+        if parallelize1(node1, ext1) && parallelize2(node2, ext2)
             push!(tasks, StableTasks.@spawn $inner_dfs_f($predicate, node1, node2))
         else
             for child1 in STI.getchild(node1)
+                cext1 = STI.node_extent(child1)
                 for child2 in STI.getchild(node2)
-                    if predicate(STI.node_extent(child1), STI.node_extent(child2))
-                        @controlflow multithreaded_dual_depth_first_search(inner_dfs_f, predicate, area_criterion, tasks, child1, child2)
+                    cext2 = STI.node_extent(child2)
+                    if predicate(cext1, cext2)
+                        @controlflow multithreaded_dual_depth_first_search(
+                            inner_dfs_f, predicate, parallelize1, parallelize2, tasks,
+                            child1, cext1, child2, cext2,
+                        )
                     end
                 end
             end
@@ -35,9 +49,18 @@ function _inner_dfs_f(predicate::P, node1::N1, node2::N2) where {P, N1, N2}
     return ret
 end
 
-function multithreaded_dual_query(predicate::P, area_criterion::A, node1::N1, node2::N2; progress = false) where {P, A, N1, N2}
+function multithreaded_dual_query(
+    predicate::P, parallelize1::A1, parallelize2::A2,
+    node1::N1, node2::N2;
+    progress = false,
+) where {P, A1, A2, N1, N2}
     tasks = StableTasks.StableTask{Vector{Tuple{Int, Int}}}[]
-    multithreaded_dual_depth_first_search(_inner_dfs_f, predicate, area_criterion, tasks, node1, node2)
+    ext1 = STI.node_extent(node1)
+    ext2 = STI.node_extent(node2)
+    multithreaded_dual_depth_first_search(
+        _inner_dfs_f, predicate, parallelize1, parallelize2, tasks,
+        node1, ext1, node2, ext2,
+    )
     return reduce(vcat, map(fetch, tasks))
 end
 

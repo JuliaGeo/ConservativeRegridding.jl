@@ -2,6 +2,8 @@ using ConservativeRegridding
 using Test
 
 import GeometryOps as GO, GeoInterface as GI
+import GeometryOpsCore
+import Extents
 using SparseArrays
 
 @testset "Custom intersection_operator" begin
@@ -37,8 +39,6 @@ using SparseArrays
         @test Aop == spzeros(eltype(Aop), size(Aop)...)
     end
 end
-
-import GeometryOpsCore
 
 @testset "regrid! with n-dimensional arrays" begin
     function make_grid(nx, ny)
@@ -106,4 +106,84 @@ import GeometryOpsCore
             @test all(dst_3d .≈ 1.0)
         end
     end
+end
+
+# Regression test for GitHub issue #66 + verifies the `should_parallelize` dispatch hook:
+# Planar grids ship no default policy, so threaded regridding requires the tree author
+# to define `should_parallelize` for their tree type. Here we override on the package's
+# own TopDownQuadtreeCursor (acting as the "tree author") and verify that:
+#   1. the override is actually invoked during the dual DFS, and
+#   2. threaded planar regridding produces correct results.
+@testset "Planar grid threaded regridding (#66)" begin
+    function make_grid(nx, ny)
+        polys = Matrix{GI.Polygon}(undef, nx, ny)
+        for j in 1:ny, i in 1:nx
+            x0, x1 = (i-1)/nx, i/nx
+            y0, y1 = (j-1)/ny, j/ny
+            ring = GI.LinearRing([(x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0)])
+            polys[i,j] = GI.Polygon([ring])
+        end
+        polys
+    end
+
+    # The planar default errors when no tree-type-specific method is defined.
+    # Test with a synthetic tree type so the assertion is independent of any
+    # method later added in this session.
+    struct _UnsupportedPlanarTree end
+    @test_throws ErrorException ConservativeRegridding.Trees.should_parallelize(
+        _UnsupportedPlanarTree(), nothing, Extents.Extent(X=(0.0, 1.0), Y=(0.0, 1.0)),
+    )
+
+    # Grids must be large enough that neither tree's top-level cursor is already a
+    # leaf — otherwise the dual DFS short-circuits before consulting `should_parallelize`.
+    src = make_grid(8, 8)
+    dst = make_grid(16, 16)
+
+    # Define a tree-type-specific policy and confirm it's called during construction.
+    call_count = Ref(0)
+    ConservativeRegridding.Trees.should_parallelize(
+        tree::ConservativeRegridding.Trees.TopDownQuadtreeCursor,
+        node,
+        extent::Extents.Extent,
+    ) = (call_count[] += 1; true)
+
+    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst, src; threaded=true)
+    @test call_count[] > 0
+    @test r isa ConservativeRegridding.Regridder
+    @test size(r) == (16*16, 8*8)
+    A = r.intersections
+    @test sum(A) > 0
+end
+
+# Verifies the instance-level WithParallelizePolicy wrapper: dispatching
+# on the wrapper short-circuits the type-level default and calls the
+# user-supplied closure instead.
+@testset "WithParallelizePolicy wrapper" begin
+    function make_grid(nx, ny)
+        polys = Matrix{GI.Polygon}(undef, nx, ny)
+        for j in 1:ny, i in 1:nx
+            x0, x1 = (i-1)/nx, i/nx
+            y0, y1 = (j-1)/ny, j/ny
+            ring = GI.LinearRing([(x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0)])
+            polys[i,j] = GI.Polygon([ring])
+        end
+        polys
+    end
+
+    src_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), make_grid(8, 8))
+    dst_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), make_grid(16, 16))
+
+    policy_calls = Ref(0)
+    src_wrapped = ConservativeRegridding.Trees.WithParallelizePolicy(
+        src_tree, (tree, node, extent) -> (policy_calls[] += 1; true),
+    )
+    dst_wrapped = ConservativeRegridding.Trees.WithParallelizePolicy(
+        dst_tree, (tree, node, extent) -> (policy_calls[] += 1; true),
+    )
+
+    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_wrapped, src_wrapped; threaded=true)
+    @test policy_calls[] > 0
+    @test r isa ConservativeRegridding.Regridder
+    @test size(r) == (16*16, 8*8)
+    @test sum(r.intersections) > 0
 end
