@@ -7,6 +7,9 @@ using Test, SafeTestsets
     @safetestset "Unit tests: QuadtreeCursors" begin include("trees/quadtree_cursors.jl") end
     @safetestset "Unit tests: Neighbours (lon-lat)" begin include("trees/neighbours_lonlat.jl") end
     @safetestset "Unit tests: Neighbours (cubed sphere)" begin include("trees/neighbours_cubed_sphere.jl") end
+    @safetestset "Unit tests: Second-order kernels" begin include("regridder/second_order_unit.jl") end
+    @safetestset "Unit tests: Second-order (lon-lat)" begin include("regridder/second_order_lonlat.jl") end
+    @safetestset "Unit tests: Second-order (cubed sphere)" begin include("regridder/second_order_cubed_sphere.jl") end
 
     @safetestset "Extensions: Oceananigans" begin include("extensions/oceananigans.jl") end
     @safetestset "Extensions: ClimaCore" begin include("extensions/climacore.jl") end
