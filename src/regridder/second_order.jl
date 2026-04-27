@@ -118,18 +118,66 @@ function _polygon_vertices(manifold::M, poly, ::Type{T}) where {M, T}
     return vs
 end
 
+# Single-pass, allocation-free, dedup-aware vertex mean of a polygon's
+# exterior ring. Skips a vertex if it is within tolerance of the previous
+# kept vertex; also compares the final kept vertex against the first to
+# guard the wrap-around. Matches ESMF's MONOPOLE behaviour at the poles
+# of a global lat/lon grid: the two top corners of a polar cap collapse
+# to a single UnitSphericalPoint, so the cell's centroid is computed as
+# if it were a triangle.
+@inline _vmd_tol(::Spherical, ::Type{T}) where {T} = T(1e-12)
+@inline _vmd_tol(::Planar,    ::Type{T}) where {T} = eps(T)  # scaled per pair
+
+@inline function _vmd_close(::Spherical, p, q, tol)
+    # UnitSphericalPoints are unit-norm, so an absolute chord tolerance is fine.
+    d2 = (p[1] - q[1])^2 + (p[2] - q[2])^2 + (p[3] - q[3])^2
+    return d2 <= tol * tol
+end
+@inline function _vmd_close(::Planar, p, q, tol)
+    # Scale by point magnitude so Float32 rings at large coordinates still dedup.
+    s2 = max(p[1]^2 + p[2]^2, q[1]^2 + q[2]^2, one(eltype(p)))
+    d2 = (p[1] - q[1])^2 + (p[2] - q[2])^2
+    return d2 <= (tol * tol) * s2
+end
+
+@inline _vmd_finalize(::Planar,    s, n) = s ./ n
+@inline _vmd_finalize(::Spherical, s, n) = LinearAlgebra.normalize(s ./ n)
+
+function _vertex_mean_dedup(manifold::M, poly, ::Type{T}) where {M <: Manifold, T <: AbstractFloat}
+    ring = GI.getexterior(poly)
+    npts = GI.npoint(ring)
+    n_unique_max = npts - 1
+    SV = StaticArrays.SVector{_spatial_dim(manifold), T}
+    tol = _vmd_tol(manifold, T)
+
+    first_v = _point_to_svec(manifold, T, GI.getpoint(ring, 1))
+    s::SV = first_v
+    prev::SV = first_v
+    n = 1
+
+    @inbounds for i in 2:n_unique_max
+        v = _point_to_svec(manifold, T, GI.getpoint(ring, i))
+        _vmd_close(manifold, v, prev, tol) && continue
+        s = s + v
+        prev = v
+        n += 1
+    end
+    if n > 1 && _vmd_close(manifold, prev, first_v, tol)
+        s = s - prev
+        n -= 1
+    end
+    return _vmd_finalize(manifold, s, T(n))::SV
+end
+
 # Multipart-aware area-weighted vertex-mean centroid (ESMFLike) of an
 # intersection-polygon list. Returns (centroid, total_area).
 function _vertex_mean_centroid(manifold::Spherical, ::Type{T}, polys) where {T}
     accum = zero(StaticArrays.SVector{3, T})
     total = zero(T)
     for poly in polys
-        verts = _polygon_vertices(manifold, poly, T)
-        n = length(verts); n == 0 && continue
         a = T(GO.area(manifold, poly))
         a > 0 || continue
-        m = LinearAlgebra.normalize(sum(verts) ./ T(n))
-        accum = accum + a * m
+        accum = accum + a * _vertex_mean_dedup(manifold, poly, T)
         total += a
     end
     total > 0 || return zero(StaticArrays.SVector{3, T}), zero(T)
@@ -140,12 +188,9 @@ function _vertex_mean_centroid(manifold::Planar, ::Type{T}, polys) where {T}
     accum = zero(StaticArrays.SVector{2, T})
     total = zero(T)
     for poly in polys
-        verts = _polygon_vertices(manifold, poly, T)
-        n = length(verts); n == 0 && continue
         a = T(GO.area(manifold, poly))
         a > 0 || continue
-        m = sum(verts) ./ T(n)
-        accum = accum + a * m
+        accum = accum + a * _vertex_mean_dedup(manifold, poly, T)
         total += a
     end
     total > 0 || return zero(StaticArrays.SVector{2, T}), zero(T)
@@ -326,8 +371,7 @@ function _source_centroid(::SecondOrderConservative{ESMFLike}, manifold::Spheric
     if total > 0
         return LinearAlgebra.normalize(accum)
     else
-        verts = _polygon_vertices(manifold, Trees.getcell(src_tree, n), T)
-        return LinearAlgebra.normalize(sum(verts) ./ T(length(verts)))
+        return _vertex_mean_dedup(manifold, Trees.getcell(src_tree, n), T)
     end
 end
 
@@ -342,8 +386,7 @@ function _source_centroid(::SecondOrderConservative{ESMFLike}, manifold::Planar,
     if total > 0
         return accum ./ total
     else
-        verts = _polygon_vertices(manifold, Trees.getcell(src_tree, n), T)
-        return sum(verts) ./ T(length(verts))
+        return _vertex_mean_dedup(manifold, Trees.getcell(src_tree, n), T)
     end
 end
 
@@ -355,14 +398,8 @@ function _source_centroid(::SecondOrderConservative{GeometricCentroid}, manifold
 end
 
 # Neighbour centroid c_m.
-function _neighbour_centroid(::SecondOrderConservative{ESMFLike}, manifold::Spherical, poly_m, ::Type{T}) where {T}
-    verts = _polygon_vertices(manifold, poly_m, T)
-    return LinearAlgebra.normalize(sum(verts) ./ T(length(verts)))
-end
-
-function _neighbour_centroid(::SecondOrderConservative{ESMFLike}, manifold::Planar, poly_m, ::Type{T}) where {T}
-    verts = _polygon_vertices(manifold, poly_m, T)
-    return sum(verts) ./ T(length(verts))
+function _neighbour_centroid(::SecondOrderConservative{ESMFLike}, manifold::M, poly_m, ::Type{T}) where {M <: Manifold, T}
+    return _vertex_mean_dedup(manifold, poly_m, T)
 end
 
 function _neighbour_centroid(::SecondOrderConservative{GeometricCentroid}, manifold, poly_m, ::Type{T}) where {T}
