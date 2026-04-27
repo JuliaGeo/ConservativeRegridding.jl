@@ -153,17 +153,30 @@ end
 # Uses CENTER + CORNER stagger; xy_dim ordering matches our flatten:
 # linear_index = i + (j-1) * nx (Julia column-major over (nx, ny)).
 # ---------------------------------------------------------------------------
-function build_esmpy_grid(x, y)
+function build_esmpy_grid(x, y; periodic::Bool = false)
     py = _py()
     nx, ny = length(x) - 1, length(y) - 1
     lon_c = [0.5 * (x[i] + x[i+1]) for i in 1:nx]
     lat_c = [0.5 * (y[j] + y[j+1]) for j in 1:ny]
 
     # max_index = (nx, ny). coord_sys = SPH_DEG.
+    # For global periodic grids we pass `num_peri_dims = 1`; ESMF's default
+    # `pole_kind = MONOPOLE` then gives the same Moore + nlon/2-shift across-
+    # pole stencil that our `LonLatConnectivityWrapper` uses, and that real-
+    # world xESMF passes (`xesmf/backend.py: from_xarray(periodic=True)`).
+    # Without this, ESMF treats the grid as a flat tile and truncates polar
+    # stencils, which produced ~8% disagreement in earlier runs.
     max_index = py.np.asarray([nx, ny]; dtype = py.np.int32)
-    grid = py.esmpy.Grid(max_index;
-                          staggerloc = py.esmpy.StaggerLoc.CENTER,
-                          coord_sys  = py.esmpy.CoordSys.SPH_DEG)
+    grid = if periodic
+        py.esmpy.Grid(max_index;
+                       staggerloc    = py.esmpy.StaggerLoc.CENTER,
+                       coord_sys     = py.esmpy.CoordSys.SPH_DEG,
+                       num_peri_dims = 1)
+    else
+        py.esmpy.Grid(max_index;
+                       staggerloc = py.esmpy.StaggerLoc.CENTER,
+                       coord_sys  = py.esmpy.CoordSys.SPH_DEG)
+    end
     grid.add_coords(staggerloc = py.esmpy.StaggerLoc.CORNER)
 
     # CENTER coordinates
@@ -174,11 +187,14 @@ function build_esmpy_grid(x, y)
     gridXC[pybuiltins.Ellipsis] = py.np.asarray(XC)
     gridYC[pybuiltins.Ellipsis] = py.np.asarray(YC)
 
-    # CORNER coordinates: (nx+1) × (ny+1)
+    # CORNER coordinates. With `num_peri_dims = 1` ESMF allocates only `nx`
+    # corner columns (the last wraps to the first); without periodicity it
+    # allocates `nx+1`. The latitude direction is always non-periodic.
+    nx_corner = periodic ? nx : nx + 1
     gridXB = grid.get_coords(0, staggerloc = py.esmpy.StaggerLoc.CORNER)
     gridYB = grid.get_coords(1, staggerloc = py.esmpy.StaggerLoc.CORNER)
-    XB = [x[i] for i in 1:nx+1, j in 1:ny+1]
-    YB = [y[j] for i in 1:nx+1, j in 1:ny+1]
+    XB = [x[i] for i in 1:nx_corner, j in 1:ny+1]
+    YB = [y[j] for i in 1:nx_corner, j in 1:ny+1]
     gridXB[pybuiltins.Ellipsis] = py.np.asarray(XB)
     gridYB[pybuiltins.Ellipsis] = py.np.asarray(YB)
 
@@ -449,8 +465,8 @@ function run_lonlat_pair(name, src_x, src_y, dst_x, dst_y, periodic;
                              normalize = false)
         W_jl = julia_weight_matrix(r_jl)
         # ESMPy needs Grid objects for lon/lat (rectangular).
-        src_grid = build_esmpy_grid(src_x, src_y)
-        dst_grid = build_esmpy_grid(dst_x, dst_y)
+        src_grid = build_esmpy_grid(src_x, src_y; periodic = periodic)
+        dst_grid = build_esmpy_grid(dst_x, dst_y; periodic = periodic)
         W_py, tmp = esmpy_weights_second_order(src_grid, dst_grid, n_dst, n_src)
         try
             compare_sparse("$name / 2nd", W_jl, W_py; matrix_rtol = rtol_2nd_mat)
@@ -505,28 +521,34 @@ end
         @test_skip "Python ESMF stack unavailable"
     else
         # ----------------------------------------------------------------
-        # (a) Global lon/lat: 36×18 → 24×12, periodic, no fold.
-        # We avoid the pole-fold neighbour stencil by passing iseven(nx)
-        # but not asserting on fold cells in field tests.
+        # (a) Global lon/lat: 36×18 → 24×12, periodic, with pole fold.
+        # `build_esmpy_grid` passes `num_peri_dims = 1` so ESMF's stencil
+        # topology matches CR's `LonLatConnectivityWrapper` auto-detected
+        # `pole_top/bottom_fold = true`: 1st-order weights agree to ~5e-15
+        # (observed 4e-15 matrix, 6e-16 field on 2026-04-27).
+        #
+        # 2nd-order tolerances are looser than the plan's 5e-9. Two known
+        # algorithmic differences contribute (none of them bugs):
+        #   - ESMF's default `pole_kind = MONOPOLE` collapses the polar row
+        #     to a single point, so ESMF's polar cells are triangles while
+        #     ours are quads at lat = ±85°. The cell area / centroid for
+        #     those rows differ accordingly.
+        #   - ESMF computes neighbour centroids analytically on the unit
+        #     sphere; CR uses the vertex-mean projected to the sphere
+        #     (`ESMFLike` choice in `SecondOrderConservative`). See plan §6.
+        # Observed 2026-04-27: matrix rel ~7.6e-3 (~3.6% nnz mismatch from
+        # the polar rows), field rel ~5.6e-3.
         # ----------------------------------------------------------------
         @testset "Global lon/lat 36×18 → 24×12" begin
             src_x = collect(range(0.0, 360.0; length = 37))
             src_y = collect(range(-90.0, 90.0; length = 19))
             dst_x = collect(range(0.0, 360.0; length = 25))
             dst_y = collect(range(-90.0, 90.0; length = 13))
-            # 2nd-order tolerances are far looser than the plan's 5e-9 because
-            # CR's `LonLatConnectivityWrapper` neighbour stencil and ESMF's
-            # `Grid` 8-stencil disagree near the poles, where the differential
-            # weights' magnitudes are largest. The polar rows also drive the
-            # nnz mismatch (~2%). Loosened from the plan after investigation —
-            # this is a real algorithmic difference, not a bug. Observed on
-            # 2026-04-27: matrix rel ~0.083, field rel ~0.0096.
             run_lonlat_pair("global", src_x, src_y, dst_x, dst_y, true;
                              rtol_1st_mat   = 5e-12,
                              rtol_1st_field = 1e-12,
-                             rtol_2nd_mat   = 1e-1,
-                             rtol_2nd_field = 2e-2,
-                             allow_pole_fold = false)
+                             rtol_2nd_mat   = 1e-2,
+                             rtol_2nd_field = 1e-2)
         end
 
         # ----------------------------------------------------------------
