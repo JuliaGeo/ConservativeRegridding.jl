@@ -19,65 +19,74 @@ import Extents
 import SortTileRecursiveTree # in order to implement the `getcell/ncell` interface
 
 """
-    should_parallelize(tree, node, extent) -> Bool
+    should_parallelize(node, extent) -> Bool
 
-Decide whether to spawn a parallel task at `node` of `tree` during the
-multithreaded dual-tree traversal used to find candidate intersecting
-cell pairs.
+Decide whether to spawn a parallel task at `node` during the multithreaded
+dual-tree traversal used to find candidate intersecting cell pairs.
 
 Returning `true` means *this node is the granularity at which a task is
-spawned*: the dual DFS stops descending recursively into children for
-the purpose of further parallelism and runs the subtree as a single
-parallel unit. Returning `false` means *keep descending* — the node is
-still too coarse and a task at this level would create unbalanced work.
+spawned*: the dual DFS stops descending recursively into children for the
+purpose of further parallelism and runs the subtree as a single parallel
+unit. Returning `false` means *keep descending* — the node is still too
+coarse and a task at this level would create unbalanced work.
 
 `extent` is the bounding region of `node` (e.g. an `Extents.Extent` for
 planar grids or a `SphericalCap` for spherical grids). It is passed
 explicitly so implementations and the dual DFS share one computation per
 node.
 
+Dispatch is on `(node_type, extent_type)` only — the root tree is *not*
+a dispatch axis. To express tree-aware logic (e.g. "spawn when subtree
+covers ≤ 1/N of the root grid"), wrap the root tree with
+[`WithParallelizePolicy`](@ref); the wrapper plumbs the tree into a
+local closure that the dual DFS calls without participating in dispatch.
+
 # Defaults
 
-- `extent::SphericalCap`: spawns once the cap covers less than ¼ of the
-  unit sphere — a heuristic that avoids spawning a single task at the
-  root. This works because spherical caps have a natural upper bound
-  (the full unit sphere is ~4π steradians) against which "small enough"
-  has a fixed meaning.
-- `extent::Extents.Extent`: errors. Planar extents have no canonical
-  scale — a "unit square" might be 1 metre, 1 degree, or 10⁹ metres —
-  and there is no upper or lower bound on the magnitude of an `Extent`,
-  so no manifold-agnostic default can decide "small enough" without
-  knowing the tree's own notion of size. Tree authors must supply
-  their own method.
+- `(::AbstractQuadtreeCursor, ::SphericalCap | ::Extents.Extent)`: leaf-count
+  test using `node.grid` for total cells. Spawns once the subtree covers
+  ≤ `prod(ncells(node.grid)) ÷ (Threads.nthreads() * 32)` leaves. Defined
+  in `quadtree_cursors.jl`.
+- `(::Any, ::SphericalCap)`: spawns once the cap covers less than ¼ of the
+  unit sphere — a coarse heuristic for foreign tree types where leaf count
+  isn't cheap.
+- `(::Any, ::Extents.Extent)`: errors. Planar extents have no canonical
+  scale — tree authors must supply their own method (or wrap with
+  [`WithParallelizePolicy`](@ref)).
 
 # Customization
 
-Override per tree type by adding a more-specific method:
+Two paths:
 
-```julia
-ConservativeRegridding.Trees.should_parallelize(
-    tree::MyTree, node, extent::Extents.Extent,
-) = prod(ncells(node)) ≤ prod(ncells(getgrid(tree))) ÷ (Threads.nthreads() * 4)
-```
+1. **Tree-type-specific override** — define a node-type-specific method:
 
-…or wrap any tree at construction time with [`WithParallelizePolicy`](@ref)
-to supply an instance-level callable without defining a method:
+   ```julia
+   ConservativeRegridding.Trees.should_parallelize(
+       node::MyCursorType, extent::Extents.Extent,
+   ) = prod(ncells(node)) ≤ prod(ncells(node.grid)) ÷ (Threads.nthreads() * 4)
+   ```
 
-```julia
-tree_with_policy = WithParallelizePolicy(my_tree, (node, extent) -> ...)
-```
+2. **Instance-level wrapper** — wrap the root tree at construction time:
+
+   ```julia
+   tree_with_policy = WithParallelizePolicy(my_tree, (tree, node, extent) -> ...)
+   ```
+
+   The wrapper plumbs the policy through the dual DFS via a local closure
+   in `intersection_areas.jl`, so it doesn't participate in dispatch.
 """
 function should_parallelize end
 
-should_parallelize(tree, node, extent::GO.UnitSpherical.SphericalCap) =
+should_parallelize(node, extent::GO.UnitSpherical.SphericalCap) =
     (2π * (1 - cos(extent.radius))) < π
 
-should_parallelize(tree, node, extent::Extents.Extent) = error(
+should_parallelize(node, extent::Extents.Extent) = error(
     """
-    `Trees.should_parallelize` has no method for planar `Extents.Extent` on tree of type `$(typeof(tree))`.
-    Planar trees must define a tree-type-specific method, e.g. 
-    `ConservativeRegridding.Trees.should_parallelize(::$(typeof(tree)), node, extent::Extents.Extent) = ...`
-    to control multithreading granularity.
+    `Trees.should_parallelize` has no method for planar `Extents.Extent` on node of type `$(typeof(node))`.
+    Either define a node-type-specific method:
+        `ConservativeRegridding.Trees.should_parallelize(::$(typeof(node)), extent::Extents.Extent) = ...`
+    or wrap your tree with `WithParallelizePolicy(tree, policy)` to supply an
+    instance-level callable.
     """
 )
 

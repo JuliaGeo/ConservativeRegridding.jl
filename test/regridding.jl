@@ -126,12 +126,12 @@ end
         polys
     end
 
-    # The planar default errors when no tree-type-specific method is defined.
-    # Test with a synthetic tree type so the assertion is independent of any
-    # method later added in this session.
-    struct _UnsupportedPlanarTree end
+    # The planar default errors when called on a node type that has no
+    # specific method. Use a synthetic node type so this assertion is
+    # independent of any method added later in this session.
+    struct _UnsupportedPlanarNode end
     @test_throws ErrorException ConservativeRegridding.Trees.should_parallelize(
-        _UnsupportedPlanarTree(), nothing, Extents.Extent(X=(0.0, 1.0), Y=(0.0, 1.0)),
+        _UnsupportedPlanarNode(), Extents.Extent(X=(0.0, 1.0), Y=(0.0, 1.0)),
     )
 
     # Grids must be large enough that neither tree's top-level cursor is already a
@@ -139,15 +139,20 @@ end
     src = make_grid(8, 8)
     dst = make_grid(16, 16)
 
-    # Define a tree-type-specific policy and confirm it's called during construction.
+    # Inject a tree-aware policy via the `WithParallelizePolicy` wrapper and
+    # confirm it's called during construction. The wrapper is detected at the
+    # dual-DFS call site (intersection_areas.jl) and threaded through a local
+    # closure, so the policy callback gets the root tree as its first arg
+    # without that being a Julia dispatch axis.
     call_count = Ref(0)
-    ConservativeRegridding.Trees.should_parallelize(
-        tree::ConservativeRegridding.Trees.TopDownQuadtreeCursor,
-        node,
-        extent::Extents.Extent,
-    ) = (call_count[] += 1; true)
+    src_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), src)
+    dst_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), dst)
+    src_w = ConservativeRegridding.Trees.WithParallelizePolicy(
+        src_tree, (tree, node, extent) -> (call_count[] += 1; true))
+    dst_w = ConservativeRegridding.Trees.WithParallelizePolicy(
+        dst_tree, (tree, node, extent) -> (call_count[] += 1; true))
 
-    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst, src; threaded=true)
+    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_w, src_w; threaded=true)
     @test call_count[] > 0
     @test r isa ConservativeRegridding.Regridder
     @test size(r) == (16*16, 8*8)
