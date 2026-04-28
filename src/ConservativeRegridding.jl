@@ -33,10 +33,14 @@ export should_parallelize, WithParallelizePolicy
 include("regridder/regridder.jl")
 include("regridder/regrid.jl")
 include("regridder/intersection_areas.jl")
+include("regridder/second_order.jl")
 
 
 @public Regridder, regrid, regrid!
 @public areas
+@public RegriddingAlgorithm, FirstOrderConservative, SecondOrderConservative
+@public CentroidAlgorithm, ESMFLike, GeometricCentroid
+@public supports_transpose
 
 """
     save_esmf_weights(path, regridder;

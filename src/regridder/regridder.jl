@@ -10,6 +10,42 @@ const DEFAULT_MATRIX = SparseArrays.SparseMatrixCSC{DEFAULT_FLOATTYPE}
 const DEFAULT_MATRIX_CONSTRUCTOR = SparseArrays.spzeros # SparseCSC for regridder
 
 """
+    abstract type RegriddingAlgorithm
+
+Tag type that selects which weight-construction algorithm a [`Regridder`](@ref)
+uses. The active algorithm is stored on the regridder so that capability
+queries (`supports_transpose`, etc.) and dispatchers (`Base.transpose`,
+`build_weights`) can specialize on it.
+
+Concrete subtypes:
+- [`FirstOrderConservative`](@ref) — area-weighted; preserves the integral.
+- `SecondOrderConservative` (in `second_order.jl`) — adds a per-cell
+  Taylor reconstruction with a Green's-theorem gradient stencil.
+"""
+abstract type RegriddingAlgorithm end
+
+"""
+    FirstOrderConservative()
+
+The classical area-weighted conservative regridder. The intersection-area
+matrix `A[dst, src]` is built from the geometric overlap between source and
+destination cells, and a destination value is `(A * src) ./ dst_areas`.
+Supports `Base.transpose`.
+"""
+struct FirstOrderConservative <: RegriddingAlgorithm end
+
+"""
+    supports_transpose(algorithm::RegriddingAlgorithm) -> Bool
+
+Whether `Base.transpose(::Regridder)` is well-defined for a regridder built
+with this algorithm. Default `false`; methods on concrete algorithm types may
+override it. `Regridder`s whose algorithm reports `false` will raise a
+`MethodError` on `transpose`.
+"""
+supports_transpose(::RegriddingAlgorithm) = false
+supports_transpose(::FirstOrderConservative) = true
+
+"""
     abstract type AbstractRegridder
 
 Defines an interface for regridding operators.
@@ -22,9 +58,9 @@ See also: [`Regridder`](@ref).
 abstract type AbstractRegridder end
 
 # Primary `Regridder` struct.
-struct Regridder{W, A, V} <: AbstractRegridder
+struct Regridder{T <: AbstractFloat, ALG <: RegriddingAlgorithm, W, A, V} <: AbstractRegridder
     "Matrix of area intersections between cells on the source and destination grid"
-    intersections :: W 
+    intersections :: W
     "Vector of areas on the destination grid"
     dst_areas :: A
     "Vector of areas on the source grid"
@@ -33,11 +69,18 @@ struct Regridder{W, A, V} <: AbstractRegridder
     dst_temp :: V
     "Dense vectors used as work-arrays if trying to regrid non-contiguous memory"
     src_temp :: V
+    "Algorithm used to construct the weight matrix"
+    algorithm :: ALG
 end
 
-function Base.show(io::IO, regridder::Regridder{W, A, V}) where {W, A, V}
+function Regridder(intersections::W, dst_areas::A, src_areas::A, dst_temp::V, src_temp::V, algorithm::ALG) where {ALG <: RegriddingAlgorithm, W, A, V}
+    T = eltype(A)
+    return Regridder{T, ALG, W, A, V}(intersections, dst_areas, src_areas, dst_temp, src_temp, algorithm)
+end
+
+function Base.show(io::IO, regridder::Regridder{T, ALG, W, A, V}) where {T, ALG, W, A, V}
     n2, n1 = size(regridder)
-    println(io, "$n2×$n1 Regridder{$W, $A, $V}")
+    println(io, "$n2×$n1 Regridder{$T, $(nameof(ALG)), …}")
     Base.print_array(io, regridder.intersections)
     println(io, "\n\nSource areas: ", regridder.src_areas)
     print(io, "Dest.  areas: ", regridder.dst_areas)
@@ -45,9 +88,17 @@ end
 
 """$(TYPEDSIGNATURES)
 Return a Regridder for the backwards regridding, i.e. from destination to source grid.
-Does not copy any data, i.e. regridder for forward and backward share the same underlying arrays."""
-LinearAlgebra.transpose(regridder::Regridder) =
-    Regridder(transpose(regridder.intersections), regridder.src_areas, regridder.dst_areas, regridder.src_temp, regridder.dst_temp)
+Does not copy any data, i.e. regridder for forward and backward share the same underlying arrays.
+
+Dispatches on the algorithm: only algorithms with `supports_transpose(alg) === true`
+provide a `Base.transpose(::Regridder, alg)` method. Otherwise a `MethodError`
+is raised."""
+LinearAlgebra.transpose(regridder::Regridder) = LinearAlgebra.transpose(regridder, regridder.algorithm)
+
+function LinearAlgebra.transpose(regridder::Regridder, ::FirstOrderConservative)
+    return Regridder(transpose(regridder.intersections), regridder.src_areas, regridder.dst_areas,
+                     regridder.src_temp, regridder.dst_temp, regridder.algorithm)
+end
 
 Base.size(regridder::Regridder, args...) = size(regridder.intersections, args...)
 
@@ -123,10 +174,12 @@ function Regridder(dst, src; kwargs...)
 end
 
 function Regridder(
-        manifold::M, dst, src; 
-        normalize = true, 
-        intersection_operator::F = DefaultIntersectionOperator(manifold), 
+        manifold::M, dst, src;
+        normalize = true,
+        intersection_operator::F = DefaultIntersectionOperator(manifold),
         threaded = True(),
+        algorithm::RegriddingAlgorithm = FirstOrderConservative(),
+        T::Type{<:AbstractFloat} = DEFAULT_FLOATTYPE,
         kwargs...
     ) where {M <: Manifold, F}
     # "Normalize" the destination and source grids into trees.
@@ -135,31 +188,43 @@ function Regridder(
 
     _threaded = booltype(threaded)
 
-    # Compute the intersection areas.
-    intersections = intersection_areas(
-        manifold,
-        _threaded, 
-        dst_tree, src_tree; 
-        intersection_operator, 
-        kwargs...
+    # Compute the weight (intersection) matrix; algorithm-dispatched.
+    intersections = build_weights(
+        algorithm, manifold, _threaded, dst_tree, src_tree;
+        intersection_operator, T, kwargs...
     )
 
-    # Compute the areas of each cell
-    # of the destination and source grids.
-    dst_areas = areas(manifold, dst, dst_tree)
-    src_areas = areas(manifold, src, src_tree)
+    # Compute the areas of each cell of the destination and source grids.
+    dst_areas = convert(Vector{T}, areas(manifold, dst, dst_tree))
+    src_areas = convert(Vector{T}, areas(manifold, src, src_tree))
 
     # TODO: make this GPU-compatible?
-    # Allocate temporary arrays for the regridding operation - 
+    # Allocate temporary arrays for the regridding operation —
     # in case the destination and source fields are not contiguous in memory.
-    dst_temp = zeros(length(dst_areas))
-    src_temp = zeros(length(src_areas))
+    dst_temp = zeros(T, length(dst_areas))
+    src_temp = zeros(T, length(src_areas))
 
     # Construct the regridder.  Normalize if requested.
-    regridder = Regridder(intersections, dst_areas, src_areas, dst_temp, src_temp)
+    regridder = Regridder(intersections, dst_areas, src_areas, dst_temp, src_temp, algorithm)
     normalize && LinearAlgebra.normalize!(regridder)
 
     return regridder
+end
+
+"""
+    build_weights(algorithm, manifold, threaded, dst_tree, src_tree; kwargs...)
+
+Construct the sparse weight (intersection) matrix used by a `Regridder`.
+Multiple-dispatched on `algorithm <: RegriddingAlgorithm`. The first-order
+method is the area-weighted overlap matrix; second-order lives in
+`second_order.jl`.
+"""
+function build_weights end
+
+function build_weights(::FirstOrderConservative, manifold, threaded, dst_tree, src_tree;
+                       intersection_operator, T = DEFAULT_FLOATTYPE, kwargs...)
+    return intersection_areas(manifold, threaded, dst_tree, src_tree;
+                               intersection_operator, T, kwargs...)
 end
 
 function areas(manifold::GOCore.Manifold, item, tree)
