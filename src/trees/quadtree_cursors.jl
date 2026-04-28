@@ -3,6 +3,27 @@ abstract type AbstractQuadtreeCursor end
 
 GOCore.best_manifold(c::AbstractQuadtreeCursor) = GOCore.manifold(getgrid(c))
 
+# Default `should_parallelize` for any cursor (TopDownQuadtreeCursor,
+# IndexOffsetQuadtreeCursor, ReorderedTopDownQuadtreeCursor, QuadtreeCursor):
+# spawn once a subtree's leaf count drops below `total / (nthreads * K)`. With
+# K = 32 we land ~256 tasks on 8 threads — enough for the scheduler to balance
+# work without paying excessive spawn overhead. The cursor carries `.grid`,
+# so we get the root grid's total cell count without needing the root tree.
+# Both `prod(ncells(...))` calls are O(1).
+const _PARALLELIZE_K_DEFAULT = 32
+
+@inline _grid_total_cells(g) = ncells(g, 1) * ncells(g, 2)
+
+function should_parallelize(node::AbstractQuadtreeCursor, extent::GO.UnitSpherical.SphericalCap)
+    threshold = max(1, _grid_total_cells(node.grid) ÷ (Threads.nthreads() * _PARALLELIZE_K_DEFAULT))
+    return prod(ncells(node)) <= threshold
+end
+
+function should_parallelize(node::AbstractQuadtreeCursor, extent::Extents.Extent)
+    threshold = max(1, _grid_total_cells(node.grid) ÷ (Threads.nthreads() * _PARALLELIZE_K_DEFAULT))
+    return prod(ncells(node)) <= threshold
+end
+
 """
     QuadtreeCursor(grid::AbstractCurvilinearGrid)
 
