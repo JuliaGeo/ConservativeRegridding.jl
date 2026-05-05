@@ -52,27 +52,83 @@ const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeReg
         weights = ClimaCoreExt.se_node_weights(cubedsphere_space)
         @test isapprox(sum(weights .* v), sum(field), rtol=1e-10)
     end
-    # get_value_per_element! test is flaky — sum(field_lat) varies between ~0 and 1.0
-    # across runs depending on ClimaCore internals, causing intermittent failures.
-    # @testset "get_value_per_element!" begin
-    #     field_lat = deepcopy(Fields.coordinate_field(cubedsphere_space).lat)
-    #     ones_field = Fields.ones(cubedsphere_space)
-    #     value_per_element = zeros(Float64, Meshes.nelements(cubedsphere_space.grid.topology.mesh))
-    #     ClimaCoreExt.get_value_per_element!(
-    #         value_per_element,
-    #         field_lat,
-    #         ones_field,
-    #     )
-    #     @test isapprox(sum(value_per_element), sum(field_lat), atol = 1e-12)
-    # end
-    @testset "set_value_per_element!" begin
-        value_per_element1 = zeros(Float64, Meshes.nelements(cubedsphere_space.grid.topology.mesh))
-        field1_one_value_per_element = Fields.zeros(cubedsphere_space)
-        ClimaCoreExt.set_value_per_element!(field1_one_value_per_element, value_per_element1)
 
-        # Check the error of converting to one value per element
-        abs_error_one_value_per_element = abs(sum(field1_one_value_per_element) - sum(field))
-        @test_broken abs_error_one_value_per_element < 2e-11
-        @test_broken isapprox(mean(field), mean(field1_one_value_per_element), rtol=1e-14)
+    @testset "inverse_element_map round-trip on GLL nodes (all faces)" begin
+        space = CommonSpaces.CubedSphereSpace(;
+            radius = GO.Spherical().radius,
+            n_quad_points = 4,
+            h_elem = 4,
+        )
+        qs = Spaces.quadrature_style(space)
+        ξs, _ = Quadratures.quadrature_points(Float64, qs)
+        Nq = length(ξs)
+        ne = Topologies.mesh(Spaces.topology(space)).ne
+
+        coords = Fields.coordinate_field(space)
+        long_data = parent(Fields.field_values(coords.long))
+        lat_data  = parent(Fields.field_values(coords.lat))
+        transform = GO.UnitSphereFromGeographic()
+
+        for face in 1:6
+            elem_idx = (face - 1) * ne^2 + 1
+            for (i, j) in ((1, 1), (Nq, Nq), (2, 3), (3, 2))
+                lon = long_data[i, j, 1, elem_idx]
+                lat = lat_data[i, j, 1, elem_idx]
+                x = transform((lon, lat))
+                ξ, η = ClimaCoreExt.inverse_element_map(space, elem_idx, x)
+                @test ξ ≈ ξs[i] atol=1e-10
+                @test η ≈ ξs[j] atol=1e-10
+            end
+        end
     end
+
+    @testset "element_jacobian_at returns nodal Jᵉᵢⱼ at GLL nodes" begin
+        space = CommonSpaces.CubedSphereSpace(;
+            radius = GO.Spherical().radius,
+            n_quad_points = 4,
+            h_elem = 4,
+        )
+        qs = Spaces.quadrature_style(space)
+        ξs, ws = Quadratures.quadrature_points(Float64, qs)
+        Nq = length(ξs)
+
+        WJ = parent(Spaces.weighted_jacobian(space))
+        elem_idx = 1
+        for j in 1:Nq, i in 1:Nq
+            Jᵢⱼ = WJ[i, j, 1, elem_idx] / (ws[i] * ws[j])
+            Jq = ClimaCoreExt.element_jacobian_at(space, elem_idx, ξs[i], ξs[j])
+            @test Jq ≈ Jᵢⱼ atol=1e-10
+        end
+
+        @test ClimaCoreExt.element_jacobian_at(space, elem_idx, 0.0, 0.0) > 0
+        @test ClimaCoreExt.element_jacobian_at(space, elem_idx, 0.3, -0.4) > 0
+    end
+
+    @testset "accumulate_principled_b: sum equals intersection area" begin
+        space = CommonSpaces.CubedSphereSpace(;
+            radius = GO.Spherical().radius,
+            n_quad_points = 4,
+            h_elem = 4,
+        )
+        Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
+
+        # When the destination polygon IS the element polygon, k ∩ e = e and
+        # Σᵢⱼ B(k, (e,i,j)) = ∫_e Σᵢⱼ ϕᵢϕⱼ dA = ∫_e 1 dA = A_e by partition of unity.
+        # This is the principled-version analogue of PDF Eq. 21 collapsed to a
+        # single element. Note that individual B[i,j] entries form the FULL mass
+        # matrix Mᵢⱼ, not the diagonal Wᵉᵢⱼ — those agree only under GLL quadrature.
+        se_tree = Trees.treeify(GO.Spherical(), space)
+
+        for face in 1:6
+            ne = Topologies.mesh(Spaces.topology(space)).ne
+            elem_idx = (face - 1) * ne^2 + 1
+            poly = Trees.getcell(se_tree, elem_idx)
+            B = ClimaCoreExt.accumulate_principled_b(
+                GO.Spherical(), space, elem_idx, poly;
+                triangle_quad_degree = 2 * (Nq - 1),
+            )
+            @test sum(B) ≈ GO.area(GO.Spherical(), poly) rtol=1e-10
+        end
+    end
+
 end

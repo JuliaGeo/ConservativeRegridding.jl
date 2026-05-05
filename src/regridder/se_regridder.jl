@@ -15,18 +15,34 @@ struct SEtoFVRegridder{W, A, V} <: AbstractRegridder
 end
 
 """
-    FVtoSERegridder{W,V} <: AbstractRegridder
+    FVtoSERegridder{W,V,N} <: AbstractRegridder
 
 Regridder from a finite volume (FV) grid to a spectral element (SE) grid.
 
-The `weight_matrix` is a sparse matrix of size `(N_se_nodes, N_fv)` whose entries
-are 1 where a SE node falls inside a FV cell.  Regridding computes `dst = weight_matrix * src`
-(no area normalization -- each SE node receives the value of the FV cell containing it).
+The `weight_matrix` is a sparse matrix of size `(N_se_nodes, N_fv)`.
+
+Two construction paths share this struct:
+
+- **Simplified (`method=:node_in_polygon`)**: entries are 1 where an SE node falls
+  inside a FV cell. `inv_node_weights = nothing`. Regridding computes
+  `dst = weight_matrix * src` (no normalization). Each SE node receives the value
+  of its containing FV cell. Output is automatically continuous because every
+  duplicate of a physical node maps to the same cell.
+
+- **Principled (`method=:polygon_intersection`)**: entries are
+  `B(k, (e, i, j)) = ∫_{k∩e} ϕᵢ(ξ) ϕⱼ(η) dA_phys` (PDF Eq. 30, with the
+  Jacobian cancellation from change of variables). `inv_node_weights[n] = 1/Wᵉᵢⱼ`
+  for flat node index `n = (e, i, j)`. Regridding computes
+  `dst = (weight_matrix * src) .* inv_node_weights`. Output is NOT automatically
+  continuous; downstream consumers should apply DSS (the field-level `regrid!`
+  in the ClimaCore extension does this automatically).
 """
-struct FVtoSERegridder{W, V} <: AbstractRegridder
+struct FVtoSERegridder{W, V, N} <: AbstractRegridder
     weight_matrix :: W
     dst_temp :: V
     src_temp :: V
+    "Per-node `1/Wᵉᵢⱼ` (principled), or `nothing` (simplified)"
+    inv_node_weights :: N
 end
 
 """
@@ -81,11 +97,16 @@ function regrid!(dst_field::AbstractVector, regridder::SEtoFVRegridder, src_fiel
 end
 
 # ──────────────────────────────────────────────────────────
-# FV → SE:  dst[n] = f_src[k]  where node n is inside cell k
+# FV → SE:
+#   simplified: dst[n] = f_src[k]  where node n is inside cell k
+#   principled: dst[n] = (Σ_k B(k,n) f_src[k]) / Wᵉᵢⱼ  (PDF Eq. 30)
 # ──────────────────────────────────────────────────────────
 
 function regrid!(dst_field::DenseVector, regridder::FVtoSERegridder, src_field::DenseVector)
     LinearAlgebra.mul!(dst_field, regridder.weight_matrix, src_field)
+    if regridder.inv_node_weights !== nothing
+        dst_field .*= regridder.inv_node_weights
+    end
     return dst_field
 end
 

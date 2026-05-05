@@ -2,6 +2,8 @@ using Test, SafeTestsets
 
 @testset "ConservativeRegridding.jl" begin
 
+    @safetestset "Unit tests: Lagrange" begin include("lagrange.jl") end
+    @safetestset "Unit tests: TriangleQuadrature" begin include("triangle_quadrature.jl") end
     @safetestset "Unit tests: Regridding" begin include("regridding.jl") end
     @safetestset "Unit tests: Grids" begin include("trees/grids.jl") end
     @safetestset "Unit tests: QuadtreeCursors" begin include("trees/quadtree_cursors.jl") end
