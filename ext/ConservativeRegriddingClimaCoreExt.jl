@@ -121,9 +121,9 @@ accepts raw `AbstractData` (e.g. `Fields.field_values(coords.lat)` or
 function flat_nodal_data(data::DataLayouts.AbstractData)
     array = DataLayouts.data2array(data)
     if array isa AbstractVector
-        return collect(array)
+        return vec(array)
     elseif ndims(array) == 2
-        return collect(view(array, 1, :))
+        return vec(view(array, 1, :))
     else
         error("Unexpected data2array shape: $(size(array))")
     end
