@@ -6,7 +6,7 @@ using Oceananigans.Fields: AbstractField
 using Oceananigans.Architectures: CPU
 
 using ConservativeRegridding
-using ConservativeRegridding: Regridder, ExampleFieldFunction
+using ConservativeRegridding: Regridder, FVtoFV, SEtoFV, ExampleFieldFunction
 using ConservativeRegridding.Trees
 
 import GeoInterface as GI
