@@ -20,7 +20,7 @@ using ClimaCore:
 #   - non-global source: undershoot is expected (uncovered regions),
 #                        but overshoot (value > 1 + atol) indicates a bug
 # ---------------------------------------------------------------------------
-function test_constant_regrid(R, src_global, dst_global; atol=1e-2)
+function test_constant_regrid(R, src_global, dst_global; atol=1e-4)
     n_dst, n_src = size(R)
     A = R.intersections
 
@@ -112,13 +112,26 @@ grids = [
 # Tests: all spherical grid pairs
 # ---------------------------------------------------------------------------
 
+# Per-pair atol overrides.  TripolarF↔TripolarC is the worst case for the spherical
+# Sutherland-Hodgman operator: the two grids are half-cell-shifted versions of each
+# other, so ~65% of cell-pair intersections are slivers (vs ~19% for tripolar↔Healpix).
+# Slivers trigger catastrophic cancellation in `spherical_orient`, producing coherent
+# col-sum bias up to ~9e-4 in mid-latitudes (rows 35–48 of TripolarC).  This is an
+# operator-precision floor that cannot be tightened without an upstream fix to the
+# spherical clipping algorithm.
+function atol_for_pair(d_name, s_name)
+    pair = sort([d_name, s_name])
+    pair == ["TripolarC(120×60)", "TripolarF(120×60)"] && return 1e-3
+    return 1e-4
+end
+
 @testset "Constant-field regridding" begin
     for i in 1:length(grids), j in (i+1):length(grids)
         d = grids[i]
         s = grids[j]
         @testset "$(d.name) ↔ $(s.name)" begin
             R = ConservativeRegridding.Regridder(GO.Spherical(), d.grid, s.grid)
-            test_constant_regrid(R, s.global_coverage, d.global_coverage)
+            test_constant_regrid(R, s.global_coverage, d.global_coverage; atol = atol_for_pair(d.name, s.name))
         end
     end
 end
