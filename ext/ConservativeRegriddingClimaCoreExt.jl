@@ -464,8 +464,10 @@ function se_to_fv_principled(manifold, dst, src; threaded, triangle_quad_degree,
     weight_matrix = SparseArrays.sparse(rows, cols, vals, N_fv, N_nodes)
     dst_areas = ConservativeRegridding.areas(manifold, dst, fv_tree)
 
-    return ConservativeRegridding.SEtoFVRegridder(
-        weight_matrix, dst_areas, zeros(N_fv), zeros(N_nodes),
+    return ConservativeRegridding.Regridder(
+        weight_matrix,
+        ConservativeRegridding.SEtoFV(dst_areas),
+        zeros(N_fv), zeros(N_nodes),
     )
 end
 
@@ -654,8 +656,10 @@ function fv_to_se_l2_projection(manifold, dst, src;
 
     weight_matrix = SparseArrays.sparse(rows, cols, vals, N_nodes, N_fv)
 
-    return ConservativeRegridding.FVtoSERegridder(
-        weight_matrix, zeros(N_nodes), zeros(N_fv),
+    return ConservativeRegridding.Regridder(
+        weight_matrix,
+        ConservativeRegridding.FVtoSE(),
+        zeros(N_nodes), zeros(N_fv),
     )
 end
 

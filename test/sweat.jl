@@ -1,6 +1,7 @@
 # Sweat test for all known tree types against each other
 
 using ConservativeRegridding
+using ConservativeRegridding: destination_areas, source_areas
 using ConservativeRegridding: ConservativeRegridding as CR, Trees
 using Test
 import GeometryOps as GO, GeoInterface as GI
@@ -21,8 +22,8 @@ function test_integral_is_conserved(regridder, tree1, values1, tree2, values2, f
 end
 
 function test_intersection_areas_agree(regridder, tree1, tree2; rtol = sqrt(eps(Float64)))
-    @test sum(regridder.intersections, dims=2)[:, 1] ≈ regridder.dst_areas rtol=rtol
-    @test sum(regridder.intersections, dims=1)[1, :] ≈ regridder.src_areas rtol=rtol
+    @test sum(regridder.weight_matrix, dims=2)[:, 1] ≈ destination_areas(regridder) rtol=rtol
+    @test sum(regridder.weight_matrix, dims=1)[1, :] ≈ source_areas(regridder) rtol=rtol
 end
 
 
@@ -240,7 +241,7 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
                         field1.grid isa Oceananigans.RotatedLatitudeLongitudeGrid
                     )
                     tol = (is_dateline_straddling_source && fun_to_test isa ConservativeRegridding.LongitudeField) ? 5e-2 : 1e-2
-                    @test sum(abs.(vals2_regridded) .* regridder.dst_areas) ≈ sum(abs.(vals2_analytical) .* regridder.dst_areas) rtol=tol
+                    @test sum(abs.(vals2_regridded) .* destination_areas(regridder)) ≈ sum(abs.(vals2_analytical) .* destination_areas(regridder)) rtol=tol
                 end
             end
         end

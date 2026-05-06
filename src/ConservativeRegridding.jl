@@ -35,11 +35,12 @@ include("regridder/triangle_quadrature.jl")
 include("regridder/regridder.jl")
 include("regridder/regrid.jl")
 include("regridder/intersection_areas.jl")
-include("regridder/se_regridder.jl")
 
 
 @public Regridder, regrid, regrid!
-@public SEtoFVRegridder, FVtoSERegridder
+@public AbstractMapping, AbstractNormalizingMapping, FVtoFV, SEtoFV, FVtoSE
+@public FVtoFVRegridder, SEtoFVRegridder, FVtoSERegridder
+@public destination_areas, source_areas
 @public areas
 
 end

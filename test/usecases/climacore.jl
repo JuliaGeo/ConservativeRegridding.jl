@@ -1,5 +1,5 @@
 using ConservativeRegridding
-using ConservativeRegridding: Trees
+using ConservativeRegridding: Trees, destination_areas, source_areas
 using Statistics
 using Test
 import GeometryOps as GO, GeoInterface as GI, LibGEOS
@@ -147,7 +147,7 @@ end
 
     # Source-side integral the regridder treats as the conserved invariant:
     src_integral = sum(vec(sum(R.weight_matrix; dims=1)) .* src_vec)
-    dst_integral = sum(dst .* R.dst_areas)
+    dst_integral = sum(dst .* destination_areas(R))
 
     sphere_area = 4π * GO.Spherical().radius^2
     @test isapprox(src_integral, sphere_area; rtol=1e-12)   # math sanity

@@ -1,4 +1,5 @@
 using ConservativeRegridding
+using ConservativeRegridding: destination_areas, source_areas
 using ConservativeRegridding: Trees
 using Test
 
@@ -30,7 +31,7 @@ tree2 = GO.SpatialTreeInterface.FlatNoTree(polys2)
 @testset "Simple Regridding" begin
     # Construct a regridder from grid2 to grid1
     R = ConservativeRegridding.Regridder(GO.Planar(), tree1, tree2; normalize=false)
-    A = R.intersections
+    A = R.weight_matrix
     # Now, let's perform some interpolation!
     area1 = vec(sum(A, dims=2))
     @test area1 == GO.area.(polys1)
@@ -56,8 +57,8 @@ end
     regridder_T = transpose(regridder)
 
     # Verify that transpose swaps the areas
-    @test regridder_T.src_areas === regridder.dst_areas
-    @test regridder_T.dst_areas === regridder.src_areas
+    @test source_areas(regridder_T) === destination_areas(regridder)
+    @test destination_areas(regridder_T) === source_areas(regridder)
 
     # Verify that transpose swaps the temporary vectors too
     @test regridder_T.src_temp === regridder.dst_temp
@@ -67,7 +68,7 @@ end
     src_on_grid1 = Float64[1, 2, 3, 4]
     dst_on_grid2 = zeros(Float64, length(polys2))
     ConservativeRegridding.regrid!(dst_on_grid2, regridder_T, src_on_grid1)
-    @test sum(dst_on_grid2 .* regridder_T.dst_areas) ≈ sum(src_on_grid1 .* regridder_T.src_areas)
+    @test sum(dst_on_grid2 .* destination_areas(regridder_T)) ≈ sum(src_on_grid1 .* source_areas(regridder_T))
 end
 
 @testset "Regridding with STRtrees" begin
@@ -79,7 +80,7 @@ end
     str_tree2 = Trees.GeometryMaintainingTreeWrapper(polys2, str2)
 
     R = ConservativeRegridding.Regridder(GO.Planar(), str_tree1, str_tree2; normalize=false)
-    A = R.intersections
+    A = R.weight_matrix
     area1 = vec(sum(A, dims=2))
     @test area1 == GO.area.(polys1)
     area2 = vec(sum(A, dims=1))

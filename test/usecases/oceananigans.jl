@@ -1,4 +1,5 @@
 using ConservativeRegridding
+using ConservativeRegridding: destination_areas, source_areas
 using ConservativeRegridding.Trees
 
 import GeoInterface as GI
@@ -48,11 +49,11 @@ end
 
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
 
-    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-10
+    @test sum(vec(interior(dst)) .* destination_areas(regridder)) ≈ sum(vec(interior(src)) .* source_areas(regridder)) rtol=1e-10
 
     set!(src, (x, y, z) -> rand())
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
-    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+    @test sum(vec(interior(dst)) .* destination_areas(regridder)) ≈ sum(vec(interior(src)) .* source_areas(regridder)) rtol=1e-7
 end
 
 @testset "Tripolar (UPivot / RightCenterFolded) to lat-long" begin
@@ -71,11 +72,11 @@ end
 
     # The tests on a `RightCenterFolded` grid have a lower relative tolerance because of the extra 
     # half row thatis repeated at the top of the domain
-    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+    @test sum(vec(interior(dst)) .* destination_areas(regridder)) ≈ sum(vec(interior(src)) .* source_areas(regridder)) rtol=1e-7
 
     set!(src, (x, y, z) -> rand())
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
-    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+    @test sum(vec(interior(dst)) .* destination_areas(regridder)) ≈ sum(vec(interior(src)) .* source_areas(regridder)) rtol=1e-7
 end
 
 @testset "RotatedLatitudeLongitudeGrid to lat-long" begin
@@ -91,11 +92,11 @@ end
     set!(dst, (x, y, z) -> 0)
 
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
-    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-10
+    @test sum(vec(interior(dst)) .* destination_areas(regridder)) ≈ sum(vec(interior(src)) .* source_areas(regridder)) rtol=1e-10
 
     set!(src, (x, y, z) -> rand())
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
-    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+    @test sum(vec(interior(dst)) .* destination_areas(regridder)) ≈ sum(vec(interior(src)) .* source_areas(regridder)) rtol=1e-7
 end
 
 @testset "Lat-long to RotatedLatitudeLongitudeGrid" begin
@@ -111,11 +112,11 @@ end
     set!(dst, (x, y, z) -> 0)
 
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
-    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-10
+    @test sum(vec(interior(dst)) .* destination_areas(regridder)) ≈ sum(vec(interior(src)) .* source_areas(regridder)) rtol=1e-10
 
     set!(src, (x, y, z) -> rand())
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
-    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+    @test sum(vec(interior(dst)) .* destination_areas(regridder)) ≈ sum(vec(interior(src)) .* source_areas(regridder)) rtol=1e-7
 end
 
 @testset "Tripolar (FPivot) to RotatedLatitudeLongitudeGrid" begin
@@ -131,11 +132,11 @@ end
     set!(dst, (x, y, z) -> 0)
 
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
-    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+    @test sum(vec(interior(dst)) .* destination_areas(regridder)) ≈ sum(vec(interior(src)) .* source_areas(regridder)) rtol=1e-7
 
     set!(src, (x, y, z) -> rand())
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
-    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+    @test sum(vec(interior(dst)) .* destination_areas(regridder)) ≈ sum(vec(interior(src)) .* source_areas(regridder)) rtol=1e-7
 end
 
 @testset "Tripolar (UPivot) to RotatedLatitudeLongitudeGrid" begin
@@ -151,11 +152,11 @@ end
     set!(dst, (x, y, z) -> 0)
 
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
-    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+    @test sum(vec(interior(dst)) .* destination_areas(regridder)) ≈ sum(vec(interior(src)) .* source_areas(regridder)) rtol=1e-7
 
     set!(src, (x, y, z) -> rand())
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
-    @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
+    @test sum(vec(interior(dst)) .* destination_areas(regridder)) ≈ sum(vec(interior(src)) .* source_areas(regridder)) rtol=1e-7
 end
 
 @testset "Rectilinear (planar) upscaling" begin

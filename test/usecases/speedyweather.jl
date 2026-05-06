@@ -1,4 +1,5 @@
 using ConservativeRegridding
+using ConservativeRegridding: destination_areas, source_areas
 using SpeedyWeather
 using GeoInterface
 using GeometryOps
@@ -59,13 +60,13 @@ dst_cells = get_faces(dst)
 
 regridder = ConservativeRegridding.Regridder(dst_cells, src_cells)
 
-A = regridder.intersections
+A = regridder.weight_matrix
 
 # Now, let's perform some interpolation!
 area1 = vec(sum(A, dims=1))
-@test area1 == regridder.src_areas
+@test area1 == source_areas(regridder)
 area2 = vec(sum(A, dims=2))
-@test area2 == regridder.dst_areas
+@test area2 == destination_areas(regridder)
 
 values_on_grid1 = A * grid2 ./ area1
 @test sum(values_on_grid1 .* area1) == sum(grid2 .* area2)

@@ -1,27 +1,34 @@
 """$(TYPEDSIGNATURES)
-Regrid data on `src_field` onto `dst_field` conservatively (mean-preserving) using the `regridder` matrix.
-`dst_area` is the area of each grid cell in `dst_field` and is used to normalize the result,
-if not provided, will recompute this from `regridder`. `src_field` and `dst_field` can be any n-dimensional array,
-in which case the regridding of the 1st dimension is broadcast to additional dimensions.
-
-Mathematics of regridding: if A are the intersection areas between the respective grids of the fields d (dst) and s (src),
-and aˢ and aᵈ are the areas of the source and destination grid cells, then ``d`` is computed via
-
-```math
-d = (A s) / aˢ 
-```
-
-Note that by construction,
-
-```julia
-aᵈ = sum(A; dims=2)
-aˢ = sum(A; dims=1)
-```
+Default forward regrid: `dst = weight_matrix · src`. Used for any mapping that
+does not need post-`mul!` normalization (currently `FVtoSE`, where the inverse
+mass matrix is already baked into the weight matrix).
 """
 function regrid!(dst_field::DenseVector, regridder::Regridder, src_field::DenseVector)
-    areas = regridder.dst_areas # area of each grid cell
-    LinearAlgebra.mul!(dst_field, regridder.intersections, src_field) # units of src_field times area of grid cell
-    dst_field ./= areas # normalize by area of each grid cell
+    LinearAlgebra.mul!(dst_field, regridder.weight_matrix, src_field)
+    return dst_field
+end
+
+"""$(TYPEDSIGNATURES)
+Normalizing forward regrid: `dst = (weight_matrix · src) ./ mapping.dst_areas`.
+Applies to any [`AbstractNormalizingMapping`](@ref) (currently `FVtoFV` and `SEtoFV`).
+
+Mathematics: if `A` are the intersection-area / `B`-integral entries of the
+weight matrix between source `s` and destination `d`, and `aᵈ` are the
+destination cell areas, then
+
+```math
+d = (A s) / aᵈ
+```
+
+For `FVtoFV`, by construction `aᵈ = sum(A; dims=2)` and `aˢ = sum(A; dims=1)`.
+"""
+function regrid!(
+    dst_field::DenseVector,
+    regridder::Regridder{<:Any, <:AbstractNormalizingMapping},
+    src_field::DenseVector,
+)
+    LinearAlgebra.mul!(dst_field, regridder.weight_matrix, src_field)
+    dst_field ./= regridder.mapping.dst_areas
     return dst_field
 end
 

@@ -1,4 +1,5 @@
 using ConservativeRegridding
+using ConservativeRegridding: destination_areas, source_areas
 using ConservativeRegridding.Trees
 
 import GeometryOps as GO
@@ -22,7 +23,7 @@ using ClimaCore:
 # ---------------------------------------------------------------------------
 function test_constant_regrid(R::ConservativeRegridding.Regridder, src_global, dst_global; atol=1e-4)
     n_dst, n_src = size(R)
-    A = R.intersections
+    A = R.weight_matrix
 
     # Forward: src → dst
     @testset let direction = :forward, src_covers_globe = src_global
@@ -71,7 +72,7 @@ function test_constant_regrid(R::ConservativeRegridding.SEtoFVRegridder, src_glo
         src_vals = ones(N_se_nodes)
         dst_vals = zeros(N_fv)
         ConservativeRegridding.regrid!(dst_vals, R, src_vals)
-        @test isapprox(sum(dst_vals .* R.dst_areas) / sum(R.dst_areas), 1.0; rtol)
+        @test isapprox(sum(dst_vals .* destination_areas(R)) / sum(destination_areas(R)), 1.0; rtol)
     end
 end
 
