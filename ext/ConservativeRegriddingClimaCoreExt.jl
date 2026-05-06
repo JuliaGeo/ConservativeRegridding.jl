@@ -104,7 +104,7 @@ Trees.treeify(manifold::GOCore.Spherical, field::ClimaCore.Fields.Field) = Trees
 
 ## Node extraction helpers for spectral element fields
 """
-    collect_flat_nodal(data::DataLayouts.AbstractData) → Vector
+    flat_nodal_data(data::DataLayouts.AbstractData) → Vector
 
 Flatten nodal storage to a `Vector` using ClimaCore’s [`DataLayouts.data2array`](@ref),
 which matches the memory layout (for `IJFH`-style data this is `i` fastest, then `j`,
@@ -118,7 +118,7 @@ For scalar fields you can equivalently use `Fields.field2array(field)`; this hel
 accepts raw `AbstractData` (e.g. `Fields.field_values(coords.lat)` or
 `Spaces.weighted_jacobian(space)`).
 """
-function collect_flat_nodal(data::DataLayouts.AbstractData)
+function flat_nodal_data(data::DataLayouts.AbstractData)
     array = DataLayouts.data2array(data)
     if array isa AbstractVector
         return collect(array)
@@ -138,8 +138,8 @@ then element 2, etc.
 """
 function se_node_positions(space)
     coords = Fields.coordinate_field(space)
-    lat_flat  = collect_flat_nodal(Fields.field_values(coords.lat))
-    long_flat = collect_flat_nodal(Fields.field_values(coords.long))
+    lat_flat  = flat_nodal_data(Fields.field_values(coords.lat))
+    long_flat = flat_nodal_data(Fields.field_values(coords.long))
     transform = GO.UnitSphereFromGeographic()
     return [transform((long_flat[k], lat_flat[k])) for k in eachindex(lat_flat)]
 end
@@ -152,7 +152,7 @@ flat vector.  Same ordering as [`se_node_positions`](@ref).
 """
 function se_node_weights(space)
     wj = Spaces.weighted_jacobian(space)
-    return collect_flat_nodal(wj)
+    return flat_nodal_data(wj)
 end
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -366,7 +366,7 @@ Convert a ClimaCore field to a flat vector of nodal values.
 Same ordering as [`se_node_positions`](@ref).
 """
 function se_field_to_vec(field)
-    return collect_flat_nodal(Fields.field_values(field))
+    return flat_nodal_data(Fields.field_values(field))
 end
 
 """
