@@ -39,7 +39,7 @@ include("regridder/se_regridder.jl")
 
 
 @public Regridder, regrid, regrid!
-@public SEtoFVRegridder, FVtoSERegridder, SEtoSERegridder
+@public SEtoFVRegridder, FVtoSERegridder
 @public areas
 
 end

@@ -87,19 +87,6 @@ function test_constant_regrid(R::ConservativeRegridding.FVtoSERegridder, src_glo
     end
 end
 
-# SE → SE: global conservation — area-weighted mean of destination elements ≈ 1.0.
-function test_constant_regrid(R::ConservativeRegridding.SEtoSERegridder, src_global, dst_global; rtol=2e-2)
-    N_dst_nodes, N_src_nodes = size(R)
-    Nq2 = R.Nq_dst^2
-    @testset let direction = :forward
-        src_vals = ones(N_src_nodes)
-        dst_vals = zeros(N_dst_nodes)
-        ConservativeRegridding.regrid!(dst_vals, R, src_vals)
-        elem_vals = [dst_vals[(e-1)*Nq2 + 1] for e in 1:length(R.dst_element_areas)]
-        @test isapprox(sum(elem_vals .* R.dst_element_areas) / sum(R.dst_element_areas), 1.0; rtol)
-    end
-end
-
 # ---------------------------------------------------------------------------
 # Grid construction
 # ---------------------------------------------------------------------------
@@ -155,10 +142,14 @@ grids = [
 # Tests: all spherical grid pairs
 # ---------------------------------------------------------------------------
 
+is_se_grid(g) = g isa Spaces.AbstractSpectralElementSpace
+
 @testset "Constant-field regridding" begin
     for i in 1:length(grids), j in (i+1):length(grids)
         d = grids[i]
         s = grids[j]
+        # Skip SE ↔ SE pairs — this PR drops SE → SE regridding.
+        is_se_grid(d.grid) && is_se_grid(s.grid) && continue
         @testset "$(d.name) ↔ $(s.name)" begin
             R = ConservativeRegridding.Regridder(GO.Spherical(), d.grid, s.grid)
             test_constant_regrid(R, s.global_coverage, d.global_coverage)

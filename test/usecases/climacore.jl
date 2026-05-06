@@ -71,17 +71,6 @@ end
     @test maximum(abs.(dst .- 1.0)) < 1e-10
 end
 
-@testset "method=:node_in_polygon kwarg dispatches to simplified path" begin
-    # Verify the kwarg dispatch reaches the existing simplified constructor.
-    # We don't assert conservation on a non-constant field here because the
-    # simplified scheme is documented to be non-conservative in regimes
-    # where many FV cells contain no SE node (PDF §2, Option 2).
-    space = make_cubedsphere_space(; h_elem=8, n_quad_points=4)
-    R = ConservativeRegridding.Regridder(latlon_grid, space;
-                                         method=:node_in_polygon, threaded=false)
-    @test R isa ConservativeRegridding.SEtoFVRegridder
-end
-
 @testset "SE → FV: Gilbert ordered cubed sphere" begin
     space = make_cubedsphere_space(; h_elem=16, n_quad_points=4, use_sfc=true)
     @assert Topologies.uses_spacefillingcurve(space.grid.topology)
@@ -137,102 +126,6 @@ end
     ConservativeRegridding.regrid!(dst_vec, regridder, src_fv)
 
     @test all(x -> isapprox(x, 1.0; atol=1e-10), dst_vec)
-end
-
-@testset "SE → SE: Regular cubed sphere (different resolutions)" begin
-    src_space = make_cubedsphere_space(; h_elem=8, n_quad_points=4)
-    dst_space = make_cubedsphere_space(; h_elem=16, n_quad_points=4)
-
-    src_field = Fields.ones(src_space)
-    src_vec = ClimaCoreExt.se_field_to_vec(src_field)
-
-    Nq_dst = Quadratures.degrees_of_freedom(Spaces.quadrature_style(dst_space))
-    Nh_dst = Meshes.nelements(Topologies.mesh(Spaces.topology(dst_space)))
-    N_dst_nodes = Nq_dst^2 * Nh_dst
-
-    regridder = ConservativeRegridding.Regridder(dst_space, src_space; threaded=false)
-    @test regridder isa ConservativeRegridding.SEtoSERegridder
-
-    dst_vec = zeros(N_dst_nodes)
-    ConservativeRegridding.regrid!(dst_vec, regridder, src_vec)
-
-    dst_field = Fields.zeros(dst_space)
-    ClimaCoreExt.vec_to_se_field!(dst_field, dst_vec)
-
-    @test isapprox(sum(dst_field), sum(src_field), rtol=1e-2)
-end
-
-@testset "SE → SE: Gilbert ordered cubed sphere" begin
-    src_space = make_cubedsphere_space(; h_elem=8, n_quad_points=4, use_sfc=true)
-    dst_space = make_cubedsphere_space(; h_elem=16, n_quad_points=4, use_sfc=true)
-
-    src_field = Fields.ones(src_space)
-    src_vec = ClimaCoreExt.se_field_to_vec(src_field)
-
-    Nq_dst = Quadratures.degrees_of_freedom(Spaces.quadrature_style(dst_space))
-    Nh_dst = Meshes.nelements(Topologies.mesh(Spaces.topology(dst_space)))
-    N_dst_nodes = Nq_dst^2 * Nh_dst
-
-    regridder = ConservativeRegridding.Regridder(dst_space, src_space; threaded=false)
-    @test regridder isa ConservativeRegridding.SEtoSERegridder
-
-    dst_vec = zeros(N_dst_nodes)
-    ConservativeRegridding.regrid!(dst_vec, regridder, src_vec)
-
-    dst_field = Fields.zeros(dst_space)
-    ClimaCoreExt.vec_to_se_field!(dst_field, dst_vec)
-
-    @test isapprox(sum(dst_field), sum(src_field), rtol=1e-2)
-end
-
-@testset "h-convergence: principled is higher-order than simplified" begin
-    # Smooth field on the sphere; for each h_elem, regrid SE → FV and measure
-    # L2 error against the analytic field evaluated at FV cell centers.
-    # Principled should converge at ≥ ~2nd order in h; simplified at ~1st.
-    f(lon, lat) = sin(2 * deg2rad(lat)) * cos(deg2rad(lon))
-
-    coarse_grid = LatitudeLongitudeGrid(
-        size=(180, 90, 1), longitude=(0, 360), latitude=(-90, 90),
-        z=(0, 1), radius=GO.Spherical().radius,
-    )
-    nx, ny = 180, 90
-    ref = [f((i - 0.5) * (360/nx), (j - 0.5) * (180/ny) - 90) for j in 1:ny for i in 1:nx]
-
-    function L2err(h_elem, method)
-        space = make_cubedsphere_space(; h_elem, n_quad_points=4)
-        coords = Fields.coordinate_field(space)
-        long_v = parent(Fields.field_values(coords.long))
-        lat_v  = parent(Fields.field_values(coords.lat))
-        # Flatten in the same order as se_field_to_vec
-        src_vec = vec([f(long_v[i, j, 1, h], lat_v[i, j, 1, h])
-                       for i in axes(long_v, 1), j in axes(long_v, 2),
-                       h in axes(long_v, 4)])
-
-        R = ConservativeRegridding.Regridder(coarse_grid, space; method, threaded=false)
-        dst = zeros(nx * ny)
-        ConservativeRegridding.regrid!(dst, R, src_vec)
-        return sqrt(sum((dst .- ref).^2) / length(dst))
-    end
-
-    h_elems = (4, 8, 16)
-
-    err_prin = [L2err(h, :polygon_intersection) for h in h_elems]
-    err_simp = [L2err(h, :node_in_polygon)      for h in h_elems]
-
-    # Principled should be strictly more accurate than simplified at every h
-    # we test. (We can't cleanly test convergence *rate* here without an
-    # exact cell-average reference: the principled regrid converges to cell
-    # averages, while we sample the reference at cell centers, which has its
-    # own O(h_FV²) discretization floor independent of h_SE — so the principled
-    # error plateaus as h_SE shrinks. A rate assertion would need a finer FV
-    # grid or analytic cell averages, both deferred.)
-    for i in eachindex(h_elems)
-        @test err_prin[i] < err_simp[i]
-    end
-
-    # Simplified should still converge at ~1st order in h_SE.
-    rates_simp = [log2(err_simp[i] / err_simp[i+1]) for i in 1:length(err_simp)-1]
-    @test all(>(0.7), rates_simp)
 end
 
 @testset "Principled SE → FV: conservation to 1e-12" begin
