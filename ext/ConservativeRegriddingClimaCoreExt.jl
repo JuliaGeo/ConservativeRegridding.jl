@@ -112,9 +112,9 @@ F and V indices.
 """
 function _flat_nodal_data(p::AbstractArray)
     if ndims(p) == 4      # IJFH: (I, J, F, H)
-        return collect(vec(view(p, :, :, 1, :)))
+        return vec(p[:, :, 1, :])
     elseif ndims(p) == 5  # VIJFH: (I, J, F, V, H)
-        return collect(vec(view(p, :, :, 1, 1, :)))
+        return vec(p[:, :, 1, 1, :])
     else
         error("Unexpected data layout dimensionality: $(ndims(p))")
     end
