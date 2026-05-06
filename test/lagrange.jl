@@ -1,39 +1,41 @@
-using ConservativeRegridding: Lagrange
+import ClimaCore.Quadratures as CCQ
+using StaticArrays
 using Test
 
-@testset "Lagrange basis on GLL nodes" begin
-    # GLL(4) nodes: known exact values
-    ξs = [-1.0, -sqrt(1/5), sqrt(1/5), 1.0]
+# Nodal Lagrange evaluation matches `ConservativeRegriddingClimaCoreExt` (barycentric formula).
+
+@testset "Lagrange basis via ClimaCore.Quadratures.interpolation_matrix" begin
+    ξs, _ = CCQ.quadrature_points(Float64, CCQ.GLL{4}())
 
     @testset "Kronecker delta at nodes" begin
-        for i in 1:4, p in 1:4
-            ϕᵢ_at_ξₚ = Lagrange.evaluate(ξs, i, ξs[p])
-            @test ϕᵢ_at_ξₚ ≈ (i == p ? 1.0 : 0.0) atol=1e-12
+        for p in 1:4
+            M = CCQ.interpolation_matrix(SVector(ξs[p]), ξs)
+            for i in 1:4
+                @test M[1, i] ≈ (i == p ? 1.0 : 0.0) atol=1e-12
+            end
         end
     end
 
     @testset "Partition of unity off-node" begin
-        # Σᵢ ϕᵢ(ξ) == 1 at any ξ for Lagrange basis
         for ξ in (-0.7, -0.3, 0.0, 0.42, 0.91)
-            s = sum(Lagrange.evaluate(ξs, i, ξ) for i in 1:4)
-            @test s ≈ 1.0 atol=1e-12
+            M = CCQ.interpolation_matrix(SVector(ξ), ξs)
+            @test sum(M[1, :]) ≈ 1.0 atol=1e-12
         end
     end
 
-    @testset "evaluate_all returns a vector" begin
+    @testset "Single-point row is length Nq" begin
         ξ = 0.3
-        all = Lagrange.evaluate_all(ξs, ξ)
-        @test length(all) == 4
-        @test sum(all) ≈ 1.0 atol=1e-12
-        for i in 1:4
-            @test all[i] ≈ Lagrange.evaluate(ξs, i, ξ) atol=1e-12
-        end
+        M = CCQ.interpolation_matrix(SVector(ξ), ξs)
+        @test size(M) == (1, 4)
+        @test sum(M[1, :]) ≈ 1.0 atol=1e-12
     end
 
-    @testset "evaluate_all! mutates the buffer" begin
-        ξs = [-1.0, 0.0, 1.0]
+    @testset "Buffer fill from matrix row" begin
+        ξs3, _ = CCQ.quadrature_points(Float64, CCQ.GLL{3}())
+        ξ = 0.5
+        M = CCQ.interpolation_matrix(SVector(ξ), ξs3)
         out = zeros(3)
-        Lagrange.evaluate_all!(out, ξs, 0.5)
-        @test out ≈ Lagrange.evaluate_all(ξs, 0.5)
+        out .= M[1, :]
+        @test out ≈ Vector(M[1, :])
     end
 end
