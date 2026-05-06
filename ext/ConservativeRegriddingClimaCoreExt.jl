@@ -11,10 +11,12 @@ import Extents
 
 using GeometryOps.UnitSpherical: UnitSphericalPoint
 using LinearAlgebra: normalize
+using StaticArrays: SVector
 
 using ClimaCore:
     CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies, DataLayouts, ClimaComms
 import ClimaCore
+import ClimaCore.Utilities: linear_ind
 
 """
     coords_for_face(mesh::CubedSphereMesh, face_idx)::Matrix{UnitSphericalPoint}
@@ -102,21 +104,28 @@ Trees.treeify(manifold::GOCore.Spherical, field::ClimaCore.Fields.Field) = Trees
 
 ## Node extraction helpers for spectral element fields
 """
-    _flat_nodal_data(p::AbstractArray) → Vector
+    flat_nodal_data(data::DataLayouts.AbstractData) → Vector
 
-Extract a flat vector from a parent array in IJFH or VIJFH data layout.
-Ordering: i varies fastest, then j, then element h.
+Flatten nodal storage to a `Vector` using ClimaCore’s [`DataLayouts.data2array`](@ref),
+which matches the memory layout (for `IJFH`-style data this is `i` fastest, then `j`,
+then remaining horizontal indices).
 
-Note we regrid only 2D Fields here, so we can drop the
-F and V indices.
+For layouts with a vertical dimension (`VIJFH`, etc.), `data2array` is an ``N_v \\times N_h``
+matrix; we take the first vertical level so behavior matches the previous explicit
+`view(parent, :, :, 1, 1, :)` slicing.
+
+For scalar fields you can equivalently use `Fields.field2array(field)`; this helper
+accepts raw `AbstractData` (e.g. `Fields.field_values(coords.lat)` or
+`Spaces.weighted_jacobian(space)`).
 """
-function _flat_nodal_data(p::AbstractArray)
-    if ndims(p) == 4      # IJFH: (I, J, F, H)
-        return vec(p[:, :, 1, :])
-    elseif ndims(p) == 5  # VIJFH: (I, J, F, V, H)
-        return vec(p[:, :, 1, 1, :])
+function flat_nodal_data(data::DataLayouts.AbstractData)
+    array = DataLayouts.data2array(data)
+    if array isa AbstractVector
+        return vec(array)
+    elseif ndims(array) == 2
+        return vec(view(array, 1, :))
     else
-        error("Unexpected data layout dimensionality: $(ndims(p))")
+        error("Unexpected data2array shape: $(size(array))")
     end
 end
 
@@ -129,8 +138,8 @@ then element 2, etc.
 """
 function se_node_positions(space)
     coords = Fields.coordinate_field(space)
-    lat_flat  = _flat_nodal_data(parent(Fields.field_values(coords.lat)))
-    long_flat = _flat_nodal_data(parent(Fields.field_values(coords.long)))
+    lat_flat  = flat_nodal_data(Fields.field_values(coords.lat))
+    long_flat = flat_nodal_data(Fields.field_values(coords.long))
     transform = GO.UnitSphereFromGeographic()
     return [transform((long_flat[k], lat_flat[k])) for k in eachindex(lat_flat)]
 end
@@ -143,7 +152,7 @@ flat vector.  Same ordering as [`se_node_positions`](@ref).
 """
 function se_node_weights(space)
     wj = Spaces.weighted_jacobian(space)
-    return _flat_nodal_data(parent(wj))
+    return flat_nodal_data(wj)
 end
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -216,13 +225,13 @@ function element_jacobian_at(space::ClimaCore.Spaces.AbstractSpectralElementSpac
     Nq = length(ξs)
 
     WJ = parent(Spaces.weighted_jacobian(space))
-    ϕξ = ConservativeRegridding.Lagrange.evaluate_all(ξs, ξ)
-    ϕη = ConservativeRegridding.Lagrange.evaluate_all(ξs, η)
+    Mξ = Quadratures.interpolation_matrix(SVector(ξ), ξs)
+    Mη = Quadratures.interpolation_matrix(SVector(η), ξs)
 
     Jᵉ = 0.0
     @inbounds for q in 1:Nq, p in 1:Nq
         Jₚᵩ = WJ[p, q, 1, elem_idx] / (ws[p] * ws[q])
-        Jᵉ += Jₚᵩ * ϕξ[p] * ϕη[q]
+        Jᵉ += Jₚᵩ * Mξ[1, p] * Mη[1, q]
     end
     return Jᵉ
 end
@@ -280,15 +289,15 @@ function accumulate_principled_b(
             xᵧ = bary_to_physical(manifold, λ, centroid, v₁, v₂)
 
             ξ, η = inverse_element_map(space, elem_idx, xᵧ)
-            ϕξ = ConservativeRegridding.Lagrange.evaluate_all(ξs, ξ)
-            ϕη = ConservativeRegridding.Lagrange.evaluate_all(ξs, η)
+            Mξ = Quadratures.interpolation_matrix(SVector(ξ), ξs)
+            Mη = Quadratures.interpolation_matrix(SVector(η), ξs)
 
             # Reference rule's weights sum to 1/2 (ref triangle area); to map
             # onto a physical triangle of area Aₜ, scale by Aₜ/(1/2) = 2 Aₜ.
             wAᵧ = wᵧ * 2 * Aₜ
 
             @inbounds for j in 1:Nq, i in 1:Nq
-                B[i, j] += wAᵧ * ϕξ[i] * ϕη[j]
+                B[i, j] += wAᵧ * Mξ[1, i] * Mη[1, j]
             end
         end
     end
@@ -357,7 +366,7 @@ Convert a ClimaCore field to a flat vector of nodal values.
 Same ordering as [`se_node_positions`](@ref).
 """
 function se_field_to_vec(field)
-    return _flat_nodal_data(parent(Fields.field_values(field)))
+    return flat_nodal_data(Fields.field_values(field))
 end
 
 """
@@ -455,7 +464,7 @@ function se_to_fv_principled(manifold, dst, src; threaded, triangle_quad_degree,
                 Bᵢⱼ = B[i, j]
                 Bᵢⱼ == 0 && continue
                 push!(rows, cell_idx)
-                push!(cols, offset + (j - 1) * Nq + i)
+                push!(cols, offset + linear_ind((Nq, Nq), (i, j)))
                 push!(vals, Bᵢⱼ)
             end
         end
@@ -526,18 +535,18 @@ function compute_local_mass_matrix(
         wξ = ws_q[p]
         wη = ws_q[q]
 
-        ϕξ = ConservativeRegridding.Lagrange.evaluate_all(ξs_se, ξ)
-        ϕη = ConservativeRegridding.Lagrange.evaluate_all(ξs_se, η)
+        Mξ = Quadratures.interpolation_matrix(SVector(ξ), ξs_se)
+        Mη = Quadratures.interpolation_matrix(SVector(η), ξs_se)
         Jᵉ = element_jacobian_at(space, elem_idx, ξ, η)
 
         wJ = wξ * wη * Jᵉ
         for jb in 1:Nq, ja in 1:Nq
-            row = (jb - 1) * Nq + ja
-            ϕaξ = ϕξ[ja]
-            ϕbη = ϕη[jb]
+            row = linear_ind((Nq, Nq), (ja, jb))
+            ϕaξ = Mξ[1, ja]
+            ϕbη = Mη[1, jb]
             for jj in 1:Nq, ii in 1:Nq
-                col = (jj - 1) * Nq + ii
-                M[row, col] += wJ * ϕaξ * ϕξ[ii] * ϕbη * ϕη[jj]
+                col = linear_ind((Nq, Nq), (ii, jj))
+                M[row, col] += wJ * ϕaξ * Mξ[1, ii] * ϕbη * Mη[1, jj]
             end
         end
     end
@@ -602,7 +611,7 @@ function fv_to_se_l2_projection(manifold, dst, src;
             for jb in 1:Nq, ja in 1:Nq
                 Bᵢⱼ = B[ja, jb]
                 Bᵢⱼ == 0 && continue
-                v[(jb - 1) * Nq + ja] += Bᵢⱼ
+                v[linear_ind((Nq, Nq), (ja, jb))] += Bᵢⱼ
             end
         end
     end
