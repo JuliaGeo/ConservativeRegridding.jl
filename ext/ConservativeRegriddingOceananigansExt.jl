@@ -230,11 +230,11 @@ on_architecture(arch, r::Regridder) =
               on_architecture(arch, r.dst_temp),
               on_architecture(arch, r.src_temp))
 
-on_architecture(arch, m.FVtoFV) = 
+on_architecture(arch, m::FVtoFV) = 
     FVtoFV(on_architecture(arch, m.dst_areas),
            on_architecture(arch, m.src_areas))
 
-on_architecture(arch, m.SEtoFV) = 
+on_architecture(arch, m::SEtoFV) = 
     SEtoFV(on_architecture(arch, m.dst_areas))
 
 # Allow to set example data on the field
