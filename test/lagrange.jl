@@ -18,7 +18,7 @@ using Test
 
     @testset "Partition of unity off-node" begin
         for ξ in (-0.7, -0.3, 0.0, 0.42, 0.91)
-            M = CCQ.interpolation_matrix(SVector(ξ), ξs)
+            M = Quadratures.interpolation_matrix(SVector(ξ), ξs)
             @test sum(M[1, :]) ≈ 1.0 atol=1e-12
         end
     end
