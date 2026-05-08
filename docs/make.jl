@@ -17,6 +17,9 @@ makedocs(
             "interfaces/trees.md",
             "interfaces/regrid.md",
         ],
+        "Extensions" => [
+            "extensions/climacore.md",
+        ],
     ],
     warnonly = true,#[:missing_docs],
 )
