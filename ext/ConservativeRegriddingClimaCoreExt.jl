@@ -62,8 +62,8 @@ function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology
             Iterators.partition(topology.elemorder, length(topology.elemorder) ÷ 6)
         )
         cart2lins = map(enumerate(lin2carts)) do (face_idx, face_indices)
-            mat = Matrix{Int}(undef, ne, ne)
-            @. mat = missing
+            mat = Matrix{Union{Nothing, Int}}(undef, ne, ne)
+            @. mat = nothing
             for (i, elem) in enumerate(face_indices)
                 mat[elem] = i + (face_idx - 1) * ne^2  # Global index for child_indices_extents
             end
