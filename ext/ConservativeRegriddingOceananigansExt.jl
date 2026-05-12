@@ -33,6 +33,7 @@ function compute_cell_matrix(grid::Oceananigans.Grids.AbstractGrid)
     FT = eltype(grid)
 
     cell_matrix = Array{Tuple{FT, FT}}(undef, Nx+1, Ny+1)
+    @. cell_matrix = (NaN, NaN)
 
     # Not GPU compatible so we need to move the grid on the CPU
     cpu_grid = on_architecture(CPU(), grid)
@@ -186,7 +187,7 @@ function Trees.treeify(
     # Define the grid, which is the base of the quadtree we will construct
     # on top of it.
     grid = Trees.CellBasedGrid(
-        manifold, 
+        manifold,
         cells_unitspherical
     )
     # We choose to build a quadtree on top of this grid.
@@ -224,7 +225,7 @@ GOCore.best_manifold(grid::Oceananigans.ImmersedBoundaryGrid) = GOCore.best_mani
 GOCore.best_manifold(field::Oceananigans.Field) = GOCore.best_manifold(field.grid)
 
 # Extend the `on_architecture` method for a `Regridder` object
-on_architecture(arch, r::Regridder) = 
+on_architecture(arch, r::Regridder) =
     Regridder(on_architecture(arch, r.intersections),
               on_architecture(arch, r.dst_areas),
               on_architecture(arch, r.src_areas),
