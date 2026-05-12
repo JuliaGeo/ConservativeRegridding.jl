@@ -53,6 +53,35 @@ function regrid!(dst_field::AbstractVector, regridder::Regridder, src_field::Den
     return dst_field
 end
 
+# For n-dimensional arrays, iterate over slices along dimension `dims` (default: 1).
+# Like `eachslice`, `dims` specifies the spatial dimension that the regridder operates on;
+# all other dimensions are iterated over.
+function regrid!(dst_field::AbstractArray, regridder::Regridder, src_field::AbstractArray; dims::Int=1)
+    if ndims(src_field) == 1
+        return regrid!(vec(dst_field), regridder, vec(src_field))
+    end
+    N = ndims(src_field)
+    @assert 1 <= dims <= N "dims=$dims is out of range for a $(N)-dimensional array"
+    # Collect axes for all dimensions except `dims`
+    other_axes = ntuple(i -> axes(src_field, i < dims ? i : i + 1), N - 1)
+    for I in CartesianIndices(other_axes)
+        # Build full index tuple: Colon() at position `dims`, indices elsewhere
+        idx = ntuple(N) do d
+            if d == dims
+                Colon()
+            elseif d < dims
+                I[d]
+            else
+                I[d - 1]
+            end
+        end
+        src_slice = view(src_field, idx...)
+        dst_slice = view(dst_field, idx...)
+        regrid!(dst_slice, regridder, src_slice)
+    end
+    return dst_field
+end
+
 """$(TYPEDSIGNATURES)
 Regrid a vector `src_field` using `regridder`. Area vector for the output grid can
 be passed on as optional argument to prevent recalculating it from the regridder."""

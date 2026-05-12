@@ -1,22 +1,19 @@
-# WARNING This will not work 
-# We need to hook up the speedy weather grids
-# to some sort of tree structure
-# Stay tuned!
-using SpeedyWeather, GeoMakie
+# Conservative regridding between two SpeedyWeather FullClenshawGrid
+# resolutions. Supported directly via ConservativeRegridding's RingGrids
+# extension on `AbstractFullGrid`. Full Gaussian / full equiangular grids work
+# through the same path; HEALPix, OctaHEALPix, and reduced Gaussian grids are
+# tracked in https://github.com/JuliaGeo/ConservativeRegridding.jl/issues/89.
+
+using SpeedyWeather
 using ConservativeRegridding
-import GeoInterface as GI, GeometryOps as GO
 
-field1 = rand(OctaHEALPixGrid, 24)
-field2 = rand(OctaminimalGaussianGrid, 24)
+src = rand(FullClenshawGrid, 24)
+dst = rand(FullClenshawGrid, 48)
 
-SpeedyWeatherGeoMakieExt = Base.get_extension(SpeedyWeather, :SpeedyWeatherGeoMakieExt)
-faces1 = SpeedyWeatherGeoMakieExt.get_faces(field1)
-faces2 = SpeedyWeatherGeoMakieExt.get_faces(field2)
+R = ConservativeRegridding.Regridder(dst, src)
 
-polys1 = GI.Polygon.(GI.LinearRing.(eachcol(faces1))) .|> GO.fix
-polys2 = GI.Polygon.(GI.LinearRing.(eachcol(faces2))) .|> GO.fix
+ConservativeRegridding.regrid!(dst, R, src)
 
-R = ConservativeRegridding.Regridder(polys1, polys2)
-
-ConservativeRegridding.regrid!(field1, R, field2)
-ConservativeRegridding.regrid!(field2, transpose(R), field1)
+# The reverse direction shares the same sparse matrix (via transpose) and
+# needs no new construction.
+ConservativeRegridding.regrid!(src, transpose(R), dst)
