@@ -33,7 +33,9 @@ function compute_cell_matrix(grid::Oceananigans.Grids.AbstractGrid)
     FT = eltype(grid)
 
     cell_matrix = Array{Tuple{FT, FT}}(undef, Nx+1, Ny+1)
-    @. cell_matrix = (NaN, NaN)
+    for i in 1:Nx+1, j in 1:Ny+1
+        cell_matrix[i, j] = (NaN, NaN)
+    end
 
     # Not GPU compatible so we need to move the grid on the CPU
     cpu_grid = on_architecture(CPU(), grid)
