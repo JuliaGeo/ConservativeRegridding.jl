@@ -40,6 +40,88 @@ end
 
 import GeometryOpsCore
 
+@testset "regrid! dense vs strided dispatch" begin
+    function make_grid(nx, ny)
+        polys = Matrix{GI.Polygon}(undef, nx, ny)
+        for j in 1:ny, i in 1:nx
+            x0, x1 = (i-1)/nx, i/nx
+            y0, y1 = (j-1)/ny, j/ny
+            ring = GI.LinearRing([(x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0)])
+            polys[i,j] = GI.Polygon([ring])
+        end
+        polys
+    end
+
+    src_grid = make_grid(4, 4)
+    dst_grid = make_grid(8, 8)
+    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_grid, src_grid; threaded=false)
+
+    src = collect(1.0:16.0)
+
+    # Reference result from the all-dense path.
+    reference = zeros(64)
+    ConservativeRegridding.regrid!(reference, r, src)
+
+    # `mul!` produces non-NaN output, so a NaN-fill before each call lets us detect
+    # which temp buffers were written into.
+
+    # This should never use the regridder's temp buffers, instead performing a direct `mul!`.
+    @testset "Dense -> Dense" begin
+        fill!(r.src_temp, NaN)
+        fill!(r.dst_temp, NaN)
+        dst = zeros(64)
+        ConservativeRegridding.regrid!(dst, r, src)
+        @test dst == reference
+        @test all(isnan, r.src_temp)
+        @test all(isnan, r.dst_temp)
+    end
+
+    # This should use the regridder's destination buffer, but not its source buffer.
+    @testset "Dense -> Strided" begin
+        fill!(r.src_temp, NaN)
+        fill!(r.dst_temp, NaN)
+        big_dst = zeros(128)
+        dst_view = @view big_dst[1:2:end]
+        @test !(dst_view isa DenseVector)
+        ConservativeRegridding.regrid!(dst_view, r, src)
+        @test dst_view == reference
+        @test all(isnan, r.src_temp)
+        @test !any(isnan, r.dst_temp)
+    end
+
+    # This should use the regridder's source buffer, but not its destination buffer.
+    @testset "Strided -> Dense" begin
+        fill!(r.src_temp, NaN)
+        fill!(r.dst_temp, NaN)
+        big_src = zeros(32)
+        big_src[1:2:end] .= src
+        src_view = @view big_src[1:2:end]
+        @test !(src_view isa DenseVector)
+        dst = zeros(64)
+        ConservativeRegridding.regrid!(dst, r, src_view)
+        @test dst == reference
+        @test !any(isnan, r.src_temp)
+        @test all(isnan, r.dst_temp)
+    end
+
+    # This should use the regridder's source and destination buffers.
+    @testset "Strided -> Strided" begin
+        fill!(r.src_temp, NaN)
+        fill!(r.dst_temp, NaN)
+        big_src = zeros(32)
+        big_src[1:2:end] .= src
+        src_view = @view big_src[1:2:end]
+        big_dst = zeros(128)
+        dst_view = @view big_dst[1:2:end]
+        @test !(src_view isa DenseVector)
+        @test !(dst_view isa DenseVector)
+        ConservativeRegridding.regrid!(dst_view, r, src_view)
+        @test dst_view == reference
+        @test !any(isnan, r.src_temp)
+        @test !any(isnan, r.dst_temp)
+    end
+end
+
 @testset "regrid! with n-dimensional arrays" begin
     function make_grid(nx, ny)
         polys = Matrix{GI.Polygon}(undef, nx, ny)
