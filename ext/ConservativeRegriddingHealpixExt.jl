@@ -183,16 +183,22 @@ gets us automatic denseness detection, and whatever dispatches are defined for
 exotic arrays (GPU, distributed, sparse, etc) will also work if those back a Healpix.jl map.
 =#
 
-ConservativeRegridding.extract_source_arraylike(src::Healpix.HealpixMap, regridder; kwargs...) =
-    ConservativeRegridding.extract_source_arraylike(parent(src), regridder; kwargs...)
+function ConservativeRegridding.extract_source_arraylike(src::Healpix.HealpixMap, regridder; kwargs...)
+    return ConservativeRegridding.extract_source_arraylike(parent(src), regridder; kwargs...)
+end
 
-ConservativeRegridding.extract_dest_arraylike(dst::Healpix.HealpixMap, regridder; kwargs...) =
-    ConservativeRegridding.extract_dest_arraylike(parent(dst), regridder; kwargs...)
+function ConservativeRegridding.extract_dest_arraylike(dst::Healpix.HealpixMap, regridder; kwargs...)
+    return ConservativeRegridding.extract_dest_arraylike(parent(dst), regridder; kwargs...)
+end
 
-ConservativeRegridding.initialize_regridding!(regridder, src::Healpix.HealpixMap, src_arraylike; kwargs...) =
-    ConservativeRegridding.initialize_regridding!(regridder, parent(src), src_arraylike; kwargs...)
+function ConservativeRegridding.initialize_regridding!(regridder, src::Healpix.HealpixMap, src_arraylike; kwargs...)
+    return ConservativeRegridding.initialize_regridding!(regridder, parent(src), src_arraylike; kwargs...)
+end
 
-ConservativeRegridding.finalize_regridding!(dst::Healpix.HealpixMap, regridder, dst_arraylike; kwargs...) =
-    ConservativeRegridding.finalize_regridding!(parent(dst), regridder, dst_arraylike; kwargs...)
+Base.@constprop :aggressive function ConservativeRegridding.finalize_regridding!(
+    dst::Healpix.HealpixMap, regridder, dst_arraylike; kwargs...
+)
+    return ConservativeRegridding.finalize_regridding!(parent(dst), regridder, dst_arraylike; kwargs...)
+end
 
 end
