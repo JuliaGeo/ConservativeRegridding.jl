@@ -6,7 +6,7 @@ This file contains some notes written during the development of this package, an
 
 Initially, we had one function called `regrid!`. That proved to be too much power in a single function, making dispatch complicated.
 
-To solve this, we initially proposed to split the function into three: `initialize_regrid!`, `perform_regridding!`, and `finalize_regrid!`.
+To solve this, we initially proposed to split the function into three: `initialize_regridding!`, `perform_regridding!`, and `finalize_regridding!`.
 
 I was wrong, when I thought that it was sufficient for `initialize_regridding!` to take only the source field and regridder, and `finalize_regridding!` to take only the destination field and regridder.
 
@@ -35,21 +35,21 @@ where `something` is anything that works with `mul!`.  Then you can do:
 function regrid!(dst, regridder, src)
     src_arraylike = extract_source_vector(src, regridder)
     dst_arraylike = extract_dest_vector(dst, regridder)
-    initialize_regrid!(regridder, src, src_arraylike)
+    initialize_regridding!(regridder, src, src_arraylike)
     perform_regridding!(dst_arraylike, regridder, src_arraylike)
-    finalize_regrid!(dst, regridder, dst_arraylike)
+    finalize_regridding!(dst, regridder, dst_arraylike)
 end
 ```
 
-This way, `perform_regridding!` can be assured what it's working on, and `finalize_regrid!` then has to know what the destination is.
-In this case I'm not sure what the use of `initialize_regrid!` is.  But it's probably fine to keep it.  Perhaps the split is that `extract_source_vector` only gets you the pointer in some sense, and `initialize_regrid!` actually loads data into it - if necessary.
+This way, `perform_regridding!` can be assured what it's working on, and `finalize_regridding!` then has to know what the destination is.
+In this case I'm not sure what the use of `initialize_regridding!` is.  But it's probably fine to keep it.  Perhaps the split is that `extract_source_vector` only gets you the pointer in some sense, and `initialize_regridding!` actually loads data into it - if necessary.
 
 In this case the dispatch limitations are, then, the following (where a type annotation `::T` refers to something that you can dispatch on):
 
 ```julia
 extract_source_arraylike(src::T, regridder)::AbstractArray
 extract_dest_arraylike(dst::T, regridder)::AbstractArray
-initialize_regrid!(regridder, src::T, src_arraylike) # - you should be assured what your src_arraylike is, but **must** always define `T`
-finalize_regrid!(dst::T, regridder, dst_arraylike) # - you should be assured what your dst_arraylike is, but **must** always define `T`
+initialize_regridding!(regridder, src::T, src_arraylike) # - you should be assured what your src_arraylike is, but **must** always define `T`
+finalize_regridding!(dst::T, regridder, dst_arraylike) # - you should be assured what your dst_arraylike is, but **must** always define `T`
 perform_regridding!(dst_arraylike::T1, regridder, src_arraylike::T2) # - diagonal dispatch only
 ```

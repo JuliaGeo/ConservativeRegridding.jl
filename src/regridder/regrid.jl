@@ -29,20 +29,20 @@ aˢ = sum(A; dims=1)
    read from. Dispatch on the source type.
 2. `extract_dest_arraylike(dst_field, regridder)` — return an `AbstractArray` that `mul!` can
    write to. Dispatch on the destination type.
-3. `initialize_regrid!(regridder, src_field, src_arraylike)` — load data from `src_field` into
+3. `initialize_regridding!(regridder, src_field, src_arraylike)` — load data from `src_field` into
    `src_arraylike` if needed. Dispatch on the source type.
 4. `perform_regridding!(dst_arraylike, regridder, src_arraylike)` — perform the sparse matvec.
    Diagonal dispatch only (on the arraylike types).
-5. `finalize_regrid!(dst_field, regridder, dst_arraylike)` — load `dst_arraylike` back into
+5. `finalize_regridding!(dst_field, regridder, dst_arraylike)` — load `dst_arraylike` back into
    `dst_field`, applying normalization. Dispatch on the destination type.
 ```
 """
 function regrid!(dst_field::D, regridder::R, src_field::S; kwargs...) where {D, R, S}
     src_arraylike = extract_source_arraylike(src_field, regridder; kwargs...)
     dst_arraylike = extract_dest_arraylike(dst_field, regridder; kwargs...)
-    initialize_regrid!(regridder, src_field, src_arraylike; kwargs...)
+    initialize_regridding!(regridder, src_field, src_arraylike; kwargs...)
     perform_regridding!(dst_arraylike, regridder, src_arraylike; kwargs...)
-    finalize_regrid!(dst_field, regridder, dst_arraylike; kwargs...)
+    finalize_regridding!(dst_field, regridder, dst_arraylike; kwargs...)
     return dst_field
 end
 
@@ -59,12 +59,12 @@ extract_dest_arraylike(dst_field::DenseVector, regridder; kwargs...) = dst_field
 # Load source data into the arraylike. For `DenseVector` the arraylike is the field itself,
 # so this is a no-op.
 
-function initialize_regrid!(regridder, src_field::AbstractVector, src_arraylike; kwargs...)
+function initialize_regridding!(regridder, src_field::AbstractVector, src_arraylike; kwargs...)
     src_arraylike .= src_field
     return regridder
 end
 
-initialize_regrid!(regridder, src_field::DenseVector, src_arraylike; kwargs...) = regridder
+initialize_regridding!(regridder, src_field::DenseVector, src_arraylike; kwargs...) = regridder
 
 # ## Perform regridding
 # Diagonal dispatch only. The arraylikes are guaranteed to be `mul!`-compatible.
@@ -78,7 +78,7 @@ end
 # Load the arraylike back into the destination field, applying normalization.
 # For `DenseVector` the arraylike *is* the destination, so we just normalize in place.
 
-Base.@constprop :aggressive function finalize_regrid!(dst_field::AbstractVector, regridder, dst_arraylike; normalize = true, kwargs...)
+Base.@constprop :aggressive function finalize_regridding!(dst_field::AbstractVector, regridder, dst_arraylike; normalize = true, kwargs...)
     if normalize
         @. dst_field = dst_arraylike / regridder.dst_areas
     else
@@ -87,7 +87,7 @@ Base.@constprop :aggressive function finalize_regrid!(dst_field::AbstractVector,
     return dst_field
 end
 
-Base.@constprop :aggressive function finalize_regrid!(dst_field::DenseVector, regridder, dst_arraylike; normalize = true, kwargs...)
+Base.@constprop :aggressive function finalize_regridding!(dst_field::DenseVector, regridder, dst_arraylike; normalize = true, kwargs...)
     if normalize
         dst_field ./= regridder.dst_areas
     end

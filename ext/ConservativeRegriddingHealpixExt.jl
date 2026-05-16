@@ -189,10 +189,10 @@ ConservativeRegridding.extract_source_arraylike(src::Healpix.HealpixMap, regridd
 ConservativeRegridding.extract_dest_arraylike(dst::Healpix.HealpixMap, regridder; kwargs...) =
     ConservativeRegridding.extract_dest_arraylike(parent(dst), regridder; kwargs...)
 
-ConservativeRegridding.initialize_regrid!(regridder, src::Healpix.HealpixMap, src_arraylike; kwargs...) =
-    ConservativeRegridding.initialize_regrid!(regridder, parent(src), src_arraylike; kwargs...)
+ConservativeRegridding.initialize_regridding!(regridder, src::Healpix.HealpixMap, src_arraylike; kwargs...) =
+    ConservativeRegridding.initialize_regridding!(regridder, parent(src), src_arraylike; kwargs...)
 
-ConservativeRegridding.finalize_regrid!(dst::Healpix.HealpixMap, regridder, dst_arraylike; kwargs...) =
-    ConservativeRegridding.finalize_regrid!(parent(dst), regridder, dst_arraylike; kwargs...)
+ConservativeRegridding.finalize_regridding!(dst::Healpix.HealpixMap, regridder, dst_arraylike; kwargs...) =
+    ConservativeRegridding.finalize_regridding!(parent(dst), regridder, dst_arraylike; kwargs...)
 
 end

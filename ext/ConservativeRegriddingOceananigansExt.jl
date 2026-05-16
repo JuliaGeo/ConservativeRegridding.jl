@@ -146,7 +146,7 @@ function Trees.treeify(
     #    Real partner mapping is across-the-row: real i ↔ ghost (Nx+1-i).
     #
     #    Partner slots end up with zero matrix rows/columns, so after `mul!` (and
-    #    normalize) they hold 0 or NaN.  `finalize_regrid!` below mirrors each
+    #    normalize) they hold 0 or NaN.  `finalize_regridding!` below mirrors each
     #    primary's value into its partner so the field shows the same physical
     #    value on both copies.
     Nquarter = Nhalf ÷ 2
@@ -212,12 +212,12 @@ ConservativeRegridding.extract_source_arraylike(::Oceananigans.AbstractField, re
 ConservativeRegridding.extract_dest_arraylike(::Oceananigans.AbstractField, regridder; kwargs...) =
     regridder.dst_temp
 
-function ConservativeRegridding.initialize_regrid!(regridder, field::Oceananigans.AbstractField, src_arraylike; kwargs...)
+function ConservativeRegridding.initialize_regridding!(regridder, field::Oceananigans.AbstractField, src_arraylike; kwargs...)
     copyto!(src_arraylike, vec(interior(field)))
     return regridder
 end
 
-function ConservativeRegridding.finalize_regrid!(field::Oceananigans.AbstractField, regridder, dst_arraylike; normalize = true, kwargs...)
+function ConservativeRegridding.finalize_regridding!(field::Oceananigans.AbstractField, regridder, dst_arraylike; normalize = true, kwargs...)
     if normalize
         dst_arraylike ./= regridder.dst_areas
     end
