@@ -94,32 +94,57 @@ Base.@constprop :aggressive function finalize_regridding!(dst_field::DenseVector
     return dst_field
 end
 
-# ## N-dimensional arrays
-# TODO: re-enable once the extractor interface is settled.
+# ## Worked example: contiguous SubArray fast path
 #
-# function regrid!(dst_field::AbstractArray, regridder::Regridder, src_field::AbstractArray; dims::Int=1)
-#     if ndims(src_field) == 1
-#         return regrid!(vec(dst_field), regridder, vec(src_field))
-#     end
-#     N = ndims(src_field)
-#     @assert 1 <= dims <= N "dims=$dims is out of range for a $(N)-dimensional array"
-#     other_axes = ntuple(i -> axes(src_field, i < dims ? i : i + 1), N - 1)
-#     for I in CartesianIndices(other_axes)
-#         idx = ntuple(N) do d
-#             if d == dims
-#                 Colon()
-#             elseif d < dims
-#                 I[d]
-#             else
-#                 I[d - 1]
-#             end
-#         end
-#         src_slice = view(src_field, idx...)
-#         dst_slice = view(dst_field, idx...)
-#         regrid!(dst_slice, regridder, src_slice)
-#     end
-#     return dst_field
-# end
+# `view(A, :, j)` of a column-major array is contiguous in memory, but a `SubArray`
+# is never `<: DenseVector` in Julia's type hierarchy — so without these overrides
+# the contiguous slice would be routed through `regridder.src_temp`/`dst_temp` and
+# pay an unnecessary copy each call. We dispatch on `Base.FastContiguousSubArray`,
+# whose `L=true` type parameter is Julia's compile-time flag for fast linear
+# (i.e. contiguous) indexing, and treat it like a `DenseVector`: the SubArray is
+# its own arraylike, initialization is a no-op, and finalization just normalizes
+# in place. Strided-but-non-contiguous SubArrays (e.g. `view(A, 1:2:end)`) keep
+# falling through to the generic `AbstractVector` path.
+#
+# This pair of sections also serves as a template: to plug a new field type into
+# the pipeline, define the corresponding four methods (extract / initialize /
+# finalize), routing through `regridder.src_temp`/`dst_temp` if and only if the
+# field can't be handed to `mul!` directly.
+
+extract_source_arraylike(src_field::Base.FastContiguousSubArray{<:Any,1}, regridder; kwargs...) = src_field
+extract_dest_arraylike(dst_field::Base.FastContiguousSubArray{<:Any,1}, regridder; kwargs...) = dst_field
+
+initialize_regridding!(regridder, src_field::Base.FastContiguousSubArray{<:Any,1}, src_arraylike; kwargs...) = regridder
+
+Base.@constprop :aggressive function finalize_regridding!(dst_field::Base.FastContiguousSubArray{<:Any,1}, regridder, dst_arraylike; normalize = true, kwargs...)
+    if normalize
+        dst_field ./= regridder.dst_areas
+    end
+    return dst_field
+end
+
+# ## N-dimensional arrays
+# Iterate over every slice along `dims` (default 1) and run the scalar `regrid!`
+# on each. Each `view` is a `SubArray`: contiguous ones (the common `dims=1`
+# case for column-major arrays) take the `FastContiguousSubArray` fast path
+# defined above; strided or non-contiguous ones fall through to the
+# `AbstractVector` path via the regridder's temp buffers.
+
+function regrid!(dst_field::AbstractArray{T,N}, regridder::Regridder, src_field::AbstractArray{S,N};
+                 dims::Int = 1, kwargs...) where {T,S,N}
+    if N == 1
+        # Delegate to the generic single-vector `regrid!` without recursing through
+        # this AbstractArray method (which would otherwise match Vector too).
+        return Base.invoke(regrid!, Tuple{Any,Any,Any}, dst_field, regridder, src_field; kwargs...)
+    end
+    @assert 1 <= dims <= N "dims=$dims is out of range for a $N-dimensional array"
+    other_axes = ntuple(i -> axes(src_field, i < dims ? i : i + 1), N - 1)
+    for I in CartesianIndices(other_axes)
+        idx = ntuple(d -> d == dims ? Colon() : I[d < dims ? d : d - 1], N)
+        regrid!(view(dst_field, idx...), regridder, view(src_field, idx...); kwargs...)
+    end
+    return dst_field
+end
 
 """$(TYPEDSIGNATURES)
 Regrid a vector `src_field` using `regridder`. Allocates a fresh destination vector."""
