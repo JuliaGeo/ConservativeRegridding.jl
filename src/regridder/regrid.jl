@@ -130,17 +130,27 @@ end
 # defined above; strided or non-contiguous ones fall through to the
 # `AbstractVector` path via the regridder's temp buffers.
 
-function regrid!(dst_field::AbstractArray{T,N}, regridder::Regridder, src_field::AbstractArray{S,N};
-                 dims::Int = 1, kwargs...) where {T,S,N}
+# User-facing kwarg API. `@constprop :aggressive` lets the compiler propagate the
+# `dims::Int` literal through `Val(dims)` so the workhorse method below is
+# specialized on `dims` at the type level.
+Base.@constprop :aggressive regrid!(dst_field::AbstractArray, regridder::Regridder, src_field::AbstractArray;
+        dims::Int = 1, kwargs...) =
+    regrid!(dst_field, regridder, src_field, Val(dims); kwargs...)
+
+# Workhorse: `dims` is a `Val` type parameter, so it's known at compile time. This
+# is critical for keeping the loop allocation-free for `N ≥ 3` — when `dims` is a
+# runtime `Int` the `ntuple(d -> d == dims ? ...)` closures box for higher dims.
+function regrid!(dst_field::AbstractArray{T,N}, regridder::Regridder, src_field::AbstractArray{S,N},
+                 ::Val{dims}; kwargs...) where {T,S,N,dims}
     if N == 1
         # Delegate to the generic single-vector `regrid!` without recursing through
         # this AbstractArray method (which would otherwise match Vector too).
         return Base.invoke(regrid!, Tuple{Any,Any,Any}, dst_field, regridder, src_field; kwargs...)
     end
     @assert 1 <= dims <= N "dims=$dims is out of range for a $N-dimensional array"
-    other_axes = ntuple(i -> axes(src_field, i < dims ? i : i + 1), N - 1)
+    other_axes = ntuple(i -> axes(src_field, i < dims ? i : i + 1), Val(N - 1))
     for I in CartesianIndices(other_axes)
-        idx = ntuple(d -> d == dims ? Colon() : I[d < dims ? d : d - 1], N)
+        idx = ntuple(d -> d == dims ? Colon() : I[d < dims ? d : d - 1], Val(N))
         regrid!(view(dst_field, idx...), regridder, view(src_field, idx...); kwargs...)
     end
     return dst_field
