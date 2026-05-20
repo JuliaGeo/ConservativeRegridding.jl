@@ -123,38 +123,72 @@ Base.@constprop :aggressive function finalize_regridding!(dst_field::Base.FastCo
     return dst_field
 end
 
-# ## N-dimensional arrays
-# Iterate over every slice along `dims` (default 1) and run the scalar `regrid!`
-# on each. Each `view` is a `SubArray`: contiguous ones (the common `dims=1`
-# case for column-major arrays) take the `FastContiguousSubArray` fast path
-# defined above; strided or non-contiguous ones fall through to the
-# `AbstractVector` path via the regridder's temp buffers.
+# ## N-dimensional regridding via the AbstractDimensionalSlicer interface
+#
+# N-D handling is *not* a `regrid!` dispatch — it routes through the existing
+# 5-step pipeline (extract / initialize / perform / finalize). When the input
+# is multi-dimensional, `extract_*_arraylike` returns an `AbstractDimensionalSlicer`,
+# and `perform_regridding!` dispatches on that to iterate slices through the
+# 1-D pipeline.
 
-# User-facing kwarg API. `@constprop :aggressive` lets the compiler propagate the
-# `dims::Int` literal through `Val(dims)` so the workhorse method below is
-# specialized on `dims` at the type level.
-Base.@constprop :aggressive regrid!(dst_field::AbstractArray, regridder::Regridder, src_field::AbstractArray;
-        dims::Int = 1, kwargs...) =
-    regrid!(dst_field, regridder, src_field, Val(dims); kwargs...)
+"""
+    AbstractDimensionalSlicer
 
-# Workhorse: `dims` is a `Val` type parameter, so it's known at compile time. This
-# is critical for keeping the loop allocation-free for `N ≥ 3` — when `dims` is a
-# runtime `Int` the `ntuple(d -> d == dims ? ...)` closures box for higher dims.
-function regrid!(dst_field::AbstractArray{T,N}, regridder::Regridder, src_field::AbstractArray{S,N},
-                 ::Val{dims}; kwargs...) where {T,S,N,dims}
-    if N == 1
-        # Delegate to the generic single-vector `regrid!` without recursing through
-        # this AbstractArray method (which would otherwise match Vector too).
-        return Base.invoke(regrid!, Tuple{Any,Any,Any}, dst_field, regridder, src_field; kwargs...)
-    end
-    @assert 1 <= dims <= N "dims=$dims is out of range for a $N-dimensional array"
-    other_axes = ntuple(i -> axes(src_field, i < dims ? i : i + 1), Val(N - 1))
-    for I in CartesianIndices(other_axes)
-        idx = ntuple(d -> d == dims ? Colon() : I[d < dims ? d : d - 1], Val(N))
-        regrid!(view(dst_field, idx...), regridder, view(src_field, idx...); kwargs...)
-    end
-    return dst_field
+A marker for the regridding pipeline that the field should be processed in
+1-D pieces. `perform_regridding!` dispatches on this type and iterates
+`slice_views(slicer)`, running the standard pipeline on each (source,
+destination) slice pair.
+
+# Interface
+
+A concrete subtype `MySlicer <: AbstractDimensionalSlicer` must implement:
+
+| method | returns | semantics |
+|---|---|---|
+| `Base.parent(::MySlicer)` | `AbstractArray` | the underlying field data |
+| `slice_views(::MySlicer)` | iterator of 1-D arraylikes | each element is something `mul!` can read from / write into |
+
+# Contract
+
+- Source and destination slicers in a single `perform_regridding!` call must produce
+  iterators of equal length, paired by position.
+- Each yielded slice must be a 1-D `AbstractVector` subject to the existing 1-D dispatch
+  (`DenseVector` / `FastContiguousSubArray` fast paths, `AbstractVector` slow path).
+- The slicer owns the data; `initialize_regridding!` and `finalize_regridding!` for
+  slicers are no-ops because each slice is a view into the underlying field.
+- Built-in slicers must fail loudly when the source/destination slice counts or
+  non-spatial axes differ. Do not rely on `zip` truncation semantics.
+
+# Built-in implementations
+
+- [`NDSliceLoop`](@ref) — slices an N-D `StridedArray` along a chosen dimension.
+
+# Defining a custom slicer
+
+```julia
+struct MyMatrixSlicer{A<:AbstractMatrix} <: ConservativeRegridding.AbstractDimensionalSlicer
+    array::A
 end
+
+Base.parent(s::MyMatrixSlicer) = s.array
+ConservativeRegridding.slice_views(s::MyMatrixSlicer) = (vec(parent(s)),)
+
+ConservativeRegridding.extract_source_arraylike(src::MyMatrixField, r; kwargs...) =
+    MyMatrixSlicer(rawdata(src))
+ConservativeRegridding.extract_dest_arraylike(dst::MyMatrixField, r; kwargs...) =
+    MyMatrixSlicer(rawdata(dst))
+```
+"""
+abstract type AbstractDimensionalSlicer end
+
+"""
+    slice_views(slicer::AbstractDimensionalSlicer)
+
+Return an iterator yielding 1-D arraylike views into the slicer's data.
+Each view must be acceptable as the source/destination of a 1-D `regrid!` pass.
+Required by the [`AbstractDimensionalSlicer`](@ref) interface.
+"""
+function slice_views end
 
 """$(TYPEDSIGNATURES)
 Regrid a vector `src_field` using `regridder`. Allocates a fresh destination vector."""
