@@ -37,9 +37,15 @@ aˢ = sum(A; dims=1)
    `dst_field`, applying normalization. Dispatch on the destination type.
 ```
 """
-function regrid!(dst_field::D, regridder::R, src_field::S; kwargs...) where {D, R, S}
-    src_arraylike = extract_source_arraylike(src_field, regridder; kwargs...)
-    dst_arraylike = extract_dest_arraylike(dst_field, regridder; kwargs...)
+# `dims` is lifted to an explicit kwarg here (rather than ridden inside `kwargs...`)
+# and `@constprop :aggressive` so the literal value reaches `NDSliceLoop{dims}` at
+# the extract callsite. Without this, `dims` is boxed through the kwarg `Pairs`
+# plumbing and the `Dim` type parameter of the slicer becomes dynamic — every
+# downstream call (`slice_views`, `_slice_index`, the per-slice 1-D dispatch)
+# then runs through runtime dispatch, costing megabytes per N-D call.
+Base.@constprop :aggressive function regrid!(dst_field::D, regridder::R, src_field::S; dims::Int = 1, kwargs...) where {D, R, S}
+    src_arraylike = extract_source_arraylike(src_field, regridder; dims, kwargs...)
+    dst_arraylike = extract_dest_arraylike(dst_field, regridder; dims, kwargs...)
     initialize_regridding!(regridder, src_field, src_arraylike; kwargs...)
     perform_regridding!(dst_arraylike, regridder, src_arraylike; kwargs...)
     finalize_regridding!(dst_field, regridder, dst_arraylike; kwargs...)
