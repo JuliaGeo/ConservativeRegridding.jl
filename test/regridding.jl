@@ -242,3 +242,25 @@ end
     ConservativeRegridding.regrid!(dst_field, r, src_field)
     @test all(dst_field.data .≈ 1.0)
 end
+
+@testset "Non-strided AbstractArray does not hit NDSliceLoop dispatch" begin
+    # Simulates an Oceananigans.Field / ClimaCore.Fields.Field style wrapper:
+    # subtypes AbstractArray but is NOT StridedArray.
+    struct NotStridedField{T,N} <: AbstractArray{T,N}
+        data::Array{T,N}
+    end
+    Base.size(f::NotStridedField) = size(f.data)
+    Base.getindex(f::NotStridedField, I...) = getindex(f.data, I...)
+
+    f = NotStridedField(ones(3, 4))
+    @test !(f isa StridedArray)
+    @test !(typeof(f) <: StridedArray)
+
+    # If a Regridder is around, extract_source_arraylike should NOT return an
+    # AbstractDimensionalSlicer for this type — it should fall through to the
+    # universal pipeline driver and error (no extract method) until an extension
+    # defines one.
+    src_grid = ones(2, 2)  # placeholder, won't actually be used
+    # We don't actually run regrid! — just verify the dispatch doesn't pick the slicer path.
+    @test_throws MethodError ConservativeRegridding.extract_source_arraylike(f, nothing)
+end
