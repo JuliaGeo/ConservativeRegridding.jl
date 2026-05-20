@@ -212,12 +212,12 @@ ConservativeRegridding.extract_source_arraylike(::Oceananigans.AbstractField, re
 ConservativeRegridding.extract_dest_arraylike(::Oceananigans.AbstractField, regridder; kwargs...) =
     regridder.dst_temp
 
-function ConservativeRegridding.initialize_regridding!(regridder, field::Oceananigans.AbstractField, src_arraylike; kwargs...)
+function ConservativeRegridding.initialize_regridding!(regridder, field::Oceananigans.AbstractField, src_arraylike::AbstractVector; kwargs...)
     copyto!(src_arraylike, vec(interior(field)))
     return regridder
 end
 
-function ConservativeRegridding.finalize_regridding!(field::Oceananigans.AbstractField, regridder, dst_arraylike; normalize = true, kwargs...)
+function ConservativeRegridding.finalize_regridding!(field::Oceananigans.AbstractField, regridder, dst_arraylike::AbstractVector; normalize = true, kwargs...)
     if normalize
         dst_arraylike ./= regridder.dst_areas
     end

@@ -287,13 +287,13 @@ ConservativeRegridding.extract_source_arraylike(::ClimaCore.Fields.Field, regrid
 ConservativeRegridding.extract_dest_arraylike(::ClimaCore.Fields.Field, regridder; kwargs...) =
     regridder.dst_temp
 
-function ConservativeRegridding.initialize_regridding!(regridder, src::ClimaCore.Fields.Field, src_arraylike; kwargs...)
+function ConservativeRegridding.initialize_regridding!(regridder, src::ClimaCore.Fields.Field, src_arraylike::AbstractVector; kwargs...)
     # NOTE: this will not work if the regridder was normalized, since that divides source areas by `maximum(areas)`.
     src_arraylike .= integrate_each_element(src) ./ regridder.src_areas
     return regridder
 end
 
-Base.@constprop :aggressive function ConservativeRegridding.finalize_regridding!(dst::ClimaCore.Fields.Field, regridder, dst_arraylike; normalize = true, kwargs...)
+Base.@constprop :aggressive function ConservativeRegridding.finalize_regridding!(dst::ClimaCore.Fields.Field, regridder, dst_arraylike::AbstractVector; normalize = true, kwargs...)
     if normalize
         dst_arraylike ./= regridder.dst_areas
     end

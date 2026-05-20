@@ -59,12 +59,12 @@ extract_dest_arraylike(dst_field::DenseVector, regridder; kwargs...) = dst_field
 # Load source data into the arraylike. For `DenseVector` the arraylike is the field itself,
 # so this is a no-op.
 
-function initialize_regridding!(regridder, src_field::AbstractVector, src_arraylike; kwargs...)
+function initialize_regridding!(regridder, src_field::AbstractVector, src_arraylike::AbstractVector; kwargs...)
     src_arraylike .= src_field
     return regridder
 end
 
-initialize_regridding!(regridder, src_field::DenseVector, src_arraylike; kwargs...) = regridder
+initialize_regridding!(regridder, src_field::DenseVector, src_arraylike::AbstractVector; kwargs...) = regridder
 
 # ## Perform regridding
 # Diagonal dispatch only. The arraylikes are guaranteed to be `mul!`-compatible.
@@ -78,7 +78,7 @@ end
 # Load the arraylike back into the destination field, applying normalization.
 # For `DenseVector` the arraylike *is* the destination, so we just normalize in place.
 
-Base.@constprop :aggressive function finalize_regridding!(dst_field::AbstractVector, regridder, dst_arraylike; normalize = true, kwargs...)
+Base.@constprop :aggressive function finalize_regridding!(dst_field::AbstractVector, regridder, dst_arraylike::AbstractVector; normalize = true, kwargs...)
     if normalize
         @. dst_field = dst_arraylike / regridder.dst_areas
     else
@@ -87,7 +87,7 @@ Base.@constprop :aggressive function finalize_regridding!(dst_field::AbstractVec
     return dst_field
 end
 
-Base.@constprop :aggressive function finalize_regridding!(dst_field::DenseVector, regridder, dst_arraylike; normalize = true, kwargs...)
+Base.@constprop :aggressive function finalize_regridding!(dst_field::DenseVector, regridder, dst_arraylike::AbstractVector; normalize = true, kwargs...)
     if normalize
         dst_field ./= regridder.dst_areas
     end
@@ -114,9 +114,9 @@ end
 extract_source_arraylike(src_field::Base.FastContiguousSubArray{<:Any,1}, regridder; kwargs...) = src_field
 extract_dest_arraylike(dst_field::Base.FastContiguousSubArray{<:Any,1}, regridder; kwargs...) = dst_field
 
-initialize_regridding!(regridder, src_field::Base.FastContiguousSubArray{<:Any,1}, src_arraylike; kwargs...) = regridder
+initialize_regridding!(regridder, src_field::Base.FastContiguousSubArray{<:Any,1}, src_arraylike::AbstractVector; kwargs...) = regridder
 
-Base.@constprop :aggressive function finalize_regridding!(dst_field::Base.FastContiguousSubArray{<:Any,1}, regridder, dst_arraylike; normalize = true, kwargs...)
+Base.@constprop :aggressive function finalize_regridding!(dst_field::Base.FastContiguousSubArray{<:Any,1}, regridder, dst_arraylike::AbstractVector; normalize = true, kwargs...)
     if normalize
         dst_field ./= regridder.dst_areas
     end
@@ -227,6 +227,68 @@ end
 
 @inline _slice_index(::Val{Dim}, ::Val{N}, I::CartesianIndex) where {Dim,N} =
     ntuple(d -> d == Dim ? Colon() : I[d < Dim ? d : d - 1], Val(N))
+
+# ### Pipeline integration
+
+# N-D StridedArrays wrap into an NDSliceLoop. `StridedArray` (not `AbstractArray`)
+# is the critical type: package field types (Oceananigans.Field, ClimaCore.Fields.Field,
+# Healpix.HealpixMap) subtype AbstractArray but NOT StridedArray, so they continue
+# through their own extension-defined extract methods.
+extract_source_arraylike(src::StridedArray{T,N}, regridder; dims::Int=1, kwargs...) where {T,N} =
+    NDSliceLoop{dims}(src)
+extract_dest_arraylike(dst::StridedArray{T,N}, regridder; dims::Int=1, kwargs...) where {T,N} =
+    NDSliceLoop{dims}(dst)
+
+# 1-D StridedVector guard. Without this, the StridedArray{T,N} method above would
+# hijack 1-D non-contiguous SubArrays (e.g. `view(A, 1:2:end)`), which match
+# StridedVector but neither DenseVector nor FastContiguousSubArray. Route them
+# through src_temp/dst_temp like the existing AbstractVector path.
+extract_source_arraylike(src::StridedVector, regridder; kwargs...) = regridder.src_temp
+extract_dest_arraylike(  dst::StridedVector, regridder; kwargs...) = regridder.dst_temp
+
+# Slicer pipeline: initialize and finalize are no-ops because the data lives
+# in `parent(slicer)`; slices are views into it.
+initialize_regridding!(regridder, src_field, src_arraylike::AbstractDimensionalSlicer; kwargs...) = regridder
+finalize_regridding!(dst_field, regridder, dst_arraylike::AbstractDimensionalSlicer; kwargs...) = dst_field
+
+# Generic custom slicers are responsible for satisfying the interface contract.
+# Built-in NDSliceLoop can check its non-spatial axes cheaply before entering the loop.
+_validate_slice_compatibility!(dst::AbstractDimensionalSlicer, src::AbstractDimensionalSlicer) = nothing
+
+function _validate_slice_compatibility!(
+    dst::NDSliceLoop{DstDim,DstN},
+    src::NDSliceLoop{SrcDim,SrcN},
+) where {DstDim,DstN,SrcDim,SrcN}
+    DstN == SrcN ||
+        throw(DimensionMismatch("source and destination ranks must match; got source rank $SrcN and destination rank $DstN"))
+    DstDim == SrcDim ||
+        throw(DimensionMismatch("source and destination regrid dimensions must match; got source dims=$SrcDim and destination dims=$DstDim"))
+    src_axes = _nonspatial_axes(src)
+    dst_axes = _nonspatial_axes(dst)
+    src_axes == dst_axes ||
+        throw(DimensionMismatch("source and destination non-spatial axes must match; got source axes $src_axes and destination axes $dst_axes"))
+    return nothing
+end
+
+# perform_regridding! on the slicer: iterate source and destination slice views in
+# lockstep, running the standard pipeline per slice. The per-slice work re-enters
+# the existing 1-D dispatch (DenseVector / FastContiguousSubArray / AbstractVector).
+function perform_regridding!(
+    dst_arraylike::AbstractDimensionalSlicer,
+    regridder,
+    src_arraylike::AbstractDimensionalSlicer;
+    kwargs...,
+)
+    _validate_slice_compatibility!(dst_arraylike, src_arraylike)
+    for (src_slice, dst_slice) in zip(slice_views(src_arraylike), slice_views(dst_arraylike))
+        s_src = extract_source_arraylike(src_slice, regridder; kwargs...)
+        s_dst = extract_dest_arraylike(dst_slice, regridder; kwargs...)
+        initialize_regridding!(regridder, src_slice, s_src; kwargs...)
+        perform_regridding!(s_dst, regridder, s_src; kwargs...)
+        finalize_regridding!(dst_slice, regridder, s_dst; kwargs...)
+    end
+    return dst_arraylike
+end
 
 """$(TYPEDSIGNATURES)
 Regrid a vector `src_field` using `regridder`. Allocates a fresh destination vector."""

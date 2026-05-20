@@ -191,12 +191,12 @@ function ConservativeRegridding.extract_dest_arraylike(dst::Healpix.HealpixMap, 
     return ConservativeRegridding.extract_dest_arraylike(parent(dst), regridder; kwargs...)
 end
 
-function ConservativeRegridding.initialize_regridding!(regridder, src::Healpix.HealpixMap, src_arraylike; kwargs...)
+function ConservativeRegridding.initialize_regridding!(regridder, src::Healpix.HealpixMap, src_arraylike::AbstractVector; kwargs...)
     return ConservativeRegridding.initialize_regridding!(regridder, parent(src), src_arraylike; kwargs...)
 end
 
 Base.@constprop :aggressive function ConservativeRegridding.finalize_regridding!(
-    dst::Healpix.HealpixMap, regridder, dst_arraylike; kwargs...
+    dst::Healpix.HealpixMap, regridder, dst_arraylike::AbstractVector; kwargs...
 )
     return ConservativeRegridding.finalize_regridding!(parent(dst), regridder, dst_arraylike; kwargs...)
 end
