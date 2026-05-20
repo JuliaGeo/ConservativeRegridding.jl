@@ -190,6 +190,44 @@ Required by the [`AbstractDimensionalSlicer`](@ref) interface.
 """
 function slice_views end
 
+"""
+    NDSliceLoop{Dim,N,A<:StridedArray{<:Any,N}}
+
+Built-in [`AbstractDimensionalSlicer`](@ref) for N-D strided arrays. Iterates 1-D
+views along all axes except `Dim`, in column-major order over the other axes.
+
+Constructed automatically by `extract_source_arraylike` / `extract_dest_arraylike`
+when the input is a `StridedArray{T,N}` with `N ≥ 2`; not intended for direct user use.
+"""
+struct NDSliceLoop{Dim,N,A<:StridedArray{<:Any,N}} <: AbstractDimensionalSlicer
+    array::A
+end
+
+function NDSliceLoop{Dim}(arr::StridedArray{<:Any,N}) where {Dim,N}
+    _check_valid_dim(Val(Dim), Val(N))
+    return NDSliceLoop{Dim,N,typeof(arr)}(arr)
+end
+
+Base.parent(s::NDSliceLoop) = s.array
+
+function slice_views(s::NDSliceLoop{Dim,N}) where {Dim,N}
+    arr = parent(s)
+    other_axes = _nonspatial_axes(s)
+    return (view(arr, _slice_index(Val(Dim), Val(N), I)...) for I in CartesianIndices(other_axes))
+end
+
+@inline function _check_valid_dim(::Val{Dim}, ::Val{N}) where {Dim,N}
+    (Dim isa Integer && 1 <= Dim <= N) ||
+        throw(ArgumentError("dims=$Dim is out of range for a $N-dimensional array"))
+    return nothing
+end
+
+@inline _nonspatial_axes(s::NDSliceLoop{Dim,N}) where {Dim,N} =
+    ntuple(i -> axes(parent(s), i < Dim ? i : i + 1), Val(N - 1))
+
+@inline _slice_index(::Val{Dim}, ::Val{N}, I::CartesianIndex) where {Dim,N} =
+    ntuple(d -> d == Dim ? Colon() : I[d < Dim ? d : d - 1], Val(N))
+
 """$(TYPEDSIGNATURES)
 Regrid a vector `src_field` using `regridder`. Allocates a fresh destination vector."""
 function regrid(
