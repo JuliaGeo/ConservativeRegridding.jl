@@ -240,9 +240,13 @@ end
 # is the critical type: package field types (Oceananigans.Field, ClimaCore.Fields.Field,
 # Healpix.HealpixMap) subtype AbstractArray but NOT StridedArray, so they continue
 # through their own extension-defined extract methods.
-extract_source_arraylike(src::StridedArray{T,N}, regridder; dims::Int=1, kwargs...) where {T,N} =
+# `@constprop :aggressive` so a literal `dims` reaches `NDSliceLoop{dims}` at
+# inference time even when these methods are called directly by extension
+# authors (bypassing the universal `regrid!` driver, which has its own
+# `@constprop` for the same reason).
+Base.@constprop :aggressive extract_source_arraylike(src::StridedArray{T,N}, regridder; dims::Int=1, kwargs...) where {T,N} =
     NDSliceLoop{dims}(src)
-extract_dest_arraylike(dst::StridedArray{T,N}, regridder; dims::Int=1, kwargs...) where {T,N} =
+Base.@constprop :aggressive extract_dest_arraylike(dst::StridedArray{T,N}, regridder; dims::Int=1, kwargs...) where {T,N} =
     NDSliceLoop{dims}(dst)
 
 # 1-D StridedVector guard. Without this, the StridedArray{T,N} method above would
