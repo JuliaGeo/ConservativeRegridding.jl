@@ -256,11 +256,34 @@ end
     @test !(f isa StridedArray)
     @test !(typeof(f) <: StridedArray)
 
-    # If a Regridder is around, extract_source_arraylike should NOT return an
-    # AbstractDimensionalSlicer for this type — it should fall through to the
-    # universal pipeline driver and error (no extract method) until an extension
-    # defines one.
-    src_grid = ones(2, 2)  # placeholder, won't actually be used
-    # We don't actually run regrid! — just verify the dispatch doesn't pick the slicer path.
+    function make_grid(nx, ny)
+        polys = Matrix{GI.Polygon}(undef, nx, ny)
+        for j in 1:ny, i in 1:nx
+            x0, x1 = (i-1)/nx, i/nx
+            y0, y1 = (j-1)/ny, j/ny
+            ring = GI.LinearRing([(x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0)])
+            polys[i,j] = GI.Polygon([ring])
+        end
+        polys
+    end
+    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), make_grid(3, 4), make_grid(2, 2); threaded=false)
+
+    # 1. Today's behavior: no method matches a non-strided AbstractArray. Locks in the status quo;
+    #    `nothing` regridder distinguishes "no such method exists at all" from "errored downstream".
     @test_throws MethodError ConservativeRegridding.extract_source_arraylike(f, nothing)
+    @test_throws MethodError ConservativeRegridding.extract_source_arraylike(f, r)
+
+    # 2. Forward-looking guard: if a future maintainer adds a fallback
+    #    `extract_source_arraylike(::AbstractArray, ::Any)` that erroneously routes through the
+    #    StridedArray N-D path (i.e. returns an `AbstractDimensionalSlicer`), this test must fail.
+    #    Avoids `hasmethod`/`which`, which can surprise around `where` clauses and kwargs — we
+    #    just assert the observable return value isn't a slicer. `try`/`catch` swallows the
+    #    MethodError today; the `!isa(::AbstractDimensionalSlicer)` check fires the moment a
+    #    misguided fallback gets added and starts returning successfully.
+    result = try
+        ConservativeRegridding.extract_source_arraylike(f, r)
+    catch
+        nothing
+    end
+    @test !(result isa ConservativeRegridding.AbstractDimensionalSlicer)
 end
