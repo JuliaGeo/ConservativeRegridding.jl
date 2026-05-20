@@ -138,6 +138,13 @@ end
     dst = make_grid(3, 3)
     r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst, src; threaded=false)
 
+    @testset "Vector (existing behavior, no regression)" begin
+        src_vec = ones(4)
+        dst_vec = zeros(9)
+        ConservativeRegridding.regrid!(dst_vec, r, src_vec)
+        @test all(dst_vec .≈ 1.0)
+    end
+
     @testset "Matrix" begin
         src_mat = ones(4, 3)
         dst_mat = zeros(9, 3)
@@ -145,7 +152,6 @@ end
         @test all(dst_mat .≈ 1.0)
     end
 
-    #=
     @testset "3D array" begin
         src_3d = ones(4, 3, 2)
         dst_3d = zeros(9, 3, 2)
@@ -182,5 +188,14 @@ end
             @test all(dst_3d .≈ 1.0)
         end
     end
-    =#
+
+    @testset "dimension validation" begin
+        @test_throws ArgumentError ConservativeRegridding.regrid!(zeros(9, 3), r, ones(4, 3); dims=0)
+        @test_throws ArgumentError ConservativeRegridding.regrid!(zeros(9, 3), r, ones(4, 3); dims=3)
+
+        # Non-spatial axes must match for the built-in NDSliceLoop.
+        @test_throws DimensionMismatch ConservativeRegridding.regrid!(zeros(9, 3, 1), r, ones(4, 3))
+        @test_throws DimensionMismatch ConservativeRegridding.regrid!(zeros(9, 4), r, ones(4, 3))
+        @test_throws DimensionMismatch ConservativeRegridding.regrid!(zeros(2, 9, 3), r, ones(2, 4, 4); dims=2)
+    end
 end
