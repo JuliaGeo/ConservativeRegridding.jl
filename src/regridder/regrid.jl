@@ -36,6 +36,23 @@ aˢ = sum(A; dims=1)
 5. `finalize_regridding!(dst_field, regridder, dst_arraylike)` — load `dst_arraylike` back into
    `dst_field`, applying normalization. Dispatch on the destination type.
 ```
+
+## N-dimensional arrays
+
+For a multi-dimensional `StridedArray` (e.g. `Array{T,3}`), the regrid is applied
+along axis `dims` (default `1`), iterating over the remaining axes:
+
+```julia
+regrid!(dst, regridder, src; dims = 2)  # spatial axis is axis 2
+```
+
+This works via the [`AbstractDimensionalSlicer`](@ref) interface — the `extract_*`
+methods wrap N-D `StridedArray`s in an `NDSliceLoop`, and `perform_regridding!`
+iterates the slices through the standard 1-D pipeline. Extensions can plug in
+their own field layouts by subtyping `AbstractDimensionalSlicer` and overriding
+`extract_source_arraylike` / `extract_dest_arraylike` for their field type.
+For the built-in `NDSliceLoop`, `dims` must be a valid axis and source/destination
+non-spatial axes must match exactly.
 """
 # `dims` is lifted to an explicit kwarg here (rather than ridden inside `kwargs...`)
 # and `@constprop :aggressive` so the literal value reaches `NDSliceLoop{dims}` at
