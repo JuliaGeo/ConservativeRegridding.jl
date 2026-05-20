@@ -199,3 +199,46 @@ end
         @test_throws DimensionMismatch ConservativeRegridding.regrid!(zeros(2, 9, 3), r, ones(2, 4, 4); dims=2)
     end
 end
+
+@testset "Custom AbstractDimensionalSlicer subtype" begin
+    function make_grid(nx, ny)
+        polys = Matrix{GI.Polygon}(undef, nx, ny)
+        for j in 1:ny, i in 1:nx
+            x0, x1 = (i-1)/nx, i/nx
+            y0, y1 = (j-1)/ny, j/ny
+            ring = GI.LinearRing([(x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0)])
+            polys[i,j] = GI.Polygon([ring])
+        end
+        polys
+    end
+
+    src_grid = make_grid(2, 2)
+    dst_grid = make_grid(3, 3)
+    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_grid, src_grid; threaded=false)
+
+    # A field type whose data lives in a Matrix but is conceptually 1-D (single slice = vec).
+    struct FlatMatrixField{T} <: AbstractArray{T,2}
+        data::Matrix{T}
+    end
+    Base.size(f::FlatMatrixField) = size(f.data)
+    Base.getindex(f::FlatMatrixField, I...) = getindex(f.data, I...)
+    Base.setindex!(f::FlatMatrixField, v, I...) = setindex!(f.data, v, I...)
+
+    # The custom slicer yields a single 1-D view: vec(matrix).
+    struct FlatMatrixSlicer{T} <: ConservativeRegridding.AbstractDimensionalSlicer
+        array::Matrix{T}
+    end
+    Base.parent(s::FlatMatrixSlicer) = s.array
+    ConservativeRegridding.slice_views(s::FlatMatrixSlicer) = (vec(parent(s)),)
+
+    # Wire the field into the pipeline.
+    ConservativeRegridding.extract_source_arraylike(src::FlatMatrixField, r; kwargs...) =
+        FlatMatrixSlicer(src.data)
+    ConservativeRegridding.extract_dest_arraylike(dst::FlatMatrixField, r; kwargs...) =
+        FlatMatrixSlicer(dst.data)
+
+    src_field = FlatMatrixField(ones(2, 2))   # 4 cells
+    dst_field = FlatMatrixField(zeros(3, 3))  # 9 cells
+    ConservativeRegridding.regrid!(dst_field, r, src_field)
+    @test all(dst_field.data .≈ 1.0)
+end
