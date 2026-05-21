@@ -40,6 +40,88 @@ end
 
 import GeometryOpsCore
 
+@testset "regrid! dense vs strided dispatch" begin
+    function make_grid(nx, ny)
+        polys = Matrix{GI.Polygon}(undef, nx, ny)
+        for j in 1:ny, i in 1:nx
+            x0, x1 = (i-1)/nx, i/nx
+            y0, y1 = (j-1)/ny, j/ny
+            ring = GI.LinearRing([(x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0)])
+            polys[i,j] = GI.Polygon([ring])
+        end
+        polys
+    end
+
+    src_grid = make_grid(4, 4)
+    dst_grid = make_grid(8, 8)
+    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_grid, src_grid; threaded=false)
+
+    src = collect(1.0:16.0)
+
+    # Reference result from the all-dense path.
+    reference = zeros(64)
+    ConservativeRegridding.regrid!(reference, r, src)
+
+    # `mul!` produces non-NaN output, so a NaN-fill before each call lets us detect
+    # which temp buffers were written into.
+
+    # This should never use the regridder's temp buffers, instead performing a direct `mul!`.
+    @testset "Dense -> Dense" begin
+        fill!(r.src_temp, NaN)
+        fill!(r.dst_temp, NaN)
+        dst = zeros(64)
+        ConservativeRegridding.regrid!(dst, r, src)
+        @test dst == reference
+        @test all(isnan, r.src_temp)
+        @test all(isnan, r.dst_temp)
+    end
+
+    # This should use the regridder's destination buffer, but not its source buffer.
+    @testset "Dense -> Strided" begin
+        fill!(r.src_temp, NaN)
+        fill!(r.dst_temp, NaN)
+        big_dst = zeros(128)
+        dst_view = @view big_dst[1:2:end]
+        @test !(dst_view isa DenseVector)
+        ConservativeRegridding.regrid!(dst_view, r, src)
+        @test dst_view == reference
+        @test all(isnan, r.src_temp)
+        @test !any(isnan, r.dst_temp)
+    end
+
+    # This should use the regridder's source buffer, but not its destination buffer.
+    @testset "Strided -> Dense" begin
+        fill!(r.src_temp, NaN)
+        fill!(r.dst_temp, NaN)
+        big_src = zeros(32)
+        big_src[1:2:end] .= src
+        src_view = @view big_src[1:2:end]
+        @test !(src_view isa DenseVector)
+        dst = zeros(64)
+        ConservativeRegridding.regrid!(dst, r, src_view)
+        @test dst == reference
+        @test !any(isnan, r.src_temp)
+        @test all(isnan, r.dst_temp)
+    end
+
+    # This should use the regridder's source and destination buffers.
+    @testset "Strided -> Strided" begin
+        fill!(r.src_temp, NaN)
+        fill!(r.dst_temp, NaN)
+        big_src = zeros(32)
+        big_src[1:2:end] .= src
+        src_view = @view big_src[1:2:end]
+        big_dst = zeros(128)
+        dst_view = @view big_dst[1:2:end]
+        @test !(src_view isa DenseVector)
+        @test !(dst_view isa DenseVector)
+        ConservativeRegridding.regrid!(dst_view, r, src_view)
+        @test dst_view == reference
+        @test !any(isnan, r.src_temp)
+        @test !any(isnan, r.dst_temp)
+    end
+end
+
 @testset "regrid! with n-dimensional arrays" begin
     function make_grid(nx, ny)
         polys = Matrix{GI.Polygon}(undef, nx, ny)
@@ -106,4 +188,102 @@ import GeometryOpsCore
             @test all(dst_3d .≈ 1.0)
         end
     end
+
+    @testset "dimension validation" begin
+        @test_throws ArgumentError ConservativeRegridding.regrid!(zeros(9, 3), r, ones(4, 3); dims=0)
+        @test_throws ArgumentError ConservativeRegridding.regrid!(zeros(9, 3), r, ones(4, 3); dims=3)
+
+        # Non-spatial axes must match for the built-in NDSliceLoop.
+        @test_throws DimensionMismatch ConservativeRegridding.regrid!(zeros(9, 3, 1), r, ones(4, 3))
+        @test_throws DimensionMismatch ConservativeRegridding.regrid!(zeros(9, 4), r, ones(4, 3))
+        @test_throws DimensionMismatch ConservativeRegridding.regrid!(zeros(2, 9, 3), r, ones(2, 4, 4); dims=2)
+    end
+end
+
+@testset "Custom AbstractDimensionalSlicer subtype" begin
+    function make_grid(nx, ny)
+        polys = Matrix{GI.Polygon}(undef, nx, ny)
+        for j in 1:ny, i in 1:nx
+            x0, x1 = (i-1)/nx, i/nx
+            y0, y1 = (j-1)/ny, j/ny
+            ring = GI.LinearRing([(x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0)])
+            polys[i,j] = GI.Polygon([ring])
+        end
+        polys
+    end
+
+    src_grid = make_grid(2, 2)
+    dst_grid = make_grid(3, 3)
+    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_grid, src_grid; threaded=false)
+
+    # A field type whose data lives in a Matrix but is conceptually 1-D (single slice = vec).
+    struct FlatMatrixField{T} <: AbstractArray{T,2}
+        data::Matrix{T}
+    end
+    Base.size(f::FlatMatrixField) = size(f.data)
+    Base.getindex(f::FlatMatrixField, I...) = getindex(f.data, I...)
+    Base.setindex!(f::FlatMatrixField, v, I...) = setindex!(f.data, v, I...)
+
+    # The custom slicer yields a single 1-D view: vec(matrix).
+    struct FlatMatrixSlicer{T} <: ConservativeRegridding.AbstractDimensionalSlicer
+        array::Matrix{T}
+    end
+    Base.parent(s::FlatMatrixSlicer) = s.array
+    ConservativeRegridding.slice_views(s::FlatMatrixSlicer) = (vec(parent(s)),)
+
+    # Wire the field into the pipeline.
+    ConservativeRegridding.extract_source_arraylike(src::FlatMatrixField, r; kwargs...) =
+        FlatMatrixSlicer(src.data)
+    ConservativeRegridding.extract_dest_arraylike(dst::FlatMatrixField, r; kwargs...) =
+        FlatMatrixSlicer(dst.data)
+
+    src_field = FlatMatrixField(ones(2, 2))   # 4 cells
+    dst_field = FlatMatrixField(zeros(3, 3))  # 9 cells
+    ConservativeRegridding.regrid!(dst_field, r, src_field)
+    @test all(dst_field.data .≈ 1.0)
+end
+
+@testset "Non-strided AbstractArray does not hit NDSliceLoop dispatch" begin
+    # Simulates an Oceananigans.Field / ClimaCore.Fields.Field style wrapper:
+    # subtypes AbstractArray but is NOT StridedArray.
+    struct NotStridedField{T,N} <: AbstractArray{T,N}
+        data::Array{T,N}
+    end
+    Base.size(f::NotStridedField) = size(f.data)
+    Base.getindex(f::NotStridedField, I...) = getindex(f.data, I...)
+
+    f = NotStridedField(ones(3, 4))
+    @test !(f isa StridedArray)
+    @test !(typeof(f) <: StridedArray)
+
+    function make_grid(nx, ny)
+        polys = Matrix{GI.Polygon}(undef, nx, ny)
+        for j in 1:ny, i in 1:nx
+            x0, x1 = (i-1)/nx, i/nx
+            y0, y1 = (j-1)/ny, j/ny
+            ring = GI.LinearRing([(x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0)])
+            polys[i,j] = GI.Polygon([ring])
+        end
+        polys
+    end
+    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), make_grid(3, 4), make_grid(2, 2); threaded=false)
+
+    # 1. Today's behavior: no method matches a non-strided AbstractArray. Locks in the status quo;
+    #    `nothing` regridder distinguishes "no such method exists at all" from "errored downstream".
+    @test_throws MethodError ConservativeRegridding.extract_source_arraylike(f, nothing)
+    @test_throws MethodError ConservativeRegridding.extract_source_arraylike(f, r)
+
+    # 2. Forward-looking guard: if a future maintainer adds a fallback
+    #    `extract_source_arraylike(::AbstractArray, ::Any)` that erroneously routes through the
+    #    StridedArray N-D path (i.e. returns an `AbstractDimensionalSlicer`), this test must fail.
+    #    Avoids `hasmethod`/`which`, which can surprise around `where` clauses and kwargs — we
+    #    just assert the observable return value isn't a slicer. `try`/`catch` swallows the
+    #    MethodError today; the `!isa(::AbstractDimensionalSlicer)` check fires the moment a
+    #    misguided fallback gets added and starts returning successfully.
+    result = try
+        ConservativeRegridding.extract_source_arraylike(f, r)
+    catch
+        nothing
+    end
+    @test !(result isa ConservativeRegridding.AbstractDimensionalSlicer)
 end

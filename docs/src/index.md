@@ -123,4 +123,3 @@ In ConservativeRegridding.jl:
 ConservativeRegridding.Regridder
 ConservativeRegridding.regrid!
 ```
-

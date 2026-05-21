@@ -13,8 +13,6 @@ import GeoInterface as GI
 import GeometryOps as GO
 import GeometryOpsCore as GOCore
 import GeometryOps: SpatialTreeInterface as STI
-import LinearAlgebra
-import SparseArrays
 import Oceananigans.Architectures: on_architecture
 
 instantiate(L) = L()
@@ -147,10 +145,10 @@ function Trees.treeify(
     #       right half: real = Nhalf+1..Nhalf+Nquarter, ghost = ...Nx
     #    Real partner mapping is across-the-row: real i ↔ ghost (Nx+1-i).
     #
-    #    A post-construction step in the specialized `Regridder` method below
-    #    replicates and halves matrix entries (and src/dst_areas) at fold pairs
-    #    so that regridding into the partner slot returns the same value as the
-    #    primary (no 0/0 NaN) while preserving conservation in both directions.
+    #    Partner slots end up with zero matrix rows/columns, so after `mul!` (and
+    #    normalize) they hold 0 or NaN.  `finalize_regridding!` below mirrors each
+    #    primary's value into its partner so the field shows the same physical
+    #    value on both copies.
     Nquarter = Nhalf ÷ 2
 
     # Build CellBasedGrids with only the unique cells (Nquarter per half)
@@ -185,17 +183,6 @@ function Trees.treeify(
     return Trees.KnownFullSphereExtentWrapper(tree)
 end
 
-#####
-##### Bespoke area-mangling in the last row to account for the repeated half-row shenanigans:
-##### Fold-pair halving: post-construction step that turns the ghost-cell dimension-matching 
-##### into proper duplicate-slot semantics.
-#####
-##### After the generic Regridder builds the matrix with zero entries at ghost slots, we replicate each 
-##### fold-row primary's column (or row) onto its partner and halve both, doing the same for src_areas/dst_areas.
-##### Result: regridding into a fold slot returns the primary's value (no 0/0 NaN), and regridding out of a 
-##### fold slot still single-counts each physical cell because primary + partner halves sum to the full
-##### intersection.
-
 const RightCenterFoldedGrid = Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Oceananigans.RightCenterFolded}
 
 # Linear-index pairs (primary, partner) for fold-row cells of a RightCenterFolded grid.
@@ -211,68 +198,44 @@ function fold_pairs(grid::RightCenterFoldedGrid)
     return [(r + fold_offset, (Nx + 1 - r) + fold_offset) for r in real_locals]
 end
 
-"""
-    spread_to_partners(A::SparseMatrixCSC, pairs; dim::Symbol)
-    spread_to_partners(v::AbstractVector, pairs)
+#####
+##### `regrid!` plumbing for Oceananigans fields.
+#####
+##### A `Field` is a 3D AbstractArray with halos.  `interior(field)` strips the
+##### halos but is non-contiguous in memory (row stride includes halo width), so
+##### it cannot be a `DenseVector` and `mul!` cannot operate on it directly.
+##### We route through the regridder's dense temp buffers via `copyto!`.
 
-At each fold pair `(primary, partner)`, the primary slot carries the real cell
-and the partner is a degenerate ghost (zero matrix entries, zero area).  This
-helper splits the primary's mass equally between the two slots: each ends up
-with half the matrix entries (or half the area).
+ConservativeRegridding.extract_source_arraylike(::Oceananigans.AbstractField, regridder; kwargs...) =
+    regridder.src_temp
 
-After this, regridding into a partner slot returns the same value as the
-primary (no `0/0` NaN), and conservation is preserved because primary +
-partner = the original full quantity.
+ConservativeRegridding.extract_dest_arraylike(::Oceananigans.AbstractField, regridder; kwargs...) =
+    regridder.dst_temp
 
-For the matrix form, `dim` selects whether to spread columns (`:col`, when the
-folded grid is the source) or rows (`:row`, when it's the destination).
-"""
-function spread_to_partners(A::SparseArrays.SparseMatrixCSC, pairs; dim::Symbol)
-    # Operate on columns of `M`.  For a row spread, work on the transposed copy.
-    M = dim === :row ? SparseArrays.SparseMatrixCSC(transpose(A)) : copy(A)
-    for (primary, partner) in pairs
-        half = M[:, primary] ./ 2
-        M[:, primary] = half
-        M[:, partner] = half
+function ConservativeRegridding.initialize_regridding!(regridder, field::Oceananigans.AbstractField, src_arraylike::AbstractVector; kwargs...)
+    copyto!(src_arraylike, vec(interior(field)))
+    return regridder
+end
+
+function ConservativeRegridding.finalize_regridding!(field::Oceananigans.AbstractField, regridder, dst_arraylike::AbstractVector; normalize = true, kwargs...)
+    if normalize
+        dst_arraylike ./= regridder.dst_areas
     end
-    return dim === :row ? SparseArrays.SparseMatrixCSC(transpose(M)) : M
+    _mirror_fold_partners!(dst_arraylike, field.grid)
+    copyto!(vec(interior(field)), dst_arraylike)
+    return field
 end
 
-function spread_to_partners(v::AbstractVector, pairs)
-    out = copy(v)
-    for (primary, partner) in pairs
-        half = out[primary] / 2
-        out[primary] = half
-        out[partner] = half
+# Partner slots in a folded grid have zero rows in the intersection matrix, so
+# after mul!/normalize they hold 0 (or 0/0 = NaN).  Copy each primary's value
+# into its partner so the field shows the same physical value on both copies.
+_mirror_fold_partners!(_, _) = nothing
+function _mirror_fold_partners!(dst_arraylike, grid::RightCenterFoldedGrid)
+    for (primary, partner) in fold_pairs(grid)
+        dst_arraylike[partner] = dst_arraylike[primary]
     end
-    return out
+    return dst_arraylike
 end
-
-function build_folded_regridder(manifold, dst, src, dst_pairs, src_pairs;
-                                normalize::Bool = true, kwargs...)
-    R = invoke(ConservativeRegridding.Regridder,
-               Tuple{GOCore.Manifold, Any, Any},
-               manifold, dst, src; normalize = false, kwargs...)
-    A         = R.intersections
-    dst_areas = R.dst_areas
-    src_areas = R.src_areas
-    isnothing(src_pairs) || (A         = spread_to_partners(A, src_pairs; dim=:col))
-    isnothing(dst_pairs) || (A         = spread_to_partners(A, dst_pairs; dim=:row))
-    isnothing(src_pairs) || (src_areas = spread_to_partners(src_areas, src_pairs))
-    isnothing(dst_pairs) || (dst_areas = spread_to_partners(dst_areas, dst_pairs))
-    R_new = ConservativeRegridding.Regridder(A, dst_areas, src_areas, R.dst_temp, R.src_temp)
-    normalize && LinearAlgebra.normalize!(R_new)
-    return R_new
-end
-
-ConservativeRegridding.Regridder(manifold::GOCore.Spherical, dst::RightCenterFoldedGrid, src; kwargs...) =
-    build_folded_regridder(manifold, dst, src, fold_pairs(dst), nothing; kwargs...)
-
-ConservativeRegridding.Regridder(manifold::GOCore.Spherical, dst, src::RightCenterFoldedGrid; kwargs...) =
-    build_folded_regridder(manifold, dst, src, nothing, fold_pairs(src); kwargs...)
-
-ConservativeRegridding.Regridder(manifold::GOCore.Spherical, dst::RightCenterFoldedGrid, src::RightCenterFoldedGrid; kwargs...) =
-    build_folded_regridder(manifold, dst, src, fold_pairs(dst), fold_pairs(src); kwargs...)
 
 function Trees.treeify(
     manifold::GOCore.Spherical,
