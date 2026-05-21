@@ -1,7 +1,7 @@
 name = "ConservativeRegridding"
 uuid = "8e50ac2c-eb48-49bc-a402-07c87b949343"
 license = "MIT"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Anshul Singhvi <anshulsinghvi@gmail.com>", "Milan Kloewer <milankloewer@gmx.de>", "Simone Silvestri <silvestri.simone0@gmail.com>", "and contributors"]
 
 [workspace]
@@ -26,6 +26,7 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 ClimaCore = "d414da3d-4745-48bb-8d80-42e94e092884"
 Healpix = "9f4e344d-96bc-545a-84a3-ae6b9e1b672b"
 Interfaces = "85a1e053-f937-4924-92a5-1367d23b7b87"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 RingGrids = "d1845624-ad4f-453b-8ff4-a8db365bf3a7"
@@ -35,7 +36,7 @@ ConservativeRegriddingClimaCoreExt = "ClimaCore"
 ConservativeRegriddingHealpixExt = "Healpix"
 ConservativeRegriddingInterfacesExt = "Interfaces"
 ConservativeRegriddingNCDatasetsExt = "NCDatasets"
-ConservativeRegriddingOceananigansExt = "Oceananigans"
+ConservativeRegriddingOceananigansExt = ["KernelAbstractions", "Oceananigans"]
 ConservativeRegriddingRingGridsExt = "RingGrids"
 
 [compat]
@@ -46,6 +47,7 @@ Extents = "0.1"
 GeoInterface = "1"
 GeometryOps = "0.1.33"
 GeometryOpsCore = "0.1.9"
+KernelAbstractions = "0.9"
 LinearAlgebra = "1"
 Oceananigans = "0.106, 0.107"
 ProgressMeter = "1"

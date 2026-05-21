@@ -4,6 +4,9 @@ using Oceananigans
 using Oceananigans.Grids: ξnode, ηnode, RightFaceFolded, RightCenterFolded
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Architectures: CPU
+using Oceananigans.Utils: launch!, KernelParameters
+
+using KernelAbstractions: @kernel, @index
 
 using ConservativeRegridding
 using ConservativeRegridding: Regridder, ExampleFieldFunction
@@ -185,19 +188,6 @@ end
 
 const RightCenterFoldedGrid = Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Oceananigans.RightCenterFolded}
 
-# Linear-index pairs (primary, partner) for fold-row cells of a RightCenterFolded grid.
-# Real (primary) locals match the partition built in `treeify`: 1..Nquarter and
-# Nhalf+1..Nhalf+Nquarter.  Partner of local i is Nx+1-i across the row.
-function fold_pairs(grid::RightCenterFoldedGrid)
-    Nx = size(grid, 1)
-    Ny = size(grid, 2)
-    Nquarter = Nx ÷ 4
-    Nhalf = Nx ÷ 2
-    fold_offset = (Ny - 1) * Nx
-    real_locals = vcat(1:Nquarter, Nhalf + 1 : Nhalf + Nquarter)
-    return [(r + fold_offset, (Nx + 1 - r) + fold_offset) for r in real_locals]
-end
-
 #####
 ##### `regrid!` plumbing for Oceananigans fields.
 #####
@@ -206,11 +196,8 @@ end
 ##### it cannot be a `DenseVector` and `mul!` cannot operate on it directly.
 ##### We route through the regridder's dense temp buffers via `copyto!`.
 
-ConservativeRegridding.extract_source_arraylike(::Oceananigans.AbstractField, regridder; kwargs...) =
-    regridder.src_temp
-
-ConservativeRegridding.extract_dest_arraylike(::Oceananigans.AbstractField, regridder; kwargs...) =
-    regridder.dst_temp
+ConservativeRegridding.extract_source_arraylike(::Oceananigans.AbstractField, regridder; kwargs...) = regridder.src_temp
+ConservativeRegridding.extract_dest_arraylike(::Oceananigans.AbstractField, regridder;   kwargs...) = regridder.dst_temp
 
 function ConservativeRegridding.initialize_regridding!(regridder, field::Oceananigans.AbstractField, src_arraylike::AbstractVector; kwargs...)
     copyto!(src_arraylike, vec(interior(field)))
@@ -221,7 +208,7 @@ function ConservativeRegridding.finalize_regridding!(field::Oceananigans.Abstrac
     if normalize
         dst_arraylike ./= regridder.dst_areas
     end
-    _mirror_fold_partners!(dst_arraylike, field.grid)
+    mirror_fold_partners!(dst_arraylike, field.grid)
     copyto!(vec(interior(field)), dst_arraylike)
     return field
 end
@@ -229,12 +216,27 @@ end
 # Partner slots in a folded grid have zero rows in the intersection matrix, so
 # after mul!/normalize they hold 0 (or 0/0 = NaN).  Copy each primary's value
 # into its partner so the field shows the same physical value on both copies.
-_mirror_fold_partners!(_, _) = nothing
-function _mirror_fold_partners!(dst_arraylike, grid::RightCenterFoldedGrid)
-    for (primary, partner) in fold_pairs(grid)
-        dst_arraylike[partner] = dst_arraylike[primary]
-    end
-    return dst_arraylike
+# Real (primary) locals along the fold row are 1..Nquarter and Nhalf+1..Nhalf+Nquarter;
+# the partner of local r is Nx+1-r.
+mirror_fold_partners!(_, _) = nothing
+
+function mirror_fold_partners!(dst, grid::RightCenterFoldedGrid)
+    Nx = size(grid, 1)
+    Ny = size(grid, 2)
+    Nq = Nx ÷ 4
+    Nh = Nx ÷ 2
+    fold_offset = (Ny - 1) * Nx
+    arch = grid.architecture
+    _mirror_fold_partners!(Oceananigans.Architectures.device(arch), 16, 2Nq)(
+        dst, Nx, Nh, Nq, fold_offset
+    )
+    return dst
+end
+
+@kernel function _mirror_fold_partners!(dst, Nx, Nh, Nq, fold_offset)
+    i = @index(Global)
+    r = ifelse(i ≤ Nq, i, i + Nh - Nq)
+    @inbounds dst[Nx + 1 - r + fold_offset] = dst[r + fold_offset]
 end
 
 function Trees.treeify(
