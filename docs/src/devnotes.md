@@ -51,5 +51,5 @@ extract_source_arraylike(src::T, regridder)::AbstractArray
 extract_dest_arraylike(dst::T, regridder)::AbstractArray
 initialize_regridding!(regridder, src::T, src_arraylike) # - you should be assured what your src_arraylike is, but **must** always define `T`
 finalize_regridding!(dst::T, regridder, dst_arraylike) # - you should be assured what your dst_arraylike is, but **must** always define `T`
-perform_regridding!(dst_arraylike::T1, regridder, src_arraylike::T2) # - diagonal dispatch only
+perform_regridding!(dst_arraylike::T1, regridder, src_arraylike::T2) # - first and third args must always be specified
 ```
