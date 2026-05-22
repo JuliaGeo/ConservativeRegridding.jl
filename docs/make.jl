@@ -17,6 +17,7 @@ makedocs(
             "interfaces/trees.md",
             "interfaces/regrid.md",
         ],
+        "devnotes.md",
     ],
     warnonly = true,#[:missing_docs],
 )

@@ -4,6 +4,9 @@ using Oceananigans
 using Oceananigans.Grids: ξnode, ηnode, RightFaceFolded, RightCenterFolded
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Architectures: CPU
+using Oceananigans.Utils: launch!, KernelParameters
+
+using KernelAbstractions: @kernel, @index
 
 using ConservativeRegridding
 using ConservativeRegridding: Regridder, ExampleFieldFunction
@@ -132,14 +135,23 @@ function Trees.treeify(
     N_rest = Nx * (Ny - 1)
 
     # 2. Fold row halves.
-    #    In a RightCenterFolded grid, each fold half has a within-half duplication:
-    #    cell i and cell (Nhalf+1-i) are the same physical quadrilateral (their
-    #    bottom vertices coincide with the other's top vertices due to the fold
-    #    geometry).  We keep only the first Nquarter = Nhalf÷2 cells as real
-    #    polygons in the spatial tree and add the remaining duplicate cells as
-    #    ghost cells via PaddedTreeWrapper.  Ghost cells exist for dimension
-    #    matching (the source field has Nhalf cells per fold half) but are never
-    #    reached during the dual DFS, so they contribute nothing to intersections.
+    #    In a RightCenterFolded grid, fold-row cell (i, Ny) is the same physical
+    #    quadrilateral as cell (Nx+1-i, Ny) — the fold reflects the row across
+    #    its midpoint.  Each physical cell therefore shows up at two field slots.
+    #    We treat half of each pair as a "real" polygon in the spatial tree
+    #    and the other half as a degenerate ghost cell; the dual DFS only
+    #    finds candidates for the real cells, so the matrix has at most one
+    #    nonzero column (or row) per physical cell.
+    #
+    #    Partition (Nquarter = Nhalf÷2):
+    #       left half:  real = 1..Nquarter,           ghost = Nquarter+1..Nhalf
+    #       right half: real = Nhalf+1..Nhalf+Nquarter, ghost = ...Nx
+    #    Real partner mapping is across-the-row: real i ↔ ghost (Nx+1-i).
+    #
+    #    Partner slots end up with zero matrix rows/columns, so after `mul!` (and
+    #    normalize) they hold 0 or NaN.  `finalize_regridding!` below mirrors each
+    #    primary's value into its partner so the field shows the same physical
+    #    value on both copies.
     Nquarter = Nhalf ÷ 2
 
     # Build CellBasedGrids with only the unique cells (Nquarter per half)
@@ -172,6 +184,59 @@ function Trees.treeify(
     )
 
     return Trees.KnownFullSphereExtentWrapper(tree)
+end
+
+const RightCenterFoldedGrid = Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Oceananigans.RightCenterFolded}
+
+#####
+##### `regrid!` plumbing for Oceananigans fields.
+#####
+##### A `Field` is a 3D AbstractArray with halos.  `interior(field)` strips the
+##### halos but is non-contiguous in memory (row stride includes halo width), so
+##### it cannot be a `DenseVector` and `mul!` cannot operate on it directly.
+##### We route through the regridder's dense temp buffers via `copyto!`.
+
+ConservativeRegridding.extract_source_arraylike(::Oceananigans.AbstractField, regridder; kwargs...) = regridder.src_temp
+ConservativeRegridding.extract_dest_arraylike(::Oceananigans.AbstractField, regridder;   kwargs...) = regridder.dst_temp
+
+function ConservativeRegridding.initialize_regridding!(regridder, field::Oceananigans.AbstractField, src_arraylike::AbstractVector; kwargs...)
+    copyto!(src_arraylike, vec(interior(field)))
+    return regridder
+end
+
+function ConservativeRegridding.finalize_regridding!(field::Oceananigans.AbstractField, regridder, dst_arraylike::AbstractVector; normalize = true, kwargs...)
+    if normalize
+        dst_arraylike ./= regridder.dst_areas
+    end
+    mirror_fold_partners!(dst_arraylike, field.grid)
+    copyto!(vec(interior(field)), dst_arraylike)
+    return field
+end
+
+# Partner slots in a folded grid have zero rows in the intersection matrix, so
+# after mul!/normalize they hold 0 (or 0/0 = NaN).  Copy each primary's value
+# into its partner so the field shows the same physical value on both copies.
+# Real (primary) locals along the fold row are 1..Nquarter and Nhalf+1..Nhalf+Nquarter;
+# the partner of local r is Nx+1-r.
+mirror_fold_partners!(_, _) = nothing
+
+function mirror_fold_partners!(dst, grid::RightCenterFoldedGrid)
+    Nx = size(grid, 1)
+    Ny = size(grid, 2)
+    Nq = Nx ÷ 4
+    Nh = Nx ÷ 2
+    fold_offset = (Ny - 1) * Nx
+    arch = grid.architecture
+    _mirror_fold_partners!(Oceananigans.Architectures.device(arch), 16, 2Nq)(
+        dst, Nx, Nh, Nq, fold_offset
+    )
+    return dst
+end
+
+@kernel function _mirror_fold_partners!(dst, Nx, Nh, Nq, fold_offset)
+    i = @index(Global)
+    r = ifelse(i ≤ Nq, i, i + Nh - Nq)
+    @inbounds dst[Nx + 1 - r + fold_offset] = dst[r + fold_offset]
 end
 
 function Trees.treeify(

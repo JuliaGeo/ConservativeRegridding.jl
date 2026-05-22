@@ -20,7 +20,7 @@ using ClimaCore:
 #   - non-global source: undershoot is expected (uncovered regions),
 #                        but overshoot (value > 1 + atol) indicates a bug
 # ---------------------------------------------------------------------------
-function test_constant_regrid(R, src_global, dst_global; atol=1e-2)
+function test_constant_regrid(R, src_global, dst_global; atol=1e-3)
     n_dst, n_src = size(R)
     A = R.intersections
 

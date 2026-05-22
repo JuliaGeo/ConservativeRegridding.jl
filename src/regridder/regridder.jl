@@ -124,7 +124,7 @@ end
 
 function Regridder(
         manifold::M, dst, src; 
-        normalize = true, 
+        normalize = false, 
         intersection_operator::F = DefaultIntersectionOperator(manifold), 
         threaded = True(),
         kwargs...
