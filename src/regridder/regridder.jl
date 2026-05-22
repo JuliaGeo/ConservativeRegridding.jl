@@ -21,138 +21,44 @@ See also: [`Regridder`](@ref).
 """
 abstract type AbstractRegridder end
 
-# ────────────────────────────────────────────────────────────────────────────
-# Mapping hierarchy — direction-specific data and dispatch tag for `Regridder`
-# ────────────────────────────────────────────────────────────────────────────
-
-"""
-    AbstractMapping
-
-Marker type for the kind of regridding a [`Regridder`](@ref) performs. Each
-subtype encodes the direction-specific data (e.g. cell areas) and dispatches
-the post-`mul!` behaviour. Concrete subtypes shipped with this package are
-[`FVtoFV`](@ref), [`SEtoFV`](@ref), and [`FVtoSE`](@ref).
-
-To add a new mapping:
-- If the forward step is `dst ./= dst_areas`, subtype
-  [`AbstractNormalizingMapping`](@ref) with a `dst_areas` field. `regrid!` is
-  inherited.
-- Otherwise, subtype `AbstractMapping` directly. The default `regrid!` does
-  just `mul!`. If a different post-step is needed, define a
-  `regrid!(::Regridder{<:Any, MyMapping}, …)` method.
-"""
-abstract type AbstractMapping end
-
-"""
-    AbstractNormalizingMapping <: AbstractMapping
-
-Mappings whose forward `regrid!` step divides element-wise by destination
-cell areas. Subtypes must carry a `dst_areas::AbstractVector` field.
-"""
-abstract type AbstractNormalizingMapping <: AbstractMapping end
-
-"""
-    FVtoFV{V <: AbstractVector} <: AbstractNormalizingMapping
-
-Finite-volume → finite-volume mapping. Carries source and destination cell
-areas; invertible by matrix transposition.
-"""
-struct FVtoFV{V <: AbstractVector} <: AbstractNormalizingMapping
-    dst_areas :: V
-    src_areas :: V
-end
-
-"""
-    SEtoFV{V <: AbstractVector} <: AbstractNormalizingMapping
-
-Spectral-element → finite-volume mapping. Carries destination cell areas only;
-not invertible by transposition (the inverse direction is a different
-algorithm — construct it explicitly with `Regridder(src, dst; …)`).
-"""
-struct SEtoFV{V <: AbstractVector} <: AbstractNormalizingMapping
-    dst_areas :: V
-end
-
-"""
-    FVtoSE <: AbstractMapping
-
-Finite-volume → spectral-element mapping (per-element L2 projection). The
-inverse mass matrix is already baked into the weight matrix, so no
-post-`mul!` normalization is needed and no extra data is stored.
-"""
-struct FVtoSE <: AbstractMapping end
-
-# ────────────────────────────────────────────────────────────────────────────
-# Primary `Regridder` struct
-# ────────────────────────────────────────────────────────────────────────────
-
-struct Regridder{W, M <: AbstractMapping, V} <: AbstractRegridder
-    "Sparse matrix of regridding weights"
-    weight_matrix :: W
-    "Mapping (direction-specific data + behaviour tag); see [`AbstractMapping`](@ref)"
-    mapping :: M
-    "Dense work array on the destination side (for non-contiguous inputs)"
+# Primary `Regridder` struct.
+struct Regridder{W, A, V} <: AbstractRegridder
+    "Matrix of area intersections between cells on the source and destination grid"
+    intersections :: W
+    "Vector of areas on the destination grid"
+    dst_areas :: A
+    "Vector of areas on the source grid"
+    src_areas :: A
+    "Dense vectors used as work-arrays if trying to regrid non-contiguous memory"
     dst_temp :: V
-    "Dense work array on the source side (for non-contiguous inputs)"
+    "Dense vectors used as work-arrays if trying to regrid non-contiguous memory"
     src_temp :: V
 end
 
-# Convenience type aliases
-const FVtoFVRegridder{W, V} = Regridder{W, <:FVtoFV, V}
-const SEtoFVRegridder{W, V} = Regridder{W, <:SEtoFV, V}
-const FVtoSERegridder{W, V} = Regridder{W, FVtoSE, V}
-
-# ────────────────────────────────────────────────────────────────────────────
-# Public accessors and shared interface methods
-# ────────────────────────────────────────────────────────────────────────────
-
-"""$(TYPEDSIGNATURES)
-Destination cell areas. Defined for any [`AbstractNormalizingMapping`](@ref)
-(currently `FVtoFV` and `SEtoFV`).
-"""
-destination_areas(r::Regridder{<:Any, <:AbstractNormalizingMapping}) = r.mapping.dst_areas
-
-"""$(TYPEDSIGNATURES)
-Source cell areas. Defined only for `FVtoFV` mappings.
-"""
-source_areas(r::Regridder{<:Any, <:FVtoFV}) = r.mapping.src_areas
-
-Base.size(r::Regridder, args...) = size(r.weight_matrix, args...)
-
-function Base.show(io::IO, ::MIME"text/plain", r::Regridder{W, M}) where {W, M}
-    Ndst, Nsrc = size(r.weight_matrix)
-    println(io, "Regridder{", nameof(M), "}: ", Nsrc, " → ", Ndst)
-    println(io, "  weight_matrix :: ", typeof(r.weight_matrix))
-    print(io,   "  mapping       :: ", r.mapping)
+function Base.show(io::IO, regridder::Regridder{W, A, V}) where {W, A, V}
+    n2, n1 = size(regridder)
+    println(io, "$n2×$n1 Regridder{$W, $A, $V}")
+    Base.print_array(io, regridder.intersections)
+    println(io, "\n\nSource areas: ", regridder.src_areas)
+    print(io, "Dest.  areas: ", regridder.dst_areas)
 end
 
 """$(TYPEDSIGNATURES)
-Return a Regridder for the reverse direction. Defined for `FVtoFV` mappings
-(matrix transposition encodes the inverse). Other mappings raise an explicit
-error pointing at the right alternative.
-"""
-function LinearAlgebra.transpose(r::Regridder{<:Any, <:FVtoFV})
-    m = r.mapping
-    return Regridder(transpose(r.weight_matrix),
-                     FVtoFV(m.src_areas, m.dst_areas),
-                     r.src_temp, r.dst_temp)
-end
+Return a Regridder for the backwards regridding, i.e. from destination to source grid.
+Does not copy any data, i.e. regridder for forward and backward share the same underlying arrays."""
+LinearAlgebra.transpose(regridder::Regridder) =
+    Regridder(transpose(regridder.intersections), regridder.src_areas, regridder.dst_areas, regridder.src_temp, regridder.dst_temp)
 
-function LinearAlgebra.transpose(r::Regridder)
-    error("`$(typeof(r.mapping))` is not invertible by transposition. " *
-          "Construct the inverse-direction regridder with `Regridder(src, dst; …)`.")
-end
+Base.size(regridder::Regridder, args...) = size(regridder.intersections, args...)
 
-"""$(TYPEDSIGNATURES)
-Normalize the weight matrix and the FV-FV cell-area vectors by the matrix's
-maximum entry. Defined only for `FVtoFV` mappings.
-"""
-function LinearAlgebra.normalize!(r::Regridder{<:Any, <:FVtoFV})
-    norm = maximum(r.weight_matrix)
-    r.weight_matrix ./= norm
-    r.mapping.dst_areas ./= norm
-    r.mapping.src_areas ./= norm
-    return r
+function LinearAlgebra.normalize!(regridder::Regridder)
+    (; intersections) = regridder
+    norm = maximum(intersections)   # TODO is this the best normalizer?
+    intersections ./= norm
+
+    regridder.src_areas ./= norm
+    regridder.dst_areas ./= norm
+    return regridder
 end
 
 struct DefaultIntersectionFailureError{T1, T2, E} <: Base.Exception
@@ -217,9 +123,9 @@ function Regridder(dst, src; kwargs...)
 end
 
 function Regridder(
-        manifold::M, dst, src; 
-        normalize = true, 
-        intersection_operator::F = DefaultIntersectionOperator(manifold), 
+        manifold::M, dst, src;
+        normalize = false,
+        intersection_operator::F = DefaultIntersectionOperator(manifold),
         threaded = True(),
         kwargs...
     ) where {M <: Manifold, F}
@@ -232,9 +138,9 @@ function Regridder(
     # Compute the intersection areas.
     intersections = intersection_areas(
         manifold,
-        _threaded, 
-        dst_tree, src_tree; 
-        intersection_operator, 
+        _threaded,
+        dst_tree, src_tree;
+        intersection_operator,
         kwargs...
     )
 
@@ -244,13 +150,13 @@ function Regridder(
     src_areas = areas(manifold, src, src_tree)
 
     # TODO: make this GPU-compatible?
-    # Allocate temporary arrays for the regridding operation - 
+    # Allocate temporary arrays for the regridding operation -
     # in case the destination and source fields are not contiguous in memory.
     dst_temp = zeros(length(dst_areas))
     src_temp = zeros(length(src_areas))
 
-    # Construct the regridder. Normalize if requested.
-    regridder = Regridder(intersections, FVtoFV(dst_areas, src_areas), dst_temp, src_temp)
+    # Construct the regridder.  Normalize if requested.
+    regridder = Regridder(intersections, dst_areas, src_areas, dst_temp, src_temp)
     normalize && LinearAlgebra.normalize!(regridder)
 
     return regridder

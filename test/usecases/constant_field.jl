@@ -1,5 +1,4 @@
 using ConservativeRegridding
-using ConservativeRegridding: destination_areas, source_areas
 using ConservativeRegridding.Trees
 
 import GeometryOps as GO
@@ -13,6 +12,19 @@ import Healpix
 using ClimaCore:
     CommonSpaces, Fields, Spaces, Meshes, Topologies, Domains, ClimaComms
 
+const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingClimaCoreExt)
+
+is_se_grid(g) = g isa Spaces.AbstractSpectralElementSpace
+
+# `ones`/`zeros` factories that match the grid: ClimaCore Fields for SE spaces
+# (so the Field-dispatching pipeline kicks in), flat vectors for everything else.
+ones_for(grid, n)  = is_se_grid(grid) ? Fields.ones(grid)  : ones(n)
+zeros_for(grid, n) = is_se_grid(grid) ? Fields.zeros(grid) : zeros(n)
+
+# Pull a flat numeric vector out of either a Field or a plain array.
+flat(x::Fields.Field) = ClimaCoreExt.se_field_to_vec(x)
+flat(x::AbstractVector) = x
+
 # ---------------------------------------------------------------------------
 # Helper: regrid a field of ones and check the result.
 #
@@ -20,16 +32,22 @@ using ClimaCore:
 #   - global source:     every covered dst cell should be ≈ 1.0
 #   - non-global source: undershoot is expected (uncovered regions),
 #                        but overshoot (value > 1 + atol) indicates a bug
+#
+# For SE-flavored sides we pass a ClimaCore Field through `regrid!`; the
+# Field-dispatched extract/initialize/finalize methods handle the SE conversion.
+# Transpose (backward) is only exercised for FV↔FV pairs — the SE-flavored
+# regridders are direction-specific by construction.
 # ---------------------------------------------------------------------------
-function test_constant_regrid(R::ConservativeRegridding.Regridder, src_global, dst_global; atol=1e-4)
+function test_constant_regrid(R, src_grid, dst_grid, src_global, dst_global; atol=1e-4)
     n_dst, n_src = size(R)
-    A = R.weight_matrix
+    A = R.intersections
 
     # Forward: src → dst
     @testset let direction = :forward, src_covers_globe = src_global
-        src_vals = ones(n_src)
-        dst_vals = zeros(n_dst)
-        ConservativeRegridding.regrid!(dst_vals, R, src_vals)
+        src = ones_for(src_grid, n_src)
+        dst = zeros_for(dst_grid, n_dst)
+        ConservativeRegridding.regrid!(dst, R, src)
+        dst_vals = flat(dst)
         covered = vec(sum(A, dims=2)) .> 0
         if src_global
             max_dev = maximum(abs.(dst_vals[covered] .- 1.0); init=0.0)
@@ -40,51 +58,21 @@ function test_constant_regrid(R::ConservativeRegridding.Regridder, src_global, d
         end
     end
 
-    # Backward: dst → src via transpose
-    # In the backward direction the "source" of the regrid is the dst grid of R,
-    # so dst_global determines the check.
-    @testset let direction = :backward, src_covers_globe = dst_global
-        dst_vals = ones(n_dst)
-        src_vals = zeros(n_src)
-        ConservativeRegridding.regrid!(src_vals, transpose(R), dst_vals)
-        covered = vec(sum(A, dims=1)) .> 0
-        if dst_global
-            max_dev = maximum(abs.(src_vals[covered] .- 1.0); init=0.0)
-            @test max_dev < atol
-        else
-            max_val = maximum(src_vals[covered]; init=0.0)
-            @test max_val < 1.0 + atol
+    # Backward via transpose — only valid for FV↔FV pairs.
+    if !is_se_grid(src_grid) && !is_se_grid(dst_grid)
+        @testset let direction = :backward, src_covers_globe = dst_global
+            dst_vals_in = ones(n_dst)
+            src_vals_out = zeros(n_src)
+            ConservativeRegridding.regrid!(src_vals_out, transpose(R), dst_vals_in)
+            covered = vec(sum(A, dims=1)) .> 0
+            if dst_global
+                max_dev = maximum(abs.(src_vals_out[covered] .- 1.0); init=0.0)
+                @test max_dev < atol
+            else
+                max_val = maximum(src_vals_out[covered]; init=0.0)
+                @test max_val < 1.0 + atol
+            end
         end
-    end
-end
-
-# ---------------------------------------------------------------------------
-# SE regridder constant-field tests (forward direction only; no transpose).
-#
-# src_global / dst_global are accepted for API compatibility but ignored:
-# ClimaCore cubed-sphere spaces always cover the full sphere.
-# ---------------------------------------------------------------------------
-
-# SE → FV: global conservation — area-weighted mean of destination ≈ 1.0.
-function test_constant_regrid(R::ConservativeRegridding.SEtoFVRegridder, src_global, dst_global; rtol=2e-2)
-    N_fv, N_se_nodes = size(R)
-    @testset let direction = :forward
-        src_vals = ones(N_se_nodes)
-        dst_vals = zeros(N_fv)
-        ConservativeRegridding.regrid!(dst_vals, R, src_vals)
-        @test isapprox(sum(dst_vals .* destination_areas(R)) / sum(destination_areas(R)), 1.0; rtol)
-    end
-end
-
-# FV → SE: every covered SE node should be exactly 1.0.
-function test_constant_regrid(R::ConservativeRegridding.FVtoSERegridder, src_global, dst_global; atol=1e-4)
-    N_se_nodes, N_fv = size(R)
-    @testset let direction = :forward
-        src_vals = ones(N_fv)
-        dst_vals = zeros(N_se_nodes)
-        ConservativeRegridding.regrid!(dst_vals, R, src_vals)
-        covered = vec(sum(R.weight_matrix, dims=2)) .> 0
-        @test maximum(abs.(dst_vals[covered] .- 1.0); init=0.0) < atol
     end
 end
 
@@ -143,8 +131,6 @@ grids = [
 # Tests: all spherical grid pairs
 # ---------------------------------------------------------------------------
 
-is_se_grid(g) = g isa Spaces.AbstractSpectralElementSpace
-
 @testset "Constant-field regridding" begin
     for i in 1:length(grids), j in (i+1):length(grids)
         d = grids[i]
@@ -153,7 +139,7 @@ is_se_grid(g) = g isa Spaces.AbstractSpectralElementSpace
         is_se_grid(d.grid) && is_se_grid(s.grid) && continue
         @testset "$(d.name) ↔ $(s.name)" begin
             R = ConservativeRegridding.Regridder(GO.Spherical(), d.grid, s.grid)
-            test_constant_regrid(R, s.global_coverage, d.global_coverage)
+            test_constant_regrid(R, s.grid, d.grid, s.global_coverage, d.global_coverage)
         end
     end
 end
@@ -164,5 +150,5 @@ end
 
 @testset "Constant-field regridding (planar)" begin
     R = ConservativeRegridding.Regridder(rect_a, rect_b; threaded=false)
-    test_constant_regrid(R, true, true)
+    test_constant_regrid(R, rect_b, rect_a, true, true)
 end

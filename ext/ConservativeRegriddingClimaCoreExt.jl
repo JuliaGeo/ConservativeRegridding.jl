@@ -470,12 +470,12 @@ function se_to_fv_principled(manifold, dst, src; threaded, triangle_quad_degree,
         end
     end
 
-    weight_matrix = SparseArrays.sparse(rows, cols, vals, N_fv, N_nodes)
+    intersections = SparseArrays.sparse(rows, cols, vals, N_fv, N_nodes)
     dst_areas = ConservativeRegridding.areas(manifold, dst, fv_tree)
+    src_areas = Vector{eltype(dst_areas)}(se_node_weights(src))
 
     return ConservativeRegridding.Regridder(
-        weight_matrix,
-        ConservativeRegridding.SEtoFV(dst_areas),
+        intersections, dst_areas, src_areas,
         zeros(N_fv), zeros(N_nodes),
     )
 end
@@ -663,47 +663,39 @@ function fv_to_se_l2_projection(manifold, dst, src;
         end
     end
 
-    weight_matrix = SparseArrays.sparse(rows, cols, vals, N_nodes, N_fv)
+    intersections = SparseArrays.sparse(rows, cols, vals, N_nodes, N_fv)
+    src_areas = ConservativeRegridding.areas(manifold, src, fv_tree)
+    # inv-mass already baked into `intersections`; ones make pipeline normalize a no-op
+    dst_areas = ones(N_nodes)
 
     return ConservativeRegridding.Regridder(
-        weight_matrix,
-        ConservativeRegridding.FVtoSE(),
+        intersections, dst_areas, src_areas,
         zeros(N_nodes), zeros(N_fv),
     )
 end
 
-## Field-level regrid! convenience interface
+## Pipeline overrides for ClimaCore Fields
+#
+# A `ClimaCore.Fields.Field` is the marker for SE-side data. Source-side: flatten
+# nodal values into the regridder's work buffer during `initialize_regridding!`.
+# Destination-side: copy the work buffer back into the field and apply weighted
+# DSS in `finalize_regridding!`. The FV→SE matrix already has the inverse mass
+# baked in, so the standard normalize step is skipped here.
 
-"""
-    regrid!(dst::AbstractVector, regridder::SEtoFVRegridder, src::ClimaCore.Fields.Field)
+ConservativeRegridding.extract_source_arraylike(src::ClimaCore.Fields.Field, regridder; kwargs...) = regridder.src_temp
+ConservativeRegridding.extract_dest_arraylike(dst::ClimaCore.Fields.Field, regridder; kwargs...) = regridder.dst_temp
 
-Remap a ClimaCore spectral element `Field` to a flat FV vector, converting the field
-to a flat nodal vector internally.
-"""
-function ConservativeRegridding.regrid!(
-    dst::AbstractVector,
-    regridder::ConservativeRegridding.SEtoFVRegridder,
-    src::ClimaCore.Fields.Field,
+function ConservativeRegridding.initialize_regridding!(
+    regridder, src::ClimaCore.Fields.Field, src_arraylike::AbstractVector; kwargs...,
 )
-    return ConservativeRegridding.regrid!(dst, regridder, se_field_to_vec(src))
+    src_arraylike .= se_field_to_vec(src)
+    return regridder
 end
 
-"""
-    regrid!(dst::ClimaCore.Fields.Field, regridder::FVtoSERegridder, src::AbstractVector)
-
-Remap a flat FV vector into a ClimaCore spectral element `Field`, writing the
-result back into `dst` in-place. The per-element L2 projection is not
-automatically continuous, so we apply weighted DSS (mass-conserving) to
-reconcile shared boundary nodes.
-"""
-function ConservativeRegridding.regrid!(
-    dst::ClimaCore.Fields.Field,
-    regridder::ConservativeRegridding.FVtoSERegridder,
-    src::AbstractVector,
+function ConservativeRegridding.finalize_regridding!(
+    dst::ClimaCore.Fields.Field, regridder, dst_arraylike::AbstractVector; kwargs...,
 )
-    dst_vec = regridder.dst_temp
-    ConservativeRegridding.regrid!(dst_vec, regridder, src)
-    vec_to_se_field!(dst, dst_vec)
+    vec_to_se_field!(dst, dst_arraylike)
     Spaces.weighted_dss!(dst)
     return dst
 end

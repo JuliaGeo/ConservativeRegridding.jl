@@ -1,5 +1,4 @@
 using ConservativeRegridding
-using ConservativeRegridding: destination_areas, source_areas
 using XESMF
 using Oceananigans
 using Oceananigans.Grids: RightCenterFolded
@@ -70,8 +69,8 @@ tripolar_configs = [
                 )
                 xr = XESMF.Regridder(dst_field, src_field; method = "conservative")
 
-                A_cr      = cr.weight_matrix
-                dst_areas = destination_areas(cr)
+                A_cr      = cr.intersections
+                dst_areas = cr.dst_areas
                 W_xesmf   = xr.weights
 
                 @testset "Weight matrix (cell-by-cell)" begin

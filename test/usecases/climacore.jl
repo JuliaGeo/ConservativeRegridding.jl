@@ -1,5 +1,5 @@
 using ConservativeRegridding
-using ConservativeRegridding: Trees, destination_areas, source_areas
+using ConservativeRegridding: Trees
 using StaticArrays
 using Statistics
 using Test
@@ -75,13 +75,10 @@ end
     @assert !Topologies.uses_spacefillingcurve(space.grid.topology)
 
     src_field = Fields.coordinate_field(space).lat
-    src_vec = ClimaCoreExt.se_field_to_vec(src_field)
-
     latlon_vals = zeros(360 * 180)
     regridder = ConservativeRegridding.Regridder(latlon_grid, space; threaded=false)
-    @test regridder isa ConservativeRegridding.SEtoFVRegridder
 
-    ConservativeRegridding.regrid!(latlon_vals, regridder, src_vec)
+    ConservativeRegridding.regrid!(latlon_vals, regridder, src_field)
 
     fv_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(latlon_grid))
     @test isapprox(
@@ -93,16 +90,12 @@ end
 
 @testset "Principled SE → FV: constant field exact" begin
     space = make_cubedsphere_space(; h_elem=8, n_quad_points=4)
-    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-    Nh = Meshes.nelements(Topologies.mesh(Spaces.topology(space)))
-    N_nodes = Nq^2 * Nh
 
-    src_vec = ones(N_nodes)
-    R = ConservativeRegridding.Regridder(latlon_grid, space; threaded=false)  # default = principled
-    @test R isa ConservativeRegridding.SEtoFVRegridder
+    src_field = Fields.ones(space)
+    R = ConservativeRegridding.Regridder(latlon_grid, space; threaded=false)
 
     dst = zeros(360 * 180)
-    ConservativeRegridding.regrid!(dst, R, src_vec)
+    ConservativeRegridding.regrid!(dst, R, src_field)
 
     # Principled: every covered destination cell is ~1.0 to ~machine eps
     # (each FV cell sums to A_dst,k by partition of unity, then divided by A_dst,k → 1).
@@ -114,13 +107,10 @@ end
     @assert Topologies.uses_spacefillingcurve(space.grid.topology)
 
     src_field = Fields.coordinate_field(space).lat
-    src_vec = ClimaCoreExt.se_field_to_vec(src_field)
-
     latlon_vals = zeros(360 * 180)
     regridder = ConservativeRegridding.Regridder(latlon_grid, space; threaded=false)
-    @test regridder isa ConservativeRegridding.SEtoFVRegridder
 
-    ConservativeRegridding.regrid!(latlon_vals, regridder, src_vec)
+    ConservativeRegridding.regrid!(latlon_vals, regridder, src_field)
 
     fv_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(latlon_grid))
     @test isapprox(
@@ -134,17 +124,13 @@ end
     space = make_cubedsphere_space(; h_elem=16, n_quad_points=4)
     @assert !Topologies.uses_spacefillingcurve(space.grid.topology)
 
-    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-    Nh = Meshes.nelements(Topologies.mesh(Spaces.topology(space)))
-    N_nodes = Nq^2 * Nh
-
     regridder = ConservativeRegridding.Regridder(space, latlon_grid; threaded=false)
-    @test regridder isa ConservativeRegridding.FVtoSERegridder
 
     src_fv = ones(360 * 180)
-    dst_vec = zeros(N_nodes)
-    ConservativeRegridding.regrid!(dst_vec, regridder, src_fv)
+    dst_field = Fields.zeros(space)
+    ConservativeRegridding.regrid!(dst_field, regridder, src_fv)
 
+    dst_vec = ClimaCoreExt.se_field_to_vec(dst_field)
     @test all(x -> isapprox(x, 1.0; atol=1e-10), dst_vec)
 end
 
@@ -152,17 +138,13 @@ end
     space = make_cubedsphere_space(; h_elem=16, n_quad_points=4, use_sfc=true)
     @assert Topologies.uses_spacefillingcurve(space.grid.topology)
 
-    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-    Nh = Meshes.nelements(Topologies.mesh(Spaces.topology(space)))
-    N_nodes = Nq^2 * Nh
-
     regridder = ConservativeRegridding.Regridder(space, latlon_grid; threaded=false)
-    @test regridder isa ConservativeRegridding.FVtoSERegridder
 
     src_fv = ones(360 * 180)
-    dst_vec = zeros(N_nodes)
-    ConservativeRegridding.regrid!(dst_vec, regridder, src_fv)
+    dst_field = Fields.zeros(space)
+    ConservativeRegridding.regrid!(dst_field, regridder, src_fv)
 
+    dst_vec = ClimaCoreExt.se_field_to_vec(dst_field)
     @test all(x -> isapprox(x, 1.0; atol=1e-10), dst_vec)
 end
 
@@ -175,17 +157,16 @@ end
     # meaningful, non-zero magnitude (lat integrates to ≈0 by symmetry,
     # so float noise dominates rtol on lat).
     space = make_cubedsphere_space(; h_elem=16, n_quad_points=4)
-    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-    Nh = Meshes.nelements(Topologies.mesh(Spaces.topology(space)))
 
-    src_vec = ones(Nq^2 * Nh)
+    src_field = Fields.ones(space)
+    src_vec = ClimaCoreExt.se_field_to_vec(src_field)
     R = ConservativeRegridding.Regridder(latlon_grid, space; threaded=false)
     dst = zeros(360 * 180)
-    ConservativeRegridding.regrid!(dst, R, src_vec)
+    ConservativeRegridding.regrid!(dst, R, src_field)
 
     # Source-side integral the regridder treats as the conserved invariant:
-    src_integral = sum(vec(sum(R.weight_matrix; dims=1)) .* src_vec)
-    dst_integral = sum(dst .* destination_areas(R))
+    src_integral = sum(vec(sum(R.intersections; dims=1)) .* src_vec)
+    dst_integral = sum(dst .* R.dst_areas)
 
     sphere_area = 4π * GO.Spherical().radius^2
     @test isapprox(src_integral, sphere_area; rtol=1e-12)   # math sanity
@@ -196,24 +177,16 @@ end
     space = make_cubedsphere_space(; h_elem=16, n_quad_points=4)
 
     src_field = Fields.coordinate_field(space).lat
-    src_vec = ClimaCoreExt.se_field_to_vec(src_field)
-
     N_fv = 360 * 180
-    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-    Nh = Meshes.nelements(Topologies.mesh(Spaces.topology(space)))
-    N_nodes = Nq^2 * Nh
 
     fwd = ConservativeRegridding.Regridder(latlon_grid, space; threaded=false)
     bwd = ConservativeRegridding.Regridder(space, latlon_grid; threaded=false)
 
     fv_vals = zeros(N_fv)
-    ConservativeRegridding.regrid!(fv_vals, fwd, src_vec)
-
-    roundtrip_vec = zeros(N_nodes)
-    ConservativeRegridding.regrid!(roundtrip_vec, bwd, fv_vals)
+    ConservativeRegridding.regrid!(fv_vals, fwd, src_field)
 
     roundtrip_field = Fields.zeros(space)
-    ClimaCoreExt.vec_to_se_field!(roundtrip_field, roundtrip_vec)
+    ConservativeRegridding.regrid!(roundtrip_field, bwd, fv_vals)
 
     fv_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(latlon_grid))
     @test isapprox(sum(fv_vals .* fv_areas), sum(src_field); rtol=1e-2, atol=10.0)
@@ -230,18 +203,12 @@ end
     src_tripolar = Field{Center, Center, Nothing}(tripolar_grid)
     set!(src_tripolar, src_tripolar + 1)
 
-    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-    Nh = Meshes.nelements(Topologies.mesh(Spaces.topology(space)))
-    N_nodes = Nq^2 * Nh
-
     regridder = ConservativeRegridding.Regridder(space, tripolar_grid)
-    @test regridder isa ConservativeRegridding.FVtoSERegridder
-
-    dst_vec = zeros(N_nodes)
-    ConservativeRegridding.regrid!(dst_vec, regridder, vec(interior(src_tripolar)))
 
     dst_field = Fields.zeros(space)
-    ClimaCoreExt.vec_to_se_field!(dst_field, dst_vec)
+    ConservativeRegridding.regrid!(dst_field, regridder, vec(interior(src_tripolar)))
+
+    dst_vec = ClimaCoreExt.se_field_to_vec(dst_field)
     @test isapprox(mean(dst_vec), 1.0, atol=0.1)
 end
 
@@ -256,17 +223,11 @@ end
     src_tripolar = Field{Center, Center, Nothing}(tripolar_grid)
     set!(src_tripolar, src_tripolar + 1)
 
-    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
-    Nh = Meshes.nelements(Topologies.mesh(Spaces.topology(space)))
-    N_nodes = Nq^2 * Nh
-
     regridder = ConservativeRegridding.Regridder(space, tripolar_grid)
-    @test regridder isa ConservativeRegridding.FVtoSERegridder
-
-    dst_vec = zeros(N_nodes)
-    ConservativeRegridding.regrid!(dst_vec, regridder, vec(interior(src_tripolar)))
 
     dst_field = Fields.zeros(space)
-    ClimaCoreExt.vec_to_se_field!(dst_field, dst_vec)
+    ConservativeRegridding.regrid!(dst_field, regridder, vec(interior(src_tripolar)))
+
+    dst_vec = ClimaCoreExt.se_field_to_vec(dst_field)
     @test isapprox(mean(dst_vec), 1.0, atol=0.1)
 end

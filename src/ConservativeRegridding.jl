@@ -38,10 +38,8 @@ include("regridder/intersection_areas.jl")
 
 
 @public Regridder, regrid, regrid!
-@public AbstractMapping, AbstractNormalizingMapping, FVtoFV, SEtoFV, FVtoSE
-@public FVtoFVRegridder, SEtoFVRegridder, FVtoSERegridder
-@public destination_areas, source_areas
 @public areas
+@public AbstractDimensionalSlicer, NDSliceLoop, slice_views, extract_source_arraylike, extract_dest_arraylike
 
 """
     save_esmf_weights(path, regridder;

@@ -6,7 +6,7 @@ using Oceananigans.Fields: AbstractField
 using Oceananigans.Architectures: CPU
 
 using ConservativeRegridding
-using ConservativeRegridding: Regridder, FVtoFV, SEtoFV, ExampleFieldFunction
+using ConservativeRegridding: Regridder, ExampleFieldFunction
 using ConservativeRegridding.Trees
 
 import GeoInterface as GI
@@ -224,18 +224,12 @@ GOCore.best_manifold(grid::Oceananigans.ImmersedBoundaryGrid) = GOCore.best_mani
 GOCore.best_manifold(field::Oceananigans.Field) = GOCore.best_manifold(field.grid)
 
 # Extend the `on_architecture` method for a `Regridder` object
-on_architecture(arch, r::Regridder) = 
-    Regridder(on_architecture(arch, r.weight_matrix),
-              on_architecture(arch, r.mapping),
+on_architecture(arch, r::Regridder) =
+    Regridder(on_architecture(arch, r.intersections),
+              on_architecture(arch, r.dst_areas),
+              on_architecture(arch, r.src_areas),
               on_architecture(arch, r.dst_temp),
               on_architecture(arch, r.src_temp))
-
-on_architecture(arch, m::FVtoFV) = 
-    FVtoFV(on_architecture(arch, m.dst_areas),
-           on_architecture(arch, m.src_areas))
-
-on_architecture(arch, m::SEtoFV) = 
-    SEtoFV(on_architecture(arch, m.dst_areas))
 
 # Allow to set example data on the field
 Oceananigans.set!(field::Oceananigans.Field, f::ExampleFieldFunction) = Oceananigans.set!(field, (lon, lat, z) -> f(lon, lat))
