@@ -700,4 +700,37 @@ function ConservativeRegridding.finalize_regridding!(
     return dst
 end
 
+#=
+## `regrid!` pipeline
+
+A ClimaCore `Field` stores `Nq × Nq` nodes per element, but the regridder
+operates on one scalar per element. Always route through the regridder's temp
+buffers:
+
+- source: quadrature-integrate the field over each element and divide by the
+  regridder's per-element source area to get the per-element mean.
+- destination: divide the matvec result by `dst_areas`, then broadcast the
+  per-element value to every node via `set_value_per_element!`.
+=#
+
+ConservativeRegridding.extract_source_arraylike(::ClimaCore.Fields.Field, regridder; kwargs...) =
+    regridder.src_temp
+
+ConservativeRegridding.extract_dest_arraylike(::ClimaCore.Fields.Field, regridder; kwargs...) =
+    regridder.dst_temp
+
+function ConservativeRegridding.initialize_regridding!(regridder, src::ClimaCore.Fields.Field, src_arraylike::AbstractVector; kwargs...)
+    # NOTE: this will not work if the regridder was normalized, since that divides source areas by `maximum(areas)`.
+    src_arraylike .= integrate_each_element(src) ./ regridder.src_areas
+    return regridder
+end
+
+Base.@constprop :aggressive function ConservativeRegridding.finalize_regridding!(dst::ClimaCore.Fields.Field, regridder, dst_arraylike::AbstractVector; normalize = true, kwargs...)
+    if normalize
+        dst_arraylike ./= regridder.dst_areas
+    end
+    set_value_per_element!(dst, dst_arraylike)
+    return dst
+end
+
 end

@@ -20,6 +20,7 @@ makedocs(
         "Extensions" => [
             "extensions/climacore.md",
         ],
+        "devnotes.md",
     ],
     warnonly = true,#[:missing_docs],
 )

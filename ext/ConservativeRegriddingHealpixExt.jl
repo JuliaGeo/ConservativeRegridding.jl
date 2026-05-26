@@ -174,4 +174,31 @@ GOCore.best_manifold(::HealpixTreeNode) = GO.Spherical()
 Trees.treeify(::GO.Spherical, node::HealpixRootNode) = node
 Trees.treeify(::GO.Spherical, node::HealpixTreeNode) = node
 
+#=
+## `regrid!` pipeline
+
+A `HealpixMap` is a thin wrapper around an AbstractVector `m.pixels`.
+Forwarding the call to that backing array, accessible through `parent(map)`,
+gets us automatic denseness detection, and whatever dispatches are defined for
+exotic arrays (GPU, distributed, sparse, etc) will also work if those back a Healpix.jl map.
+=#
+
+function ConservativeRegridding.extract_source_arraylike(src::Healpix.HealpixMap, regridder; kwargs...)
+    return ConservativeRegridding.extract_source_arraylike(parent(src), regridder; kwargs...)
+end
+
+function ConservativeRegridding.extract_dest_arraylike(dst::Healpix.HealpixMap, regridder; kwargs...)
+    return ConservativeRegridding.extract_dest_arraylike(parent(dst), regridder; kwargs...)
+end
+
+function ConservativeRegridding.initialize_regridding!(regridder, src::Healpix.HealpixMap, src_arraylike::AbstractVector; kwargs...)
+    return ConservativeRegridding.initialize_regridding!(regridder, parent(src), src_arraylike; kwargs...)
+end
+
+Base.@constprop :aggressive function ConservativeRegridding.finalize_regridding!(
+    dst::Healpix.HealpixMap, regridder, dst_arraylike::AbstractVector; kwargs...
+)
+    return ConservativeRegridding.finalize_regridding!(parent(dst), regridder, dst_arraylike; kwargs...)
+end
+
 end
