@@ -22,5 +22,11 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 XESMF = "2e0b0046-e7a1-486f-88de-807ee8ffabe5"
 
+[compat]
+XESMF = "0.2"
+
 [sources]
 ConservativeRegridding = {path = ".."}
+# Pinned to asinghvi17/XESMF.jl#as/oceananigans-0.109 until
+# https://github.com/NumericalEarth/XESMF.jl/pull/22 is merged and released.
+XESMF = {url = "https://github.com/asinghvi17/XESMF.jl", rev = "as/oceananigans-0.109"}
