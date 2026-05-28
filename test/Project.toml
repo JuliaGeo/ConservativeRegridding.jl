@@ -27,6 +27,5 @@ XESMF = "0.2"
 
 [sources]
 ConservativeRegridding = {path = ".."}
-# Pinned to asinghvi17/XESMF.jl#as/oceananigans-0.109 until
-# https://github.com/NumericalEarth/XESMF.jl/pull/22 is merged and released.
-XESMF = {url = "https://github.com/asinghvi17/XESMF.jl", rev = "as/oceananigans-0.109"}
+# Pinned until https://github.com/NumericalEarth/XESMF.jl/pull/23 is merged and released.
+XESMF = {url = "https://github.com/NumericalEarth/XESMF.jl", rev = "as/oceananigans-0.109"}
