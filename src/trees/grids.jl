@@ -172,18 +172,59 @@ of the given range, and then expand it such that it encloses all other points al
 Since we know our grids are curvilinear, this is broadly okay.  It's not perfectly efficient, though.
 =#
 
-using LinearAlgebra
+"""
+    _safe_slerp(a, b, t) -> UnitSphericalPoint
+
+Spherical linear interpolation with a fallback for near-antipodal points.
+
+When `dot(a, b) < -0.985` (angle > ~170°), standard `slerp` divides by
+`sin(angle) ≈ 0`, producing NaN or Inf. In that case, fall back to the
+normalized Euclidean midpoint. If that also degenerates (exactly antipodal),
+return `a` unchanged — the resulting cap radius will be slightly loose but
+finite and correct for pruning purposes.
+"""
+function _safe_slerp(a, b, t)
+    d = LinearAlgebra.dot(a, b)
+    if d > -0.985  # angle < ~170°, slerp is safe
+        return GO.UnitSpherical.slerp(a, b, t)
+    else
+        mid = (1 - t) .* a .+ t .* b
+        n = LinearAlgebra.norm(mid)
+        return n < 1e-14 ? a : LinearAlgebra.normalize(mid)
+    end
+end
+
 function circle_from_four_corners(corner_points, other_points)
     raw = GO.UnitSphereFromGeographic().(corner_points)
     # corner_points arrive as (BL, TL, BR, TR); reorder to CCW (BL, BR, TR, TL)
     # so that consecutive slerps give bottom, right, top, left edge midpoints.
     p1, p2, p3, p4 = raw[1], raw[3], raw[4], raw[2]
-    center = LinearAlgebra.normalize((p1 .+ p2 .+ p3 .+ p4) ./ 4)
+    raw_center = (p1 .+ p2 .+ p3 .+ p4) ./ 4
+    nrm = LinearAlgebra.norm(raw_center)
+    # When the four corners are symmetrically placed around the origin
+    # (e.g., a latitude band straddling the equator with exactly 180° of
+    # longitude span), their Cartesian sum cancels to near-zero and
+    # normalize() produces NaN. Fall back to the centroid of ALL border
+    # points (which break the symmetry because they include intermediate
+    # longitude samples), or an arbitrary axis if everything cancels.
+    #
+    # Threshold: 1e-12 is ~eps(Float64) × 1e4, catching sums that are
+    # zero up to floating-point cancellation of O(1) vectors while not
+    # triggering on legitimate small-but-nonzero centroids.
+    if nrm < 1e-12
+        other_raw = GO.UnitSphereFromGeographic().(other_points)
+        all_pts = vcat(collect(raw), collect(other_raw))
+        raw_center = sum(all_pts) ./ length(all_pts)
+        nrm = LinearAlgebra.norm(raw_center)
+    end
+    center = nrm < 1e-14 ?
+        GO.UnitSpherical.UnitSphericalPoint(0.0, 0.0, 1.0) :
+        LinearAlgebra.normalize(raw_center)
     # Midpoints of edges (bottom, right, top, left)
-    p12 = GO.UnitSpherical.slerp(p1, p2, 0.5)
-    p23 = GO.UnitSpherical.slerp(p2, p3, 0.5)
-    p34 = GO.UnitSpherical.slerp(p3, p4, 0.5)
-    p41 = GO.UnitSpherical.slerp(p4, p1, 0.5)
+    p12 = _safe_slerp(p1, p2, 0.5)
+    p23 = _safe_slerp(p2, p3, 0.5)
+    p34 = _safe_slerp(p3, p4, 0.5)
+    p41 = _safe_slerp(p4, p1, 0.5)
     # Distance to the furthest corner or edge midpoint
     corner_distance = maximum(p -> GO.spherical_distance(center, p), (p1, p2, p3, p4, p12, p23, p34, p41))
     # Distance to the furthest other point
