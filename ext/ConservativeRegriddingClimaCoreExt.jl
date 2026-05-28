@@ -507,12 +507,12 @@ Build the dense `Nq² × Nq²` mass matrix for SE element `elem_idx`,
 
     M^{e}_{(a,b),(i,j)} = ∫_{e} ϕₐ(ξ) ϕᵦ(η) ϕᵢ(ξ) ϕⱼ(η) Jᵉ(ξ,η) dξ dη ,
 
-with the row/col flattening `idx = (b - 1) * Nq + a`. The integrand is a
-polynomial of bidegree `(2(Nq-1), 2(Nq-1))` in (ξ, η) (the basis-function
-product) plus a polynomial of bidegree `(Nq-1, Nq-1)` from the Lagrange
-interpolation of `Jᵉ` from the SE nodal values — total bidegree
-`(3(Nq-1), 3(Nq-1))`. A tensor-product GLL rule with `Nq + 2` points per
-direction has 1D exactness `2(Nq+2) - 3 = 2Nq + 1`, which suffices.
+with the row/col flattening following ClimaCore.Utilities.linear_ind(). 
+The integrand is a polynomial of bidegree `(2(Nq-1), 2(Nq-1))` in (ξ, η) 
+(the basis-function product) plus a polynomial of bidegree `(Nq-1, Nq-1)` 
+from the Lagrange interpolation of `Jᵉ` from the SE nodal values — total 
+bidegree `(3(Nq-1), 3(Nq-1))`. A GLL rule with `n` points per direction is 
+exact for polynomials of degree `2n - 1`, so we use `n = ceil((3Nq - 2)/2) + 1`.
 """
 function compute_local_mass_matrix(
     space::ClimaCore.Spaces.AbstractSpectralElementSpace, elem_idx::Int,
@@ -521,8 +521,9 @@ function compute_local_mass_matrix(
     ξs_se, _ = Quadratures.quadrature_points(Float64, qs)
     Nq = length(ξs_se)
 
-    # GLL with Nq+2 points exactly integrates the polynomial part.
-    qs_q = Quadratures.GLL{Nq + 2}()
+    # GLL with n = (3Nq - 2) / 2 points exactly integrates
+    n = ceil(Int, (3Nq - 2) / 2) + 1
+    qs_q = Quadratures.GLL{n}()
     ξs_q, ws_q = Quadratures.quadrature_points(Float64, qs_q)
     Nq_q = length(ξs_q)
 
@@ -697,39 +698,6 @@ function ConservativeRegridding.finalize_regridding!(
 )
     vec_to_se_field!(dst, dst_arraylike)
     Spaces.weighted_dss!(dst)
-    return dst
-end
-
-#=
-## `regrid!` pipeline
-
-A ClimaCore `Field` stores `Nq × Nq` nodes per element, but the regridder
-operates on one scalar per element. Always route through the regridder's temp
-buffers:
-
-- source: quadrature-integrate the field over each element and divide by the
-  regridder's per-element source area to get the per-element mean.
-- destination: divide the matvec result by `dst_areas`, then broadcast the
-  per-element value to every node via `set_value_per_element!`.
-=#
-
-ConservativeRegridding.extract_source_arraylike(::ClimaCore.Fields.Field, regridder; kwargs...) =
-    regridder.src_temp
-
-ConservativeRegridding.extract_dest_arraylike(::ClimaCore.Fields.Field, regridder; kwargs...) =
-    regridder.dst_temp
-
-function ConservativeRegridding.initialize_regridding!(regridder, src::ClimaCore.Fields.Field, src_arraylike::AbstractVector; kwargs...)
-    # NOTE: this will not work if the regridder was normalized, since that divides source areas by `maximum(areas)`.
-    src_arraylike .= integrate_each_element(src) ./ regridder.src_areas
-    return regridder
-end
-
-Base.@constprop :aggressive function ConservativeRegridding.finalize_regridding!(dst::ClimaCore.Fields.Field, regridder, dst_arraylike::AbstractVector; normalize = true, kwargs...)
-    if normalize
-        dst_arraylike ./= regridder.dst_areas
-    end
-    set_value_per_element!(dst, dst_arraylike)
     return dst
 end
 
