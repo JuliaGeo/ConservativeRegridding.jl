@@ -24,7 +24,7 @@ abstract type AbstractRegridder end
 # Primary `Regridder` struct.
 struct Regridder{W, A, V} <: AbstractRegridder
     "Matrix of area intersections between cells on the source and destination grid"
-    intersections :: W 
+    intersections :: W
     "Vector of areas on the destination grid"
     dst_areas :: A
     "Vector of areas on the source grid"
@@ -123,9 +123,9 @@ function Regridder(dst, src; kwargs...)
 end
 
 function Regridder(
-        manifold::M, dst, src; 
-        normalize = false, 
-        intersection_operator::F = DefaultIntersectionOperator(manifold), 
+        manifold::M, dst, src;
+        normalize = false,
+        intersection_operator::F = DefaultIntersectionOperator(manifold),
         threaded = True(),
         kwargs...
     ) where {M <: Manifold, F}
@@ -138,9 +138,9 @@ function Regridder(
     # Compute the intersection areas.
     intersections = intersection_areas(
         manifold,
-        _threaded, 
-        dst_tree, src_tree; 
-        intersection_operator, 
+        _threaded,
+        dst_tree, src_tree;
+        intersection_operator,
         kwargs...
     )
 
@@ -150,7 +150,7 @@ function Regridder(
     src_areas = areas(manifold, src, src_tree)
 
     # TODO: make this GPU-compatible?
-    # Allocate temporary arrays for the regridding operation - 
+    # Allocate temporary arrays for the regridding operation -
     # in case the destination and source fields are not contiguous in memory.
     dst_temp = zeros(length(dst_areas))
     src_temp = zeros(length(src_areas))
