@@ -173,78 +173,133 @@ Since we know our grids are curvilinear, this is broadly okay.  It's not perfect
 =#
 
 using LinearAlgebra
+
+#=
+Spherical `cell_range_extent` machinery.
+
+The bounding-cap algorithm needs the four corners of the index rectangle plus
+points sampled along its perimeter (because cell edges follow constant-lat /
+constant-lon, not great-circles, so they bulge differently). Earlier versions
+materialized the perimeter into a fresh `Vector` per call — that drove most of
+the GC pressure in the dual-DFS hot path.
+
+Now the perimeter is a stack-resident iterator (`PerimeterPoints`) that yields
+points on demand via a small per-grid `_pt_at` method, and the cap builder
+consumes any iterator over `UnitSphericalPoint`s. No buffers, no shared state,
+threadsafe by construction.
+=#
+
+# Per-grid: materialize the UnitSphericalPoint at point-index (i, j).
+@inline _pt_at(g::RegularGrid{<: GO.Spherical}, i::Int, j::Int) =
+    GO.UnitSphereFromGeographic()((g.x[i], g.y[j]))
+@inline _pt_at(g::CellBasedGrid{<: GO.Spherical}, i::Int, j::Int) =
+    @inbounds g.points[i, j]
+
+# Perimeter iterator: walks the four sides of the [imin..imax] × [jmin..jmax]
+# index rectangle in order (west column, east column, north row, south row),
+# skipping degenerate sides. Yields the `_pt_at(grid, i, j)` for each border
+# point. State is `(side::Int, k::Int)`; `side > 4` signals exhaustion.
+struct PerimeterPoints{G}
+    grid::G
+    imin::Int
+    imax::Int
+    jmin::Int
+    jmax::Int
+end
+
+Base.IteratorSize(::Type{<: PerimeterPoints}) = Base.HasLength()
+function Base.length(p::PerimeterPoints)
+    nrow = p.imax - p.imin + 1
+    ncol = p.jmax - p.jmin + 1
+    n = ncol                                       # west column
+    n += (p.imax != p.imin) * ncol                 # east column
+    n += (p.jmax != p.jmin) * nrow * 2             # north + south rows
+    return n
+end
+Base.eltype(::Type{PerimeterPoints{G}}) where {G} =
+    Core.Compiler.return_type(_pt_at, Tuple{G, Int, Int})
+
+@inline function Base.iterate(p::PerimeterPoints, state = (1, p.jmin))
+    while true
+        side, k = state
+        if side == 1                               # west: (imin, k)
+            k <= p.jmax && return _pt_at(p.grid, p.imin, k), (1, k + 1)
+            state = (2, p.jmin)
+        elseif side == 2                           # east: (imax, k)
+            (p.imax != p.imin && k <= p.jmax) &&
+                return _pt_at(p.grid, p.imax, k), (2, k + 1)
+            state = (3, p.imin)
+        elseif side == 3                           # north: (k, jmax)
+            (p.jmax != p.jmin && k <= p.imax) &&
+                return _pt_at(p.grid, k, p.jmax), (3, k + 1)
+            state = (4, p.imin)
+        elseif side == 4                           # south: (k, jmin)
+            (p.jmax != p.jmin && k <= p.imax) &&
+                return _pt_at(p.grid, k, p.jmin), (4, k + 1)
+            return nothing
+        else
+            return nothing
+        end
+    end
+end
+
+"""
+    circle_from_four_corners(corner_points, other_points)
+
+Bounding `SphericalCap` covering 4 cell corners passed in (BL, TL, BR, TR) order
+plus an iterable of additional perimeter points. `corner_points` and the
+elements of `other_points` may be `UnitSphericalPoint`s or `(lon, lat)` tuples
+— `UnitSphereFromGeographic` is a no-op on already-converted points.
+
+Public for use by extensions (e.g. `HealpixExt`) that build trees out of
+arbitrary 4-corner polygons. Internally a thin wrapper over [`_spherical_cap`].
+"""
 function circle_from_four_corners(corner_points, other_points)
     raw = GO.UnitSphereFromGeographic().(corner_points)
-    # corner_points arrive as (BL, TL, BR, TR); reorder to CCW (BL, BR, TR, TL)
-    # so that consecutive slerps give bottom, right, top, left edge midpoints.
+    # Reorder (BL, TL, BR, TR) → CCW (SW, SE, NE, NW) for slerp midpoints.
     p1, p2, p3, p4 = raw[1], raw[3], raw[4], raw[2]
-    center = LinearAlgebra.normalize((p1 .+ p2 .+ p3 .+ p4) ./ 4)
-    # Midpoints of edges (bottom, right, top, left)
+    return _spherical_cap(p1, p2, p3, p4,
+        (GO.UnitSphereFromGeographic()(p) for p in other_points))
+end
+
+# Build a SphericalCap covering 4 CCW corners (SW, SE, NE, NW), the slerp
+# midpoints of their 4 edges (great-circle bulge), and every point yielded by
+# `perimeter` (constant-lat/lon bulge along cell sides).
+@inline function _spherical_cap(p1, p2, p3, p4, perimeter)
+    center = LinearAlgebra.normalize((p1 + p2 + p3 + p4) / 4)
     p12 = GO.UnitSpherical.slerp(p1, p2, 0.5)
     p23 = GO.UnitSpherical.slerp(p2, p3, 0.5)
     p34 = GO.UnitSpherical.slerp(p3, p4, 0.5)
     p41 = GO.UnitSpherical.slerp(p4, p1, 0.5)
-    # Distance to the furthest corner or edge midpoint
-    corner_distance = maximum(p -> GO.spherical_distance(center, p), (p1, p2, p3, p4, p12, p23, p34, p41))
-    # Distance to the furthest other point
-    other_distance = maximum(p -> GO.spherical_distance(center, p), GO.UnitSphereFromGeographic().(other_points); init = corner_distance)
-    # Distance to the furthest point
-    distance = max(corner_distance, other_distance)
-    #The `*1.0001` is done to not miss intersections through numerical inaccuracies
-    return GO.UnitSpherical.SphericalCap(center, distance*1.0001)
+    d = max(
+        GO.spherical_distance(center, p1), GO.spherical_distance(center, p2),
+        GO.spherical_distance(center, p3), GO.spherical_distance(center, p4),
+        GO.spherical_distance(center, p12), GO.spherical_distance(center, p23),
+        GO.spherical_distance(center, p34), GO.spherical_distance(center, p41),
+    )
+    for p in perimeter
+        d = max(d, GO.spherical_distance(center, p))
+    end
+    # The 1.0001 slack guards against missed intersections from rounding error.
+    return GO.UnitSpherical.SphericalCap(center, d * 1.0001)
 end
 
 function cell_range_extent(q::CellBasedGrid{<: GO.Spherical}, irange::UnitRange{Int}, jrange::UnitRange{Int})
-    imin, imax = extrema(irange)
-    jmin, jmax = extrema(jrange)
-    # For cell based we need 1 to the max indices from cell space
-    # to get the max indices in point space (`(n,m) -> (n+1, m+1)`)
-    imax += 1
-    jmax += 1
-
-    quadtree_points = q.points
-    corner_points = (quadtree_points[imin, jmin], quadtree_points[imin, jmax], quadtree_points[imax, jmin], quadtree_points[imax, jmax])
-
-    # Collect points from all border rows/columns
-    other_points = typeof(GI.getpoint(GI.getexterior(getcell(q, imin, jmin)), 1))[]
-    sizehint!(other_points, 2 * (imax - imin + 1) + 2 * (jmax - jmin + 1))
-    # Left and right columns (all rows)
-    append!(other_points, view(q.points, imin, jmin:jmax))
-    if imax != imin
-        append!(other_points, view(q.points, imax, jmin:jmax))
-    end
-    # Top and bottom rows (all columns)
-    if jmax != jmin
-        append!(other_points, view(q.points, imin:imax, jmax))
-        append!(other_points, view(q.points, imin:imax, jmin))
-    end
-    return circle_from_four_corners(corner_points, other_points)
+    imin, imax = extrema(irange); imax += 1
+    jmin, jmax = extrema(jrange); jmax += 1
+    return _spherical_cap(
+        _pt_at(q, imin, jmin), _pt_at(q, imax, jmin),
+        _pt_at(q, imax, jmax), _pt_at(q, imin, jmax),
+        PerimeterPoints(q, imin, imax, jmin, jmax),
+    )
 end
 
 function cell_range_extent(q::RegularGrid{<: GO.Spherical}, irange::UnitRange{Int}, jrange::UnitRange{Int})
-    imin, imax = extrema(irange)
-    jmin, jmax = extrema(jrange)
-    # For cell based we need 1 to the max indices from cell space 
-    # to get the max indices in point space (`(n,m) -> (n+1, m+1)`)
-    imax += 1
-    jmax += 1
-
-    corner_points = ((q.x[imin], q.y[jmin]), (q.x[imin], q.y[jmax]), (q.x[imax], q.y[jmin]), (q.x[imax], q.y[jmax]))
-
-    # Collect points from all border polygons
-    other_points = typeof(GI.getpoint(GI.getexterior(getcell(q, imin, jmin)), 1))[]
-    sizehint!(other_points, (imax - imin + 1) * (jmax - jmin + 1))
-    # Top and bottom rows (all columns)
-    append!(other_points, tuple.(q.x[imin], q.y[jmin:jmax]))
-    if imax != imin
-        append!(other_points, tuple.(q.x[imax], q.y[jmin:jmax]))
-    end
-    if jmax != jmin
-        append!(other_points, tuple.(q.x[imin:imax], q.y[jmax]))
-    end
-    # Bottom row (all columns) - needed for correct cap near poles
-    if jmin != jmax
-        append!(other_points, tuple.(q.x[imin:imax], q.y[jmin]))
-    end
-    return circle_from_four_corners(corner_points, other_points)
+    imin, imax = extrema(irange); imax += 1
+    jmin, jmax = extrema(jrange); jmax += 1
+    return _spherical_cap(
+        _pt_at(q, imin, jmin), _pt_at(q, imax, jmin),
+        _pt_at(q, imax, jmax), _pt_at(q, imin, jmax),
+        PerimeterPoints(q, imin, imax, jmin, jmax),
+    )
 end

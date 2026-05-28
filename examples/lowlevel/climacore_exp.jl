@@ -264,7 +264,19 @@ quadtrees = map(1:6, all_coords) do face_idx, coords
 end
 
 
-final_tree = Trees.CubedSphereToplevelTree(quadtrees)
+connectivity = let topology = space.grid.topology
+    table = Array{Tuple{Int8, Int8, Bool}, 2}(undef, 4, 6)
+    for F in 1:6, edge in 1:4
+        s = max(ne ÷ 2, 1)
+        i, j = edge == 1 ? (s, 1) : edge == 2 ? (ne, s) : edge == 3 ? (s, ne) : (1, s)
+        elem = i + (j - 1) * ne + (F - 1) * ne^2
+        opelem, opface, reversed = Topologies.opposing_face(topology, elem, edge)
+        F_prime = ((opelem - 1) ÷ ne^2) + 1
+        table[edge, F] = (Int8(F_prime), Int8(opface), Bool(reversed))
+    end
+    Trees.CubeFaceConnectivity(table, ne)
+end
+final_tree = Trees.CubedSphereToplevelTree(quadtrees, connectivity)
 
 latlon_grid = LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z = (0, 1), radius = mesh.domain.radius)
 

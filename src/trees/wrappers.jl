@@ -67,37 +67,37 @@ STI.node_extent(w::KnownFullSphereExtentWrapper) = GO.UnitSpherical.SphericalCap
 #=
 ## WithParallelizePolicy
 
-Wraps any spatial tree so that [`should_parallelize`](@ref) for it dispatches
-to a user-supplied callable instead of the default(s) for the inner tree's
-type. This is the instance-level counterpart to defining a tree-type-specific
-`should_parallelize` method — useful for one-off tuning without subtyping.
+Wraps any spatial tree so its `should_parallelize` is supplied by a
+user-provided callable — the instance-level counterpart to defining a
+node-type-specific `should_parallelize` method.
 =#
 
 """
     WithParallelizePolicy(tree, policy)
 
-Wrap `tree` so [`Trees.should_parallelize`](@ref) for it calls
-`policy(tree, node, extent) -> Bool` instead of falling back to the default(s)
-for the inner tree's type.
+Wrap `tree` so the dual-tree DFS uses `policy(tree, node, extent) -> Bool`
+instead of the default `Trees.should_parallelize(node, extent)`.
 
 `policy` returns `true` to spawn a parallel task at `node` and stop
-recursing single-threaded, `false` to keep descending. All other
-SpatialTreeInterface methods forward to the wrapped tree.
+descending single-threaded, `false` to keep descending. The wrapper is
+detected at the dual-DFS call site (`intersection_areas.jl`), which
+builds a local closure capturing `tree` and `policy` — so `policy`
+gets the root tree as its first arg without that becoming a Julia
+dispatch axis.
 
-Use this when you want to tune the multithreading granularity for a
-single regridding call without defining a Julia method on the tree's
-type. For per-type policies, define a `should_parallelize` method on
-the tree type directly.
+All other SpatialTreeInterface methods forward to the wrapped tree
+(`<: AbstractTreeWrapper`).
+
+Use this when you want to tune multithreading granularity for a
+single regridding call without defining a method on a node type.
+For per-node-type policies, define `should_parallelize(::MyNode, extent)`
+directly.
 """
 struct WithParallelizePolicy{T, F} <: AbstractTreeWrapper
     tree::T
     policy::F
 end
 Base.parent(w::WithParallelizePolicy) = w.tree
-# Disambiguate against the extent-typed defaults in interfaces.jl by defining
-# the wrapper method for each shipped extent type. The wrapper's policy wins.
-should_parallelize(w::WithParallelizePolicy, node, extent::Extents.Extent) = w.policy(w.tree, node, extent)
-should_parallelize(w::WithParallelizePolicy, node, extent::GO.UnitSpherical.SphericalCap) = w.policy(w.tree, node, extent)
 
 
 """
@@ -130,6 +130,29 @@ getcell(wrapper::GeometryMaintainingTreeWrapper{G, T}, i::Integer) where {G <: A
 
 
 #=
+## CubeFaceConnectivity
+
+Static connectivity table that records, for each cube edge of each face, which
+neighbouring face/edge it joins and whether the parameterizations along the
+shared edge run in opposite directions.
+
+Edge IDs follow ClimaCore's element-local face numbering:
+1 = south (j_min), 2 = east (i_max), 3 = north (j_max), 4 = west (i_min).
+
+The `ne` field is bundled here so that decoding global indices for a cubed
+sphere only requires the connectivity object.
+=#
+struct CubeFaceConnectivity
+    # indexed [edge, face]; entries are (neighbour_face, neighbour_edge, reversed)
+    table::Matrix{Tuple{Int8, Int8, Bool}}
+    ne::Int
+    function CubeFaceConnectivity(table::Matrix{Tuple{Int8, Int8, Bool}}, ne::Integer)
+        size(table) == (4, 6) || throw(ArgumentError("Connectivity table must be 4×6 (edges × faces); got $(size(table))"))
+        return new(table, Int(ne))
+    end
+end
+
+#=
 ## CubedSphereToplevelTree
 
 A wrapper around a vector of quadtree cursors that represents a cubed sphere.
@@ -139,6 +162,7 @@ It might be replaced by something more general later.
 =#
 struct CubedSphereToplevelTree{V <: AbstractVector{<: Union{<: AbstractTreeWrapper, <: AbstractQuadtreeCursor}}}
     quadtrees::V
+    connectivity::CubeFaceConnectivity
 end
 
 STI.isspatialtree(::Type{<: CubedSphereToplevelTree}) = true
