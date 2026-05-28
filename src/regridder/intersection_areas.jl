@@ -31,13 +31,27 @@ function compute_intersection_areas(
     return ret_i1, ret_i2, ret_area
 end
 
+# If the root tree is a `WithParallelizePolicy`, route the dual-DFS's
+# `(node, extent)` query through the user policy; otherwise fall back to the
+# default `should_parallelize` dispatch. The wrapper is *not* a dispatch axis
+# on `should_parallelize` — detecting it here keeps the dispatch graph simple.
+@inline function _build_parallelize_closure(tree)
+    if tree isa Trees.WithParallelizePolicy
+        let inner = tree.tree, p = tree.policy
+            return (node, extent) -> p(inner, node, extent)
+        end
+    else
+        return (node, extent) -> Trees.should_parallelize(node, extent)
+    end
+end
+
 function get_all_candidate_pairs(threaded::True, predicate_f::F, src_tree::T1, dst_tree::T2) where {F, T1, T2}
     # TODO: Threaded dual dfs via chunking.
     # For now this is just serial, and is the big bottleneck for larger grids.
     # First, run the dual depth first search to get all candidate pairs of
     # cells that may intersect.
-    par_src = (node, extent) -> Trees.should_parallelize(src_tree, node, extent)
-    par_dst = (node, extent) -> Trees.should_parallelize(dst_tree, node, extent)
+    par_src = _build_parallelize_closure(src_tree)
+    par_dst = _build_parallelize_closure(dst_tree)
     candidate_idxs = multithreaded_dual_query(predicate_f, par_src, par_dst, src_tree, dst_tree) # from utils/MultithreadedDualDepthFirstSearch.jl
     return candidate_idxs
 end
