@@ -701,4 +701,23 @@ function ConservativeRegridding.finalize_regridding!(
     return dst
 end
 
+"""
+    get_value_per_element!(dst, field, ones_field)
+Extract all DOF values from a ClimaCore Field into a flat vector `dst`.
+The `ones_field` argument is currently unused but kept for API consistency.
+"""
+function get_value_per_element!(dst, field::CC.Fields.Field, ones_field)
+    dst .= vec(parent(field))
+    return nothing
+end
+"""
+    set_value_per_element!(field, src)
+Set all DOF values in a ClimaCore Field from a flat vector `src`.
+"""
+function set_value_per_element!(field::CC.Fields.Field, src)
+    parent(field) .= reshape(src, size(parent(field)))
+    return nothing
+end
+
+
 end
