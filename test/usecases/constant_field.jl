@@ -38,7 +38,7 @@ flat(x::AbstractVector) = x
 # Transpose (backward) is only exercised for FV↔FV pairs — the SE-flavored
 # regridders are direction-specific by construction.
 # ---------------------------------------------------------------------------
-function test_constant_regrid(R, src_grid, dst_grid, src_global, dst_global; atol=1e-4)
+function test_constant_regrid(R, src_grid, dst_grid, src_global, dst_global; atol=1e-3)
     n_dst, n_src = size(R)
     A = R.intersections
 

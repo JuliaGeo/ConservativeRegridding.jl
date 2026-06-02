@@ -407,14 +407,19 @@ end
 
 ## Regridder constructors
 
+const SESpaceOrField = Union{ClimaCore.Spaces.AbstractSpectralElementSpace, ClimaCore.Fields.Field}
+
+se_space(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = space
+se_space(field::ClimaCore.Fields.Field) = axes(field)
+
 # SE source → FV destination (principled polygon-intersection, PDF Appendix A)
 function ConservativeRegridding.Regridder(
-    manifold::M, dst, src::ClimaCore.Spaces.AbstractSpectralElementSpace;
+    manifold::M, dst, src::SESpaceOrField;
     triangle_quad_degree::Union{Int, Nothing} = nothing,
     threaded = true,
     kwargs...
 ) where {M <: GOCore.Manifold}
-    return se_to_fv_principled(manifold, dst, src; threaded, triangle_quad_degree, kwargs...)
+    return se_to_fv_principled(manifold, dst, se_space(src); threaded, triangle_quad_degree, kwargs...)
 end
 
 function se_to_fv_principled(manifold, dst, src; threaded, triangle_quad_degree, kwargs...)
@@ -482,19 +487,19 @@ end
 
 # FV source → SE destination (per-element L2 projection)
 function ConservativeRegridding.Regridder(
-    manifold::M, dst::ClimaCore.Spaces.AbstractSpectralElementSpace, src;
+    manifold::M, dst::SESpaceOrField, src;
     triangle_quad_degree::Union{Int, Nothing} = nothing,
     threaded = true,
     kwargs...
 ) where {M <: GOCore.Manifold}
-    return fv_to_se_l2_projection(manifold, dst, src; threaded, triangle_quad_degree, kwargs...)
+    return fv_to_se_l2_projection(manifold, se_space(dst), src; threaded, triangle_quad_degree, kwargs...)
 end
 
 # Disambiguate SE → SE: no longer supported on this branch.
 function ConservativeRegridding.Regridder(
     manifold::M,
-    dst::ClimaCore.Spaces.AbstractSpectralElementSpace,
-    src::ClimaCore.Spaces.AbstractSpectralElementSpace;
+    dst::SESpaceOrField,
+    src::SESpaceOrField;
     kwargs...
 ) where {M <: GOCore.Manifold}
     error("SE → SE regridding is not supported. Use SE → FV → SE via two regridders.")
@@ -640,24 +645,32 @@ function fv_to_se_l2_projection(manifold, dst, src;
             b_full .+= b_vec
         end
 
-        row_sums = vec(sum(Mᵉ; dims=2))
-        for r in 1:(Nq^2)
-            row_sums[r] == 0 && continue
-            scale = b_full[r] / row_sums[r]
-            @inbounds for c in 1:(Nq^2)
-                Mᵉ[r, c] *= scale
+        # If b_full == 0 it means we are hitting regions with no 
+        # overlap (for example a regridding a tripolar grid than ends
+        # at 80ᵒ S onto a SE grid that covers the sphere).
+        # We cover for those cases.
+        covered = findall(!=(0), b_full)
+        isempty(covered) && continue
+        Mᶜ = Mᵉ[covered, covered]
+
+        row_sums = vec(sum(Mᶜ; dims=2))
+        for (rc, r) in enumerate(covered)
+            row_sums[rc] == 0 && continue
+            scale = b_full[r] / row_sums[rc]
+            @inbounds for c in axes(Mᶜ, 2)
+                Mᶜ[rc, c] *= scale
             end
         end
 
-        Mᵉ_inv = inv(Mᵉ)
+        Mᶜ_inv = inv(Mᶜ)
 
         offset = (elem_idx - 1) * Nq^2
         for (cell_idx, b_vec) in d
-            new_col = Mᵉ_inv * b_vec
-            for n in 1:Nq^2
-                v = new_col[n]
+            new_col = Mᶜ_inv * b_vec[covered]
+            for (rc, r) in enumerate(covered)
+                v = new_col[rc]
                 v == 0 && continue
-                push!(rows, offset + n)
+                push!(rows, offset + r)
                 push!(cols, cell_idx)
                 push!(vals, v)
             end
