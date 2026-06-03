@@ -13,7 +13,7 @@ const HealpixExt = Base.get_extension(ConservativeRegridding, :ConservativeRegri
 const RingGridsExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingRingGridsExt)
 const SpeedyWeatherExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingSpeedyWeatherExt)
 
-include("sweat_common.jl")
+using ConservativeRegriddingTestHelpers
 
 
 
@@ -94,7 +94,7 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
 @testset "Sweat test" begin
     @testset "Sweat test: $name1 -> $name2" for (i, (name1, field1, vals1)) in enumerate(fields), (j, (name2, field2, vals2)) in enumerate(fields)
         # SE → SE is unsupported (must go SE → FV → SE via two regridders).
-        both_se = field1 isa ClimaCore.Fields.Field && field2 isa ClimaCore.Fields.Field
+        both_se = has_spectral_element(field1) && has_spectral_element(field2)
         both_se && continue
 
         tic = time()
@@ -102,19 +102,16 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
         toc = time()
         push!(regridder_construction_times, (name1, name2) => toc - tic)
 
-        # The intersection-area agreement check is an FV-overlap property; the
-        # principled/L2 SE matrices are not pure overlap matrices, so skip it
-        # when an SE field is involved (SE conservation is checked below).
-        has_se = field1 isa ClimaCore.Fields.Field || field2 isa ClimaCore.Fields.Field
-        # Test that the areas are correct approximately
-        has_tripolar = (field2 isa Oceananigans.Field && field2.grid isa Oceananigans.TripolarGrid) ||
-                       (field1 isa Oceananigans.Field && field1.grid isa Oceananigans.TripolarGrid)
-        # Rotated grid cells have oblique edges that produce more complex intersection
-        # polygons, accumulating slightly more floating-point error in area sums.
-        has_rotated = (field2 isa Oceananigans.Field && field2.grid isa Oceananigans.RotatedLatitudeLongitudeGrid) ||
-                      (field1 isa Oceananigans.Field && field1.grid isa Oceananigans.RotatedLatitudeLongitudeGrid)
-        areas_rtol = has_rotated ? 1e-2 : sqrt(eps(Float64))
-        if !has_tripolar && !has_se
+        # The intersection-area agreement check is an FV-overlap property and is
+        # skipped when an SE field is involved (the principled/L2 SE matrices are
+        # not pure overlap matrices) or for tripolar grids (which don't cover the
+        # globe). Rotated grids accumulate more area error, so loosen their
+        # tolerance. See the predicates in ConservativeRegriddingTestHelpers.
+        either_se = has_spectral_element(field1) || has_spectral_element(field2)
+        either_tripolar = has_tripolar(field1) || has_tripolar(field2)
+        either_rotated = has_rotated(field1) || has_rotated(field2)
+        areas_rtol = either_rotated ? 1e-2 : sqrt(eps(Float64))
+        if !either_tripolar && !either_se
             test_intersection_areas_agree(regridder, field1, field2; rtol=areas_rtol)
         end
 
@@ -128,7 +125,7 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
         vals2_analytical = vals2[:]
 
         # Test that the areas are correct approximately
-        if !has_tripolar && !has_se
+        if !either_tripolar && !either_se
             # Oceananigans tripolar grid does not cover the globe
             test_intersection_areas_agree(regridder, field1, field2; rtol=areas_rtol)
         end

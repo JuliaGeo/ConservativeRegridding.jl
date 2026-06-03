@@ -5,7 +5,7 @@ version = "0.2.3"
 authors = ["Anshul Singhvi <anshulsinghvi@gmail.com>", "Milan Kloewer <milankloewer@gmx.de>", "Simone Silvestri <silvestri.simone0@gmail.com>", "and contributors"]
 
 [workspace]
-projects = ["test", "docs"]
+projects = ["test", "docs", "lib/ConservativeRegriddingTestHelpers"]
 
 [deps]
 ChunkSplitters = "ae650224-84b6-46f8-82ea-d812ca08434e"
