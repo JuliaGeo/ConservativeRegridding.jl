@@ -15,7 +15,7 @@ import ConservativeRegridding
 using ConservativeRegridding: Trees, TriangleQuadrature
 
 
-export has_tripolar, has_rotated, has_spectral_element
+export has_tripolar, has_rotated, has_spectral_element, has_full_ring_grid, has_cell_crossing_dateline
 export test_intersection_areas_agree, test_integration_weights
 export SphericalPolygonIntegrator, set_field_values!, zero_field!
 
@@ -42,6 +42,25 @@ True if `field` is on an rotated lat-lon grid, whose oblique cell
 edges give larger area-sum error for longitude-valued field functions → loosen the tolerance.
 """
 has_rotated(field) = false
+
+"""
+    has_full_ring_grid(field)
+
+True if `field` is on a full RingGrids grid (e.g. SpeedyWeather's FullClenshaw /
+FullGaussian), whose first ring cell is centered at lon 0° and spans the 0°/360° seam.
+"""
+has_full_ring_grid(field) = false
+
+"""
+    has_cell_crossing_dateline(field)
+
+True if `field` has cells that cross the 0°/360° longitude seam (the "dateline"):
+tripolar and rotated lat-lon grids (near their poles), full RingGrids grids, and
+cubed-sphere SE panels. Such grids smear the discontinuous `LongitudeField` by ~1%
+under regridding, so the sweat tests loosen the conservation tolerance for them.
+"""
+has_cell_crossing_dateline(field) =
+    has_tripolar(field) || has_rotated(field) || has_spectral_element(field) || has_full_ring_grid(field)
 
 """
     test_intersection_areas_agree(regridder, tree1, tree2; rtol = sqrt(eps(Float64)))

@@ -159,22 +159,11 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
                     set_field_values!(field2, vals2, fun_to_test)
                     vals2_analytical .= vals2
 
-                    # Tripolar and rotated lat-lon grid cells near the "north poles" straddle
-                    # the date line, causing the longitude field's 0°/360° discontinuity to
-                    # produce inaccurate cell-averaged integrals. Loosen tolerance for that case.
-                    # RingGrids full grids (SpeedyWeather's FullClenshaw/FullGaussian) have the
-                    # same issue by a different route: cell centers sit at lond[1] = 0°, so the
-                    # first ring cell spans [-Δλ/2, +Δλ/2] and straddles the seam directly.
-                    # Grids whose cells span the 0°/360° seam (tripolar, rotated,
-                    # RingGrids full grids, or the cubed-sphere SE panels) smear
-                    # the discontinuous `LongitudeField` by ~1% under regridding.
-                    straddles_dateline(f) =
-                        (f isa Oceananigans.Field && (f.grid isa Oceananigans.TripolarGrid ||
-                                                      f.grid isa Oceananigans.RotatedLatitudeLongitudeGrid)) ||
-                        (f isa RingGrids.AbstractField && f.grid isa RingGrids.AbstractFullGrid) ||
-                        f isa ClimaCore.Fields.Field
-                    has_dateline_seam = straddles_dateline(field1) || straddles_dateline(field2)
-                    tol = (has_dateline_seam && fun_to_test isa ConservativeRegridding.LongitudeField) ? 5e-2 : 1e-2
+                    # LongitudeField's 0°/360° discontinuity is smeared ~1% by grids whose cells
+                    # cross the seam; loosen the tolerance for those (see has_cell_crossing_dateline
+                    # in ConservativeRegriddingTestHelpers).
+                    either_dateline = has_cell_crossing_dateline(field1) || has_cell_crossing_dateline(field2)
+                    tol = (either_dateline && fun_to_test isa ConservativeRegridding.LongitudeField) ? 5e-2 : 1e-2
                     w2 = test_integration_weights(field2, regridder)
                     
                     # Compare only over covered destination cells.

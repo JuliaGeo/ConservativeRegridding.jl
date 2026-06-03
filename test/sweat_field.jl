@@ -170,12 +170,11 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
                     set_field_values!(field2, vals2, fun_to_test)
                     vals2_analytical .= vals2
 
-                    straddles_dateline(f) =
-                        (f isa Oceananigans.Field && (f.grid isa Oceananigans.TripolarGrid ||
-                                                      f.grid isa Oceananigans.RotatedLatitudeLongitudeGrid)) ||
-                        f isa ClimaCore.Fields.Field
-                    has_dateline_seam = straddles_dateline(field1) || straddles_dateline(field2)
-                    tol = (has_dateline_seam && fun_to_test isa ConservativeRegridding.LongitudeField) ? 5e-2 : 1e-2
+                    # LongitudeField's 0°/360° discontinuity is smeared ~1% by grids whose cells
+                    # cross the seam; loosen the tolerance for those (see has_cell_crossing_dateline
+                    # in ConservativeRegriddingTestHelpers).
+                    either_dateline = has_cell_crossing_dateline(field1) || has_cell_crossing_dateline(field2)
+                    tol = (either_dateline && fun_to_test isa ConservativeRegridding.LongitudeField) ? 5e-2 : 1e-2
                     w2 = test_integration_weights(field2, regridder)
                     # A non-global source (tripolar/rotated) leaves destination cells outside its footprint with no contribution, 
                     # so the regridder zeros them while the analytical field is defined everywhere. Compare the conserved integral

@@ -14,10 +14,12 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 [weakdeps]
 ClimaCore = "d414da3d-4745-48bb-8d80-42e94e092884"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
+RingGrids = "d1845624-ad4f-453b-8ff4-a8db365bf3a7"
 
 [extensions]
 TestHelpersClimaCoreExt = "ClimaCore"
 TestHelpersOceananigansExt = "Oceananigans"
+TestHelpersRingGridsExt = "RingGrids"
 
 [sources]
 ConservativeRegridding = {path = "../.."}
