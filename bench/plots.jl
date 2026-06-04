@@ -7,11 +7,13 @@ using CairoMakie
 using Serialization
 using Printf
 
-const _FAMILY_COLOR = Dict("Oceananigans" => :steelblue, "Healpix" => :darkorange)
-const _METHOD_COLOR = Dict("CR" => :steelblue, "CR-serial" => :seagreen, "XESMF" => :firebrick)
+# Categorical series use Makie's default palette (Wong colors), assigned positionally so each
+# line and its inter-quartile error bars share a colour.
+const _PALETTE = Makie.wong_colors()
+_seriescolor(i) = _PALETTE[mod1(i, length(_PALETTE))]
 
 _methodlabel(m) = m == "CR" ? "ConservativeRegridding (threaded)" :
-                  m == "CR-serial" ? "ConservativeRegridding (serial)" : "XESMF / ESMF"
+                  m == "CR-serial" ? "ConservativeRegridding (serial)" : "XESMF"
 
 _fmt_time(t) = t >= 1 ? @sprintf("%.2f s", t) :
                t >= 1e-3 ? @sprintf("%.1f ms", t * 1e3) : @sprintf("%.0f µs", t * 1e6)
@@ -30,10 +32,10 @@ function plot_scaling(rows; path)
         xlabel = "destination cells (source at half-resolution)",
         ylabel = "construction time (s)",
         title = "Regridder construction scaling by grid family")
-    for fam in sort(unique(r.family for r in rows))
+    for (i, fam) in enumerate(sort(unique(r.family for r in rows)))
         sub = sort(filter(r -> r.family == fam, rows); by = r -> r.ncells_dst)
         isempty(sub) && continue
-        col = get(_FAMILY_COLOR, fam, :black)
+        col = _seriescolor(i)
         xs = [Float64(r.ncells_dst) for r in sub]
         rangebars!(ax, xs, [_lo(r) for r in sub], [_hi(r) for r in sub];
             color = col, whiskerwidth = 7, linewidth = 1.5)
@@ -55,10 +57,10 @@ function plot_xesmf(rows; path)
         xlabel = "destination cells (source at half-resolution)",
         ylabel = "construction time (s)",
         title = "Construction time: ConservativeRegridding vs XESMF (Oceananigans)")
-    for m in ["CR", "CR-serial", "XESMF"]
+    for (i, m) in enumerate(["CR", "CR-serial", "XESMF"])
         sub = sort(filter(r -> r.method == m, rows); by = r -> r.ncells_dst)
         isempty(sub) && continue
-        col = _METHOD_COLOR[m]
+        col = _seriescolor(i)
         xs = [Float64(r.ncells_dst) for r in sub]
         rangebars!(ax, xs, [_lo(r) for r in sub], [_hi(r) for r in sub];
             color = col, whiskerwidth = 7, linewidth = 1.5)
@@ -87,9 +89,9 @@ function plot_pr_vs_master(pr_rows, base_rows; path, base_label = "base")
     hlines!(ax, [1.0]; color = :gray50, linestyle = :dash)
     yvals = Float64[]
     plotted = false
-    for fam in sort(unique(r.family for r in pr))
+    for (i, fam) in enumerate(sort(unique(r.family for r in pr)))
         sub = sort(filter(r -> r.family == fam, pr); by = r -> r.ncells_dst)
-        col = get(_FAMILY_COLOR, fam, :black)
+        col = _seriescolor(i)
         xs = Float64[]; ys = Float64[]; rlos = Float64[]; rhis = Float64[]
         for r in sub
             b = get(basemap, (r.family, r.tier), nothing)
