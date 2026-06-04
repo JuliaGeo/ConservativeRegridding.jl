@@ -1,0 +1,103 @@
+name: Benchmarks
+
+# Regridder-construction benchmarks, modeled on Makie's PR-vs-base benchmark CI: the benchmark
+# DRIVER always comes from the PR checkout, and only the ConservativeRegridding package is swapped
+# between the PR ref and the base ref (each run in an isolated subprocess). Results are rendered to
+# graphs that are pushed to an orphan `benchmark-assets` branch and embedded inline in a sticky PR
+# comment. Heavy/label-gated: it runs only when a PR carries the `run benchmarks` label (add it to
+# trigger a run) or on manual dispatch.
+
+on:
+  pull_request:
+    types: [labeled, synchronize, reopened, opened]
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: "Base git ref to compare against"
+        required: false
+        default: "main"
+      maxcells:
+        description: "Cap on destination cells per tier (bounds runtime)"
+        required: false
+        default: "50000"
+
+concurrency:
+  group: benchmarks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Regridder construction benchmarks
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'run benchmarks')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # push graphs to the orphan benchmark-assets branch
+      pull-requests: write  # post/update the sticky results comment
+    env:
+      JULIA_NUM_THREADS: "4"
+      BASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.base_ref || github.event.pull_request.base.sha }}
+      BASE_LABEL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_ref || github.event.pull_request.base.ref }}
+      MAXCELLS: ${{ github.event_name == 'workflow_dispatch' && inputs.maxcells || '50000' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0   # base ref must be present for the two-ref comparison
+
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.11'
+      - uses: julia-actions/cache@v3
+
+      # --- Parts 1 & 4: conda-free PR-vs-base construction scaling (the common path) ----------
+      - name: Plotting environment (CairoMakie, no conda)
+        run: |
+          julia --startup-file=no -e '
+            using Pkg
+            Pkg.activate(joinpath(ENV["RUNNER_TEMP"], "plotenv"))
+            Pkg.add("CairoMakie"); Pkg.instantiate()'
+
+      - name: PR-vs-base construction scaling
+        run: |
+          julia --startup-file=no --project="$RUNNER_TEMP/plotenv" \
+            bench/compare.jl "$BASE_REF" bench/results "$MAXCELLS" "$BASE_LABEL"
+
+      # --- Part 2: ConservativeRegridding vs XESMF on the PR ref (pays conda; isolated so a
+      #     failure here does not sink the PR-vs-base graphs) -----------------------------------
+      - name: Install Python (for XESMF / esmpy)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: ConservativeRegridding vs XESMF (PR ref)
+        continue-on-error: true
+        run: |
+          XENV="$RUNNER_TEMP/xesmfenv"
+          julia --startup-file=no -e '
+            using Pkg
+            Pkg.activate(joinpath(ENV["RUNNER_TEMP"], "xesmfenv"))
+            Pkg.develop(path = ".")
+            Pkg.add(["XESMF", "Oceananigans", "Chairmarks", "GeometryOps", "CairoMakie"])
+            Pkg.instantiate()'
+          cp bench/CondaPkg.toml "$XENV/CondaPkg.toml"
+          julia --startup-file=no --project="$XENV" --threads=4 bench/xesmf.jl bench/results/xesmf.jls "$MAXCELLS"
+          julia --startup-file=no --project="$XENV" -e '
+            include("bench/plots.jl"); using Serialization
+            plot_xesmf(deserialize("bench/results/xesmf.jls"); path = "bench/results/xesmf.png")'
+
+      - name: Upload graphs as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-graphs
+          path: bench/results/*.png
+          if-no-files-found: warn
+
+      - name: Publish graphs and post sticky PR comment
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
+        run: bash bench/publish.sh
