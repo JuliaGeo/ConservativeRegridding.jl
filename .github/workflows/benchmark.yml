@@ -3,9 +3,10 @@ name: Benchmarks
 # Regridder-construction benchmarks, modeled on Makie's PR-vs-base benchmark CI: the benchmark
 # DRIVER always comes from the PR checkout, and only the ConservativeRegridding package is swapped
 # between the PR ref and the base ref (each run in an isolated subprocess). Results are rendered to
-# graphs that are pushed to an orphan `benchmark-assets` branch and embedded inline in a sticky PR
-# comment. Heavy/label-gated: it runs only when a PR carries the `run benchmarks` label (add it to
-# trigger a run) or on manual dispatch.
+# graphs that are pushed to a separate assets repo (JuliaGeo/JuliaGeoBenchmarkResults, branch
+# `ConservativeRegridding`, via an SSH deploy key) and embedded inline in a sticky PR comment —
+# keeping image blobs out of the CR repo. Heavy/label-gated: it runs only when a PR carries the
+# `run benchmarks` label (add it to trigger a run) or on manual dispatch.
 
 on:
   pull_request:
@@ -33,7 +34,7 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'run benchmarks')
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # push graphs to the orphan benchmark-assets branch
+      contents: read        # checkout + local base worktree (graphs go to a separate repo via deploy key)
       pull-requests: write  # post/update the sticky results comment
     env:
       JULIA_NUM_THREADS: "4"
@@ -97,7 +98,8 @@ jobs:
       - name: Publish graphs and post sticky PR comment
         if: github.event_name == 'pull_request'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}                                # CR repo: sticky comment
+          SSH_DEPLOY_KEY: ${{ secrets.BENCHMARK_ASSETS_DEPLOY_KEY }}    # assets repo: graph push
           PR_NUMBER: ${{ github.event.pull_request.number }}
           RUN_ID: ${{ github.run_id }}
         run: bash bench/publish.sh

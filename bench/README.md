@@ -41,8 +41,12 @@ to a PR (or use *Run workflow* / `workflow_dispatch`) to trigger it. The job
    the PR checkout; only the ConservativeRegridding package is swapped (base via a detached git
    worktree, each ref benchmarked in an isolated subprocess so the loaded package is provable);
 2. runs the CR-vs-XESMF comparison on the PR ref (conda; isolated with `continue-on-error`);
-3. pushes the graphs to an orphan **`benchmark-assets`** branch (under `pr-<N>/`) and embeds them
-   inline in a single sticky PR comment, using only the stock `GITHUB_TOKEN` (no bot PAT / gist).
+3. pushes the graphs to a **separate** assets repo — `JuliaGeo/JuliaGeoBenchmarkResults`, branch
+   **`ConservativeRegridding`**, under `pr-<N>/` — and embeds them inline in a single sticky PR
+   comment. Keeping the PNG blobs out of this repo avoids bloating its git history.
 
-The full-resolution graphs are also uploaded as a workflow **artifact**. Fork PRs get a read-only
-token, so the push/comment is skipped there (the artifact still uploads).
+The cross-repo push uses an **SSH deploy key** (write-scoped to the assets repo only) stored as the
+`BENCHMARK_ASSETS_DEPLOY_KEY` secret — the stock `GITHUB_TOKEN` can't push to another repo. The
+sticky comment is still posted to this repo with the stock token. The full-resolution graphs are
+also uploaded as a workflow **artifact**. Fork PRs get neither the secret nor a writable token, so
+the push/comment is skipped there (the artifact still uploads).
