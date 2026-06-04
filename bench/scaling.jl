@@ -12,19 +12,18 @@
 using ConservativeRegridding
 import GeometryOps as GO
 import SparseArrays
-using Chairmarks
 using Serialization
 
 include(joinpath(@__DIR__, "grids.jl"))
+include(joinpath(@__DIR__, "timing.jl"))
 
-# Build once (warm up compilation + record nnz), then time construction with Chairmarks.
-# `minimum` is the least-noisy estimator (BenchmarkTools convention) and needs no extra import.
-function bench_construction(pair; seconds = 5.0, threaded::Bool = true)
+# Build once (warm up compilation + record nnz), then time construction over several repetitions
+# (see timed_summary) so each point carries a median and an inter-quartile error band.
+function bench_construction(pair; reps::Int = 5, seconds_each::Float64 = 0.5, threaded::Bool = true)
     build() = ConservativeRegridding.Regridder(GO.Spherical(), pair.dst, pair.src;
         normalize = false, threaded = threaded)
     R = build()                                   # warm up + correctness + nnz
-    s = @be build() evals = 1 seconds = seconds   # Chairmarks Benchmark
-    best = minimum(s)
+    t = timed_summary(build; reps, seconds_each)
     return (;
         family     = pair.family,
         method     = threaded ? "CR" : "CR-serial",
@@ -32,20 +31,17 @@ function bench_construction(pair; seconds = 5.0, threaded::Bool = true)
         ncells_dst = pair.ncells_dst,
         ncells_src = pair.ncells_src,
         nthreads   = Threads.nthreads(),
-        time_s     = best.time,
-        allocs     = Int(best.allocs),
-        bytes      = Int(best.bytes),
+        t.time_s, t.time_lo, t.time_hi, t.nsamples, t.allocs, t.bytes,
         nnz        = SparseArrays.nnz(R.intersections),
-        nsamples   = length(s.samples),
     )
 end
 
-function run_scaling(; maxcells = typemax(Int), seconds = 5.0, threaded::Bool = true)
+function run_scaling(; maxcells = typemax(Int), reps::Int = 5, seconds_each::Float64 = 0.5, threaded::Bool = true)
     pairs = vcat(oceananigans_tiers(; maxcells), healpix_tiers(; maxcells))
     rows = NamedTuple[]
     for p in pairs
         @info "scaling" family = p.family tier = p.tier ncells_dst = p.ncells_dst
-        push!(rows, bench_construction(p; seconds, threaded))
+        push!(rows, bench_construction(p; reps, seconds_each, threaded))
     end
     return rows
 end
