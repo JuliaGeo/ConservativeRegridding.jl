@@ -43,5 +43,3 @@ settings.json
 
 # git worktrees
 .worktrees/
-
-lib/

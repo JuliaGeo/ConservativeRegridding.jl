@@ -11,7 +11,7 @@ import Extents
 
 using GeometryOps.UnitSpherical: UnitSphericalPoint
 using LinearAlgebra: normalize
-using StaticArrays: SVector
+using StaticArrays: SVector, StaticArrays
 
 using ClimaCore:
     CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies, DataLayouts, ClimaComms
@@ -349,7 +349,7 @@ function spherical_triangle_area(::GOCore.Spherical, p₁, p₂, p₃)
     q₁ = UnitSphericalPoint(p₁[1], p₁[2], p₁[3])
     q₂ = UnitSphericalPoint(p₂[1], p₂[2], p₂[3])
     q₃ = UnitSphericalPoint(p₃[1], p₃[2], p₃[3])
-    poly = GI.Polygon([GI.LinearRing([q₁, q₂, q₃, q₁])])
+    poly = GI.Polygon([GI.LinearRing(StaticArrays.SA[q₁, q₂, q₃, q₁])])
     return GO.area(GO.Spherical(), poly)
 end
 

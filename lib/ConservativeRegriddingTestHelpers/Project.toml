@@ -1,0 +1,25 @@
+name = "ConservativeRegriddingTestHelpers"
+uuid = "883fd9f3-db67-4942-a9f0-94e65a04ba8b"
+version = "0.1.0"
+authors = ["Anshul Singhvi <anshulsinghvi@gmail.com>", "Simone Silvestri <silvestri.simone0@gmail.com>"]
+
+[deps]
+ConservativeRegridding = "8e50ac2c-eb48-49bc-a402-07c87b949343"
+GeoInterface = "cf35fbd7-0cd7-5166-be24-54bfbe79505f"
+GeometryOps = "3251bfac-6a57-4b6d-aa61-ac1fef2975ab"
+IterTools = "c8e1da08-722c-5040-9ed9-7db0dc04731e"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[weakdeps]
+ClimaCore = "d414da3d-4745-48bb-8d80-42e94e092884"
+Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
+RingGrids = "d1845624-ad4f-453b-8ff4-a8db365bf3a7"
+
+[extensions]
+TestHelpersClimaCoreExt = "ClimaCore"
+TestHelpersOceananigansExt = "Oceananigans"
+TestHelpersRingGridsExt = "RingGrids"
+
+[sources]
+ConservativeRegridding = {path = "../.."}

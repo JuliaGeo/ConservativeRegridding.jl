@@ -1,6 +1,7 @@
 [deps]
 ClimaCore = "d414da3d-4745-48bb-8d80-42e94e092884"
 ConservativeRegridding = "8e50ac2c-eb48-49bc-a402-07c87b949343"
+ConservativeRegriddingTestHelpers = "883fd9f3-db67-4942-a9f0-94e65a04ba8b"
 Extents = "411431e0-e8b7-467b-b5e0-f676ba4f2910"
 GeoInterface = "cf35fbd7-0cd7-5166-be24-54bfbe79505f"
 GeometryOps = "3251bfac-6a57-4b6d-aa61-ac1fef2975ab"
@@ -13,7 +14,6 @@ NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 RingGrids = "d1845624-ad4f-453b-8ff4-a8db365bf3a7"
 SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
-SimplexQuad = "f5de1e94-2f77-472d-8c3b-9d09f580ee5e"
 SortTileRecursiveTree = "746ee33f-1797-42c2-866d-db2fce69d14d"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 SpeedyWeather = "9e226e20-d153-4fed-8a5b-493def4f21a9"
@@ -27,3 +27,4 @@ XESMF = "0.2"
 
 [sources]
 ConservativeRegridding = {path = ".."}
+ConservativeRegriddingTestHelpers = {path = "../lib/ConservativeRegriddingTestHelpers"}
