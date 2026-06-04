@@ -6,8 +6,6 @@ using ConservativeRegridding: Trees
 import GeometryOpsCore as GOCore
 import GeometryOps as GO
 import GeoInterface as GI
-import SparseArrays
-import Extents
 
 using GeometryOps.UnitSpherical: UnitSphericalPoint
 using LinearAlgebra: normalize
@@ -388,23 +386,6 @@ function vec_to_se_field!(field, v::AbstractVector)
     return field
 end
 
-## Shared helpers for SE regridder construction
-
-"""
-    _get_candidate_pairs(manifold, se_tree, cell_tree, threaded)
-
-Get all candidate (SE element, cell) pairs for regridding.
-Uses a dual depth-first search to find all pairs of cells/elements that may intersect.
-"""
-function _get_candidate_pairs(manifold, se_tree, cell_tree, threaded)
-    _threaded = GOCore.booltype(threaded)
-    predicate_f = manifold isa GOCore.Spherical ?
-        GO.UnitSpherical._intersects : Extents.intersects
-    return ConservativeRegridding.get_all_candidate_pairs(
-        _threaded, predicate_f, se_tree, cell_tree
-    )
-end
-
 ## Regridder constructors
 
 const SESpaceOrField = Union{ClimaCore.Spaces.AbstractSpectralElementSpace, ClimaCore.Fields.Field}
@@ -422,6 +403,57 @@ function ConservativeRegridding.Regridder(
     return se_to_fv_principled(manifold, dst, se_space(src); threaded, triangle_quad_degree, kwargs...)
 end
 
+# SE → FV operator (`InPlace`, principled polygon-intersection, PDF Appendix A):
+# per (elem, cell) pair, push an Nq² block of B-weights per intersection polygon.
+struct SEToFVIntersectionOperator{M <: GOCore.Manifold, SP}
+    manifold::M
+    src_space::SP            # SE source space
+    Nq::Int
+    triangle_quad_degree::Int
+    N_fv::Int
+    N_nodes::Int
+end
+
+ConservativeRegridding.IntersectionReturnStyle(::SEToFVIntersectionOperator) = ConservativeRegridding.InPlace()
+ConservativeRegridding.output_matrix_size(op::SEToFVIntersectionOperator, ::Any, ::Any) = (op.N_fv, op.N_nodes)
+
+function (op::SEToFVIntersectionOperator)(rows, cols, vals, (elem, cell), src_tree, dst_tree)
+    elem_poly = Trees.getcell(src_tree, elem)
+    cell_poly = Trees.getcell(dst_tree, cell)
+
+    intersection_result = if op.manifold isa GOCore.Spherical
+        GO.intersection(GO.ConvexConvexSutherlandHodgman(op.manifold),
+                        elem_poly, cell_poly; target = GI.PolygonTrait())
+    else
+        GO.intersection(GO.FosterHormannClipping(GO.Planar()),
+                        elem_poly, cell_poly; target = GI.PolygonTrait())
+    end
+
+    # GO.intersection may return a single Polygon, a Vector{Polygon}, or
+    # nothing for an empty intersection. Normalize to an iterable.
+    intersection_polys = if isnothing(intersection_result)
+        ()
+    elseif intersection_result isa AbstractVector
+        intersection_result
+    else
+        (intersection_result,)   # single Polygon
+    end
+
+    for ipoly in intersection_polys
+        B = accumulate_principled_b(op.manifold, op.src_space, elem, ipoly;
+                                    triangle_quad_degree = op.triangle_quad_degree)
+        offset = (elem - 1) * op.Nq^2
+        for j in 1:op.Nq, i in 1:op.Nq
+            Bᵢⱼ = B[i, j]
+            Bᵢⱼ == 0 && continue
+            push!(rows, cell)
+            push!(cols, offset + linear_ind((op.Nq, op.Nq), (i, j)))
+            push!(vals, Bᵢⱼ)
+        end
+    end
+    return nothing
+end
+
 function se_to_fv_principled(manifold, dst, src; threaded, triangle_quad_degree, kwargs...)
     se_tree = Trees.treeify(manifold, src)
     fv_tree = Trees.treeify(manifold, dst)
@@ -433,49 +465,16 @@ function se_to_fv_principled(manifold, dst, src; threaded, triangle_quad_degree,
 
     triangle_quad_degree = something(triangle_quad_degree, 2 * (Nq - 1))
 
-    candidate_pairs = _get_candidate_pairs(manifold, se_tree, fv_tree, threaded)
+    # Assemble the N_fv × N_nodes matrix via the shared parallel driver: src = SE
+    # elements, dst = FV cells, so candidate pairs are uniformly (elem, cell).
+    op = SEToFVIntersectionOperator(manifold, src, Nq, triangle_quad_degree, N_fv, N_nodes)
+    # Extra kwargs (e.g. `normalize`) are absorbed by the signature and not forwarded;
+    # `intersection_areas` only accepts assembly kwargs.
+    intersections = ConservativeRegridding.intersection_areas(
+        manifold, GOCore.booltype(threaded), fv_tree, se_tree;
+        intersection_operator = op,
+    )
 
-    rows = Int[]
-    cols = Int[]
-    vals = Float64[]
-
-    for (elem_idx, cell_idx) in candidate_pairs
-        elem_poly = Trees.getcell(se_tree, elem_idx)
-        cell_poly = Trees.getcell(fv_tree, cell_idx)
-
-        intersection_result = if manifold isa GOCore.Spherical
-            GO.intersection(GO.ConvexConvexSutherlandHodgman(manifold),
-                            elem_poly, cell_poly; target = GI.PolygonTrait())
-        else
-            GO.intersection(GO.FosterHormannClipping(GO.Planar()),
-                            elem_poly, cell_poly; target = GI.PolygonTrait())
-        end
-
-        # GO.intersection may return a single Polygon, a Vector{Polygon}, or
-        # nothing for an empty intersection. Normalize to an iterable.
-        intersection_polys = if intersection_result === nothing
-            ()
-        elseif intersection_result isa AbstractVector
-            intersection_result
-        else
-            (intersection_result,)   # single Polygon
-        end
-
-        for ipoly in intersection_polys
-            B = accumulate_principled_b(manifold, src, elem_idx, ipoly;
-                                        triangle_quad_degree)
-            offset = (elem_idx - 1) * Nq^2
-            for j in 1:Nq, i in 1:Nq
-                Bᵢⱼ = B[i, j]
-                Bᵢⱼ == 0 && continue
-                push!(rows, cell_idx)
-                push!(cols, offset + linear_ind((Nq, Nq), (i, j)))
-                push!(vals, Bᵢⱼ)
-            end
-        end
-    end
-
-    intersections = SparseArrays.sparse(rows, cols, vals, N_fv, N_nodes)
     dst_areas = ConservativeRegridding.areas(manifold, dst, fv_tree)
     src_areas = Vector{eltype(dst_areas)}(se_node_weights(src))
 
@@ -559,6 +558,120 @@ function compute_local_mass_matrix(
     return M
 end
 
+# FV → SE operator (`InPlace`, per-element L2 projection). The per-element mass-matrix
+# solve needs all of an element's cells at once, so `work_items` makes the element
+# (not the candidate pair) the unit of work. Assembled matrix is N_nodes × N_fv.
+struct FVToSEIntersectionOperator{M <: GOCore.Manifold, SP}
+    manifold::M
+    dst_space::SP            # SE destination space
+    Nq::Int
+    triangle_quad_degree::Int
+    Nh::Int
+    N_nodes::Int
+    N_fv::Int
+end
+
+ConservativeRegridding.IntersectionReturnStyle(::FVToSEIntersectionOperator) = ConservativeRegridding.InPlace()
+ConservativeRegridding.output_matrix_size(op::FVToSEIntersectionOperator, ::Any, ::Any) = (op.N_nodes, op.N_fv)
+
+# Group (elem, cell) pairs into one (elem, cells) item per non-empty element, preserving
+# candidate-pair order so serial assembly matches the old per-element loop.
+function ConservativeRegridding.work_items(op::FVToSEIntersectionOperator, candidate_pairs)
+    cells_by_elem = [Int[] for _ in 1:op.Nh]
+    for (elem, cell) in candidate_pairs
+        push!(cells_by_elem[elem], cell)
+    end
+    return [(e, cells_by_elem[e]) for e in 1:op.Nh if !isempty(cells_by_elem[e])]
+end
+
+function (op::FVToSEIntersectionOperator)(rows, cols, vals, (elem, cells), src_tree, dst_tree)
+    Nq = op.Nq
+    elem_poly = Trees.getcell(src_tree, elem)
+
+    # Phase 1: accumulate B for this element, keyed by destination cell, value = Nq² vector.
+    d = Dict{Int, Vector{Float64}}()
+    for cell in cells
+        cell_poly = Trees.getcell(dst_tree, cell)
+
+        intersection_result = if op.manifold isa GOCore.Spherical
+            GO.intersection(GO.ConvexConvexSutherlandHodgman(op.manifold),
+                            elem_poly, cell_poly; target = GI.PolygonTrait())
+        else
+            GO.intersection(GO.FosterHormannClipping(GO.Planar()),
+                            elem_poly, cell_poly; target = GI.PolygonTrait())
+        end
+
+        intersection_polys = if isnothing(intersection_result)
+            ()
+        elseif intersection_result isa AbstractVector
+            intersection_result
+        else
+            (intersection_result,)
+        end
+
+        for ipoly in intersection_polys
+            B = accumulate_principled_b(op.manifold, op.dst_space, elem, ipoly;
+                                        triangle_quad_degree = op.triangle_quad_degree)
+            v = get!(d, cell) do
+                zeros(Nq^2)
+            end
+            for jb in 1:Nq, ja in 1:Nq
+                Bᵢⱼ = B[ja, jb]
+                Bᵢⱼ == 0 && continue
+                v[linear_ind((Nq, Nq), (ja, jb))] += Bᵢⱼ
+            end
+        end
+    end
+    isempty(d) && return nothing
+
+    # Phase 2: solve Mᵉ f_dst = b for each cell column, push the COO block.
+    #
+    # Mᵉ comes from tensor-product GLL on the reference square but B from fan
+    # triangulation on the great-circle physical polygon, so the two
+    # quadratures integrate over slightly different domains. We rescale each
+    # row of Mᵉ so that its row sum equals the column-sum of B for that
+    # element — what Mᵉ·1 must equal by partition of unity if both sides used
+    # identical quadrature. This forces exact constant preservation.
+    Mᵉ = compute_local_mass_matrix(op.dst_space, elem)
+
+    b_full = zeros(Nq^2)
+    for b_vec in values(d)
+        b_full .+= b_vec
+    end
+
+    # If b_full == 0 it means we are hitting regions with no
+    # overlap (for example regridding a tripolar grid that ends
+    # at 80ᵒ S onto a SE grid that covers the sphere).
+    # We cover for those cases.
+    covered = findall(!=(0), b_full)
+    isempty(covered) && return nothing
+    Mᶜ = Mᵉ[covered, covered]
+
+    row_sums = vec(sum(Mᶜ; dims=2))
+    for (rc, r) in enumerate(covered)
+        row_sums[rc] == 0 && continue
+        scale = b_full[r] / row_sums[rc]
+        @inbounds for c in axes(Mᶜ, 2)
+            Mᶜ[rc, c] *= scale
+        end
+    end
+
+    Mᶜ_inv = inv(Mᶜ)
+
+    offset = (elem - 1) * Nq^2
+    for (cell, b_vec) in d
+        new_col = Mᶜ_inv * b_vec[covered]
+        for (rc, r) in enumerate(covered)
+            val = new_col[rc]
+            val == 0 && continue
+            push!(rows, offset + r)
+            push!(cols, cell)
+            push!(vals, val)
+        end
+    end
+    return nothing
+end
+
 """
     fv_to_se_l2_projection(manifold, dst, src; ...)
 
@@ -582,102 +695,17 @@ function fv_to_se_l2_projection(manifold, dst, src;
 
     triangle_quad_degree = something(triangle_quad_degree, 2 * (Nq - 1))
 
-    candidate_pairs = _get_candidate_pairs(manifold, se_tree, fv_tree, threaded)
+    # Assemble the N_nodes × N_fv matrix via the shared parallel driver: src = SE
+    # elements, dst = FV cells, with `work_items` regrouping pairs by element so the
+    # per-element mass-matrix solve sees all of an element's cells at once.
+    op = FVToSEIntersectionOperator(manifold, dst, Nq, triangle_quad_degree, Nh, N_nodes, N_fv)
+    # Extra kwargs (e.g. `normalize`) are absorbed by the signature and not forwarded;
+    # `intersection_areas` only accepts assembly kwargs.
+    intersections = ConservativeRegridding.intersection_areas(
+        manifold, GOCore.booltype(threaded), fv_tree, se_tree;
+        intersection_operator = op,
+    )
 
-    # Accumulate B per element, keyed by destination cell, value = Nq² vector.
-    elem_b_dicts = [Dict{Int, Vector{Float64}}() for _ in 1:Nh]
-
-    for (elem_idx, cell_idx) in candidate_pairs
-        elem_poly = Trees.getcell(se_tree, elem_idx)
-        cell_poly = Trees.getcell(fv_tree, cell_idx)
-
-        intersection_result = if manifold isa GOCore.Spherical
-            GO.intersection(GO.ConvexConvexSutherlandHodgman(manifold),
-                            elem_poly, cell_poly; target = GI.PolygonTrait())
-        else
-            GO.intersection(GO.FosterHormannClipping(GO.Planar()),
-                            elem_poly, cell_poly; target = GI.PolygonTrait())
-        end
-
-        intersection_polys = if intersection_result === nothing
-            ()
-        elseif intersection_result isa AbstractVector
-            intersection_result
-        else
-            (intersection_result,)
-        end
-
-        for ipoly in intersection_polys
-            B = accumulate_principled_b(manifold, dst, elem_idx, ipoly;
-                                        triangle_quad_degree)
-            d = elem_b_dicts[elem_idx]
-            v = get!(d, cell_idx) do
-                zeros(Nq^2)
-            end
-            for jb in 1:Nq, ja in 1:Nq
-                Bᵢⱼ = B[ja, jb]
-                Bᵢⱼ == 0 && continue
-                v[linear_ind((Nq, Nq), (ja, jb))] += Bᵢⱼ
-            end
-        end
-    end
-
-    # For each element, solve Mᵉ f_dst = b for each cell column, emit COO.
-    #
-    # Mᵉ comes from tensor-product GLL on the reference square but B from fan
-    # triangulation on the great-circle physical polygon, so the two
-    # quadratures integrate over slightly different domains. We rescale each
-    # row of Mᵉ so that its row sum equals the column-sum of B for that
-    # element — what Mᵉ·1 must equal by partition of unity if both sides used
-    # identical quadrature. This forces exact constant preservation.
-    rows = Int[]
-    cols = Int[]
-    vals = Float64[]
-
-    for elem_idx in 1:Nh
-        d = elem_b_dicts[elem_idx]
-        isempty(d) && continue
-
-        Mᵉ = compute_local_mass_matrix(dst, elem_idx)
-
-        b_full = zeros(Nq^2)
-        for b_vec in values(d)
-            b_full .+= b_vec
-        end
-
-        # If b_full == 0 it means we are hitting regions with no 
-        # overlap (for example a regridding a tripolar grid than ends
-        # at 80ᵒ S onto a SE grid that covers the sphere).
-        # We cover for those cases.
-        covered = findall(!=(0), b_full)
-        isempty(covered) && continue
-        Mᶜ = Mᵉ[covered, covered]
-
-        row_sums = vec(sum(Mᶜ; dims=2))
-        for (rc, r) in enumerate(covered)
-            row_sums[rc] == 0 && continue
-            scale = b_full[r] / row_sums[rc]
-            @inbounds for c in axes(Mᶜ, 2)
-                Mᶜ[rc, c] *= scale
-            end
-        end
-
-        Mᶜ_inv = inv(Mᶜ)
-
-        offset = (elem_idx - 1) * Nq^2
-        for (cell_idx, b_vec) in d
-            new_col = Mᶜ_inv * b_vec[covered]
-            for (rc, r) in enumerate(covered)
-                v = new_col[rc]
-                v == 0 && continue
-                push!(rows, offset + r)
-                push!(cols, cell_idx)
-                push!(vals, v)
-            end
-        end
-    end
-
-    intersections = SparseArrays.sparse(rows, cols, vals, N_nodes, N_fv)
     src_areas = ConservativeRegridding.areas(manifold, src, fv_tree)
     # inv-mass already baked into `intersections`; ones make pipeline normalize a no-op
     dst_areas = ones(N_nodes)
