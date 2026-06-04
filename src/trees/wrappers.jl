@@ -67,37 +67,37 @@ STI.node_extent(w::KnownFullSphereExtentWrapper) = GO.UnitSpherical.SphericalCap
 #=
 ## WithParallelizePolicy
 
-Wraps any spatial tree so that [`should_parallelize`](@ref) for it dispatches
-to a user-supplied callable instead of the default(s) for the inner tree's
-type. This is the instance-level counterpart to defining a tree-type-specific
-`should_parallelize` method — useful for one-off tuning without subtyping.
+Wraps any spatial tree so its `should_parallelize` is supplied by a
+user-provided callable — the instance-level counterpart to defining a
+node-type-specific `should_parallelize` method.
 =#
 
 """
     WithParallelizePolicy(tree, policy)
 
-Wrap `tree` so [`Trees.should_parallelize`](@ref) for it calls
-`policy(tree, node, extent) -> Bool` instead of falling back to the default(s)
-for the inner tree's type.
+Wrap `tree` so the dual-tree DFS uses `policy(tree, node, extent) -> Bool`
+instead of the default `Trees.should_parallelize(node, extent)`.
 
 `policy` returns `true` to spawn a parallel task at `node` and stop
-recursing single-threaded, `false` to keep descending. All other
-SpatialTreeInterface methods forward to the wrapped tree.
+descending single-threaded, `false` to keep descending. The wrapper is
+detected at the dual-DFS call site (`intersection_areas.jl`), which
+builds a local closure capturing `tree` and `policy` — so `policy`
+gets the root tree as its first arg without that becoming a Julia
+dispatch axis.
 
-Use this when you want to tune the multithreading granularity for a
-single regridding call without defining a Julia method on the tree's
-type. For per-type policies, define a `should_parallelize` method on
-the tree type directly.
+All other SpatialTreeInterface methods forward to the wrapped tree
+(`<: AbstractTreeWrapper`).
+
+Use this when you want to tune multithreading granularity for a
+single regridding call without defining a method on a node type.
+For per-node-type policies, define `should_parallelize(::MyNode, extent)`
+directly.
 """
 struct WithParallelizePolicy{T, F} <: AbstractTreeWrapper
     tree::T
     policy::F
 end
 Base.parent(w::WithParallelizePolicy) = w.tree
-# Disambiguate against the extent-typed defaults in interfaces.jl by defining
-# the wrapper method for each shipped extent type. The wrapper's policy wins.
-should_parallelize(w::WithParallelizePolicy, node, extent::Extents.Extent) = w.policy(w.tree, node, extent)
-should_parallelize(w::WithParallelizePolicy, node, extent::GO.UnitSpherical.SphericalCap) = w.policy(w.tree, node, extent)
 
 
 """

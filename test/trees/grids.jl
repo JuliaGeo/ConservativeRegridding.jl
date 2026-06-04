@@ -1,3 +1,4 @@
+import ConservativeRegridding
 using ConservativeRegridding.Trees
 using ConservativeRegridding.Trees: cell_range_extent
 using Test
@@ -191,5 +192,80 @@ end
         @test ext.X[2] ≈ 0.75
         @test ext.Y[1] ≈ 0.0
         @test ext.Y[2] ≈ 2 / 3
+    end
+end
+
+# ===========================================================================
+# Spherical bounding-cap machinery: getvertex + CurvilinearGridPerimeterPoints
+# (replacing the private `_pt_at` accessor and the `PerimeterPoints` state machine).
+# ===========================================================================
+import GeometryOps as GO
+import LinearAlgebra
+
+# Regional spherical grids — chosen away from poles/antipodes so the bounding cap
+# is non-degenerate. (A pole-to-pole range has antipodal corners whose mean is the
+# origin, giving a NaN center; that pre-existing edge case is out of scope here.)
+const _SPH_LONS = collect(range(0.0, 40.0, length = 5))   # 4 cells along i
+const _SPH_LATS = collect(range(0.0, 30.0, length = 4))   # 3 cells along j
+const _SPH_LONLAT = [(lon, lat) for lon in _SPH_LONS, lat in _SPH_LATS]
+const _SPH_PTS = GO.UnitSphereFromGeographic().(_SPH_LONLAT)
+_regular_sph()   = RegularGrid(GOCore.Spherical(), _SPH_LONS, _SPH_LATS)
+_cellbased_sph() = CellBasedGrid(_SPH_PTS)   # UnitSphericalPoint eltype ⇒ Spherical
+
+@testset "cell_range_extent spherical: bounding cap (characterization)" begin
+    pts = _SPH_PTS
+    for (ir, jr) in ((1:4, 1:3), (1:1, 1:1), (2:3, 1:2), (1:4, 2:2), (1:2, 1:3))
+        imin, imax = first(ir), last(ir) + 1
+        jmin, jmax = first(jr), last(jr) + 1
+        expected_center = LinearAlgebra.normalize(
+            (pts[imin, jmin] + pts[imax, jmin] + pts[imax, jmax] + pts[imin, jmax]) / 4)
+        for g in (_regular_sph(), _cellbased_sph())
+            cap = cell_range_extent(g, ir, jr)
+            # the cap must bound every vertex of the requested cell range …
+            @test all(GO.spherical_distance(cap.point, pts[i, j]) <= cap.radius
+                      for i in imin:imax, j in jmin:jmax)
+            # … and be centered on the normalized mean of the 4 range corners
+            @test isapprox(cap.point, expected_center; atol = 1e-12)
+        end
+    end
+end
+
+@testset "getvertex returns the vertex at point-index (i,j)" begin
+    cbg = _cellbased_sph()
+    rg  = _regular_sph()
+    gv  = ConservativeRegridding.Trees.getvertex
+    # CellBasedGrid stores the points directly
+    @test gv(cbg, 1, 1) == _SPH_PTS[1, 1]
+    @test gv(cbg, 2, 3) == _SPH_PTS[2, 3]
+    @test gv(cbg, 5, 4) == _SPH_PTS[5, 4]
+    # RegularGrid converts (lon, lat) → unit sphere on demand
+    @test gv(rg, 1, 1) == GO.UnitSphereFromGeographic()((_SPH_LONS[1], _SPH_LATS[1]))
+    @test gv(rg, 2, 3) == GO.UnitSphereFromGeographic()((_SPH_LONS[2], _SPH_LATS[3]))
+    @test gv(rg, 5, 4) == GO.UnitSphereFromGeographic()((_SPH_LONS[5], _SPH_LATS[4]))
+end
+
+# Expected border-ring (i,j) order: west column, east column, then the interiors
+# of the south and north rows (so each corner is yielded once, by the columns).
+function _expected_ring_ij(imin, imax, jmin, jmax)
+    ij = Tuple{Int,Int}[]
+    for j in jmin:jmax;         push!(ij, (imin, j)); end   # west column
+    for j in jmin:jmax;         push!(ij, (imax, j)); end   # east column
+    for i in (imin + 1):(imax - 1); push!(ij, (i, jmin)); end  # south row interior
+    for i in (imin + 1):(imax - 1); push!(ij, (i, jmax)); end  # north row interior
+    return ij
+end
+
+@testset "CurvilinearGridPerimeterPoints yields the border ring in order" begin
+    cbg = _cellbased_sph()
+    pts = _SPH_PTS
+    PP  = ConservativeRegridding.Trees.CurvilinearGridPerimeterPoints
+    # full grid, sub-range, single cell, thin-in-i (W=2), thin-in-j (H=2)
+    for (imin, imax, jmin, jmax) in
+            ((1, 5, 1, 4), (2, 4, 1, 3), (1, 2, 1, 2), (1, 2, 1, 4), (1, 5, 2, 3))
+        it = PP(cbg, imin, imax, jmin, jmax)
+        expected = [pts[i, j] for (i, j) in _expected_ring_ij(imin, imax, jmin, jmax)]
+        @test collect(it) == expected
+        @test length(it) == length(expected)
+        @test length(it) == 2 * (imax - imin + 1) + 2 * (jmax - jmin + 1) - 4
     end
 end
