@@ -141,9 +141,11 @@ Implementations of `AbstractCurvilinearGrid` are [`Trees.RegularGrid`](@ref), [`
 =#
 
 """
-    abstract type AbstractCurvilinearGrid
+    abstract type AbstractCurvilinearGrid{M <: GOCore.Manifold}
 
-Abstract supertype for all curvilinear grid types.
+Abstract supertype for all curvilinear grid types, parameterized by the manifold `M`
+(e.g. `Planar`, `Spherical`) the grid lives on, so algorithms can dispatch on the
+manifold — see the generic spherical [`Trees.cell_range_extent`](@ref).
 The type itself should store the representation of the "base" of the quadtree,
 which should fit into the `QuadtreeCursor` type.
 
@@ -162,7 +164,7 @@ cell_range_extent(grid, irange::UnitRange{Int}, jrange::UnitRange{Int})
 
 and then you may also want to specialize on `STI.node_extent(::QuadtreeCursor{<: YourQuadtreeType}) -> GO.UnitSpherical.SphericalCap{Float64}`
 """
-abstract type AbstractCurvilinearGrid end
+abstract type AbstractCurvilinearGrid{M <: GOCore.Manifold} end
 
 """
     getcell(grid::AbstractCurvilinearGrid, i::Int, j::Int) -> GI.Polygon
@@ -199,6 +201,23 @@ Get the extent of the cells in the given range of indices.
 """
 function cell_range_extent(grid::AbstractCurvilinearGrid, irange::UnitRange{Int}, jrange::UnitRange{Int})
     error("cell_range_extent not implemented for $(typeof(grid))")
+end
+
+"""
+    getvertex(grid::AbstractCurvilinearGrid, i::Int, j::Int)
+
+Get the grid vertex at *point-index* `(i, j)`. Point indices run `1:(n+1) × 1:(m+1)`
+for an `n × m` cell grid — one more than the cell count per dimension, since adjacent
+cells share corners. For spherical grids this returns a
+`GO.UnitSpherical.UnitSphericalPoint`.
+
+Part of the [`Trees.AbstractCurvilinearGrid`](@ref) interface (sibling to
+[`Trees.getcell`](@ref)), used by the spherical [`Trees.cell_range_extent`](@ref) to
+build bounding caps from the corners and `CurvilinearGridPerimeterPoints` of an index
+range. Structured grids on the sphere should implement it; planar grids need not.
+"""
+function getvertex(grid::AbstractCurvilinearGrid, i::Int, j::Int)
+    error("getvertex not implemented for $(typeof(grid))")
 end
 
 # ### Generic higher-level implementations

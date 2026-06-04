@@ -34,7 +34,7 @@ to the manifold the grid lives on.
 
 A grid that is built from a matrix of pre-computed polygons.  This is the most explicit method with the least optimizations, but it is the most flexible.
 """
-struct ExplicitPolygonGrid{M <: GOCore.Manifold, PolyMatrixType <: AbstractMatrix} <: AbstractCurvilinearGrid
+struct ExplicitPolygonGrid{M <: GOCore.Manifold, PolyMatrixType <: AbstractMatrix} <: AbstractCurvilinearGrid{M}
     manifold::M
     polygons::PolyMatrixType
 end
@@ -54,7 +54,7 @@ because it knows the corner points of each polygon.
 
 For a cell based grid with n by m cells, the points matrix will have n+1 by m+1 points.
 """
-struct CellBasedGrid{M <: GOCore.Manifold, PointMatrixType <: AbstractMatrix} <: AbstractCurvilinearGrid
+struct CellBasedGrid{M <: GOCore.Manifold, PointMatrixType <: AbstractMatrix} <: AbstractCurvilinearGrid{M}
     manifold::M
     points::PointMatrixType
 end
@@ -93,7 +93,7 @@ This is optimized for regular grids but requires unit-spherical transforms
 to be run on each call to `node_extent` - so it might be better to use a
 [`CellBasedGrid`](@ref) instead if performance is a concern.
 """
-struct RegularGrid{M <: GOCore.Manifold, DX, DY} <: AbstractCurvilinearGrid
+struct RegularGrid{M <: GOCore.Manifold, DX, DY} <: AbstractCurvilinearGrid{M}
     manifold::M
     x::DX
     y::DY
@@ -177,29 +177,32 @@ using LinearAlgebra
 #=
 Spherical `cell_range_extent` machinery.
 
-The bounding-cap algorithm needs the four corners of the index rectangle plus
-points sampled along its perimeter (because cell edges follow constant-lat /
-constant-lon, not great-circles, so they bulge differently). Earlier versions
-materialized the perimeter into a fresh `Vector` per call — that drove most of
-the GC pressure in the dual-DFS hot path.
+The bounding cap must cover the four corners of the index rectangle and the points
+sampled along its perimeter — cell edges follow constant-lat / constant-lon, not
+great circles, so they bulge differently. Earlier versions materialized the perimeter
+into a fresh `Vector` per call, which drove most of the GC pressure in the dual-DFS
+hot path.
 
-Now the perimeter is a stack-resident iterator (`PerimeterPoints`) that yields
-points on demand via a small per-grid `_pt_at` method, and the cap builder
-consumes any iterator over `UnitSphericalPoint`s. No buffers, no shared state,
-threadsafe by construction.
+Instead each vertex is accessed on demand through the per-grid `getvertex` interface
+method, and the border is walked with the stack-resident `CurvilinearGridPerimeterPoints`
+iterator. The cap builder folds `max`-distance over the corners and that iterator — no
+buffers, no shared state, threadsafe by construction.
 =#
 
-# Per-grid: materialize the UnitSphericalPoint at point-index (i, j).
-@inline _pt_at(g::RegularGrid{<: GO.Spherical}, i::Int, j::Int) =
+# `getvertex` interface methods (interfaces.jl) for the structured spherical grids —
+# the one piece of per-grid variation the bounding-cap code below dispatches on.
+@inline getvertex(g::RegularGrid{<: GO.Spherical}, i::Int, j::Int) =
     GO.UnitSphereFromGeographic()((g.x[i], g.y[j]))
-@inline _pt_at(g::CellBasedGrid{<: GO.Spherical}, i::Int, j::Int) =
+@inline getvertex(g::CellBasedGrid{<: GO.Spherical}, i::Int, j::Int) =
     @inbounds g.points[i, j]
 
-# Perimeter iterator: walks the four sides of the [imin..imax] × [jmin..jmax]
-# index rectangle in order (west column, east column, north row, south row),
-# skipping degenerate sides. Yields the `_pt_at(grid, i, j)` for each border
-# point. State is `(side::Int, k::Int)`; `side > 4` signals exhaustion.
-struct PerimeterPoints{G}
+# Lazy iterator over the border-ring vertices of the point block
+# [imin..imax] × [jmin..jmax], in order: west column, east column, then the
+# interiors of the south and north rows (so each of the 4 corners is yielded once,
+# by the columns). Built on `getvertex`, so it works for any grid implementing the
+# interface. State is a single linear index `n`; the `n → (i,j)` map is plain
+# arithmetic and iteration ends once `n` passes `length`.
+struct CurvilinearGridPerimeterPoints{G}
     grid::G
     imin::Int
     imax::Int
@@ -207,40 +210,25 @@ struct PerimeterPoints{G}
     jmax::Int
 end
 
-Base.IteratorSize(::Type{<: PerimeterPoints}) = Base.HasLength()
-function Base.length(p::PerimeterPoints)
-    nrow = p.imax - p.imin + 1
-    ncol = p.jmax - p.jmin + 1
-    n = ncol                                       # west column
-    n += (p.imax != p.imin) * ncol                 # east column
-    n += (p.jmax != p.jmin) * nrow * 2             # north + south rows
-    return n
-end
-Base.eltype(::Type{PerimeterPoints{G}}) where {G} =
-    Core.Compiler.return_type(_pt_at, Tuple{G, Int, Int})
+Base.IteratorSize(::Type{<: CurvilinearGridPerimeterPoints}) = Base.HasLength()
+# A W×H point block has 2W + 2H − 4 border vertices (corners counted once).
+Base.length(p::CurvilinearGridPerimeterPoints) =
+    2 * (p.imax - p.imin + 1) + 2 * (p.jmax - p.jmin + 1) - 4
 
-@inline function Base.iterate(p::PerimeterPoints, state = (1, p.jmin))
-    while true
-        side, k = state
-        if side == 1                               # west: (imin, k)
-            k <= p.jmax && return _pt_at(p.grid, p.imin, k), (1, k + 1)
-            state = (2, p.jmin)
-        elseif side == 2                           # east: (imax, k)
-            (p.imax != p.imin && k <= p.jmax) &&
-                return _pt_at(p.grid, p.imax, k), (2, k + 1)
-            state = (3, p.imin)
-        elseif side == 3                           # north: (k, jmax)
-            (p.jmax != p.jmin && k <= p.imax) &&
-                return _pt_at(p.grid, k, p.jmax), (3, k + 1)
-            state = (4, p.imin)
-        elseif side == 4                           # south: (k, jmin)
-            (p.jmax != p.jmin && k <= p.imax) &&
-                return _pt_at(p.grid, k, p.jmin), (4, k + 1)
-            return nothing
-        else
-            return nothing
-        end
+@inline function Base.iterate(p::CurvilinearGridPerimeterPoints, n::Int = 1)
+    n > length(p) && return nothing
+    H = p.jmax - p.jmin + 1
+    W = p.imax - p.imin + 1
+    if n <= H
+        i, j = p.imin, p.jmin + n - 1                # west column (incl. both W corners)
+    elseif n <= 2H
+        i, j = p.imax, p.jmin + (n - H) - 1          # east column (incl. both E corners)
+    elseif n <= 2H + (W - 2)
+        i, j = p.imin + (n - 2H), p.jmin             # south row interior
+    else
+        i, j = p.imin + (n - 2H - (W - 2)), p.jmax   # north row interior
     end
+    return getvertex(p.grid, i, j), n + 1
 end
 
 """
@@ -284,22 +272,16 @@ end
     return GO.UnitSpherical.SphericalCap(center, d * 1.0001)
 end
 
-function cell_range_extent(q::CellBasedGrid{<: GO.Spherical}, irange::UnitRange{Int}, jrange::UnitRange{Int})
+# Bounding cap for a range of cells on any spherical curvilinear grid: the four
+# corners, their great-circle edge midpoints, and the perimeter vertices of the
+# index rectangle. One generic method — concrete grids supply only `getvertex`.
+# (`ExplicitPolygonGrid{<: GO.Spherical}` keeps its own, more-specific method above.)
+function cell_range_extent(g::AbstractCurvilinearGrid{<: GO.Spherical}, irange::UnitRange{Int}, jrange::UnitRange{Int})
     imin, imax = extrema(irange); imax += 1
     jmin, jmax = extrema(jrange); jmax += 1
     return _spherical_cap(
-        _pt_at(q, imin, jmin), _pt_at(q, imax, jmin),
-        _pt_at(q, imax, jmax), _pt_at(q, imin, jmax),
-        PerimeterPoints(q, imin, imax, jmin, jmax),
-    )
-end
-
-function cell_range_extent(q::RegularGrid{<: GO.Spherical}, irange::UnitRange{Int}, jrange::UnitRange{Int})
-    imin, imax = extrema(irange); imax += 1
-    jmin, jmax = extrema(jrange); jmax += 1
-    return _spherical_cap(
-        _pt_at(q, imin, jmin), _pt_at(q, imax, jmin),
-        _pt_at(q, imax, jmax), _pt_at(q, imin, jmax),
-        PerimeterPoints(q, imin, imax, jmin, jmax),
+        getvertex(g, imin, jmin), getvertex(g, imax, jmin),
+        getvertex(g, imax, jmax), getvertex(g, imin, jmax),
+        CurvilinearGridPerimeterPoints(g, imin, imax, jmin, jmax),
     )
 end
