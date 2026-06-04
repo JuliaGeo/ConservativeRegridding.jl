@@ -78,7 +78,7 @@ jobs:
             using Pkg
             Pkg.activate(joinpath(ENV["RUNNER_TEMP"], "xesmfenv"))
             Pkg.develop(path = ".")
-            Pkg.add(["XESMF", "Oceananigans", "Chairmarks", "GeometryOps", "CairoMakie"])
+            Pkg.add(["XESMF", "Oceananigans", "Healpix", "Chairmarks", "GeometryOps", "CairoMakie"])
             Pkg.instantiate()'
           cp bench/CondaPkg.toml "$XENV/CondaPkg.toml"
           julia --startup-file=no --project="$XENV" --threads=4 bench/xesmf.jl bench/results/xesmf.jls "$MAXCELLS"

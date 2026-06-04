@@ -76,6 +76,8 @@ finally
     end
 end
 
+# The PR's own rows ARE the Part-1 scaling data (one curve per grid family).
+plot_scaling(pr_rows; path = joinpath(outdir, "scaling.png"))
 plot_pr_vs_master(pr_rows, base_rows; path = joinpath(outdir, "pr_vs_master.png"), base_label = base_label)
 open(io -> println(io, summary_markdown(pr_rows, base_rows; base_label = base_label)),
     joinpath(outdir, "summary.md"), "w")
