@@ -50,3 +50,14 @@ The cross-repo push uses an **SSH deploy key** (write-scoped to the assets repo 
 sticky comment is still posted to this repo with the stock token. The full-resolution graphs are
 also uploaded as a workflow **artifact**. Fork PRs get neither the secret nor a writable token, so
 the push/comment is skipped there (the artifact still uploads).
+
+## Profiling
+
+`profile_cr.jl` breaks `Regridder` construction into its phases (candidate search, COO assembly,
+sparse build, per-cell areas), times each threaded and serial, and profiles the hot path.
+`construction-performance.md` writes up where the time goes and the trig-free broad-phase
+optimization it motivated (#112).
+
+```bash
+julia --project=bench --threads=4 bench/profile_cr.jl
+```
