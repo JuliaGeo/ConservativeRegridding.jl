@@ -347,8 +347,10 @@ function spherical_triangle_area(::GOCore.Spherical, p₁, p₂, p₃)
     q₁ = UnitSphericalPoint(p₁[1], p₁[2], p₁[3])
     q₂ = UnitSphericalPoint(p₂[1], p₂[2], p₂[3])
     q₃ = UnitSphericalPoint(p₃[1], p₃[2], p₃[3])
-    poly = GI.Polygon([GI.LinearRing(StaticArrays.SA[q₁, q₂, q₃, q₁])])
-    return GO.area(GO.Spherical(), poly)
+    poly = GI.Polygon(StaticArrays.SA[GI.LinearRing(StaticArrays.SA[q₁, q₂, q₃, q₁])])
+    # `::Float64` barrier: GO.area on a spherical polygon infers `Any`, which
+    # otherwise boxes every quadrature weight downstream in accumulate_principled_b.
+    return GO.area(GO.Spherical(), poly)::Float64
 end
 
 function spherical_triangle_area(::GOCore.Planar, p₁, p₂, p₃)
