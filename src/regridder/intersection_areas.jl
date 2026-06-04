@@ -8,75 +8,65 @@ using GeometryOps: SpatialTreeInterface as STI
 """
     abstract type IntersectionReturnStyle
 
-Trait describing how an intersection operator delivers its contribution for a
-single unit of work during sparse-matrix assembly.  The trait is resolved once,
-at the top of [`intersection_areas`](@ref) via the accessor
-`IntersectionReturnStyle(op)`, and the resulting value is threaded through the
-parallel assembly so the trait lookup never happens in the hot loop.
+Trait for how an intersection operator delivers its contribution per work item
+during sparse-matrix assembly. Resolved once via `IntersectionReturnStyle(op)`
+at the top of [`intersection_areas`](@ref) and threaded through the parallel
+assembly, so the lookup never happens in the hot loop.
 
 Subtypes:
-- [`OutOfPlaceSingleResult`](@ref): the kernel is `op(src_cell, dst_cell) -> area`
-  and the driver stores the COO triplet.
-- [`InPlace`](@ref): the kernel is
-  `op(rows, cols, vals, item, src_tree, dst_tree) -> nothing` and pushes its own
-  COO contributions.
+- [`OutOfPlaceSingleResult`](@ref): kernel `op(src_cell, dst_cell) -> area`; driver stores the COO triplet.
+- [`InPlace`](@ref): kernel `op(rows, cols, vals, item, src_tree, dst_tree) -> nothing` pushes its own COO.
 
-The default accessor returns [`OutOfPlaceSingleResult`](@ref), so any operator
-that does not override it behaves like [`DefaultIntersectionOperator`](@ref).
+Defaults to [`OutOfPlaceSingleResult`](@ref), matching [`DefaultIntersectionOperator`](@ref).
 """
 abstract type IntersectionReturnStyle end
 
 """
     OutOfPlaceSingleResult <: IntersectionReturnStyle
 
-Return style for operators that compute one scalar per candidate pair.  The
-kernel is `op(src_cell, dst_cell) -> area::Real`; the driver stores the COO
-triplet `(dst_index, src_index, area)` whenever `area > 0`.  This is the default
-style and the one used by [`DefaultIntersectionOperator`](@ref).
+One scalar per candidate pair. Kernel `op(src_cell, dst_cell) -> area::Real`; the
+driver stores the COO triplet `(dst_index, src_index, area)` when `area > 0`.
+Default style, used by [`DefaultIntersectionOperator`](@ref).
 """
 struct OutOfPlaceSingleResult <: IntersectionReturnStyle end
 
 """
     InPlace <: IntersectionReturnStyle
 
-Return style for operators that push a block of COO contributions per work item.
-The kernel is `op(rows, cols, vals, item, src_tree, dst_tree) -> nothing` and is
-responsible for `push!`ing onto `rows`/`cols`/`vals` itself.  Used by
-block-emitting operators such as the ClimaCore spectral-element assemblers.
+A block of COO contributions per work item. Kernel
+`op(rows, cols, vals, item, src_tree, dst_tree) -> nothing` `push!`es onto
+`rows`/`cols`/`vals` itself. Used by block-emitting operators such as the
+ClimaCore spectral-element assemblers.
 """
 struct InPlace <: IntersectionReturnStyle end
 
 """
     IntersectionReturnStyle(op) -> IntersectionReturnStyle
 
-Return the [`IntersectionReturnStyle`](@ref) of intersection operator `op`.
-Defaults to [`OutOfPlaceSingleResult`](@ref); operators that assemble blocks in
-place override this to return [`InPlace`](@ref).
+Return the [`IntersectionReturnStyle`](@ref) of operator `op`. Defaults to
+[`OutOfPlaceSingleResult`](@ref); block-assembling operators override to [`InPlace`](@ref).
 """
 IntersectionReturnStyle(::Any) = OutOfPlaceSingleResult()
 
 """
     work_items(op, candidate_pairs) -> items
 
-Map the candidate `(src_index, dst_index)` pairs to the collection of work units
-that the parallel assembly iterates over.  Each item is handed to the operator:
-destructured as `(src_index, dst_index)` for [`OutOfPlaceSingleResult`](@ref), or
-passed through verbatim for [`InPlace`](@ref).
+Map candidate `(src_index, dst_index)` pairs to the work units the parallel
+assembly iterates. Each item is destructured as `(src_index, dst_index)` for
+[`OutOfPlaceSingleResult`](@ref) or passed through verbatim for [`InPlace`](@ref).
 
-Defaults to one work unit per candidate pair.  Override it to change the parallel
-granularity — e.g. to group all of an element's candidate cells into a single
-work unit.
+Defaults to one unit per candidate pair. Override to change parallel granularity —
+e.g. to group all of an element's candidate cells into one unit.
 """
 work_items(::Any, candidate_pairs) = candidate_pairs
 
 """
     output_matrix_size(op, src_tree, dst_tree) -> (nrows, ncols)
 
-Return the `(nrows, ncols)` shape of the sparse matrix that
-[`intersection_areas`](@ref) assembles for operator `op`.  Defaults to
-`(prod(ncells(dst_tree)), prod(ncells(src_tree)))` — destination cells as rows,
-source cells as columns.  Operators whose row/column counts differ from the cell
-counts (e.g. spectral-element node counts) override this.
+Shape of the sparse matrix [`intersection_areas`](@ref) assembles for `op`.
+Defaults to `(prod(ncells(dst_tree)), prod(ncells(src_tree)))` — dst cells as
+rows, src cells as columns. Operators whose counts differ from cell counts
+(e.g. spectral-element node counts) override this.
 """
 output_matrix_size(::Any, src_tree, dst_tree) =
     (prod(Trees.ncells(dst_tree)), prod(Trees.ncells(src_tree)))
@@ -183,21 +173,18 @@ _parallel_coo(style, op, items, src_tree, dst_tree, ::False; kwargs...) =
                        npartitions = Threads.nthreads() * 4, progress = false)
 
 Assemble the sparse intersection matrix between `src_tree` and `dst_tree` on
-`manifold`.
+`manifold`. Lower-level assembly entry that intersection operators plug into;
+most users go through [`Regridder`](@ref)`(…; intersection_operator = …)`.
 
-This is the lower-level assembly entry that intersection operators plug into;
-most users go through [`Regridder`](@ref)`(…; intersection_operator = …)`, which
-calls this.
-
-The build is driven by three dispatched seams on `intersection_operator`, each
-with a default reproducing the built-in area computation:
+Driven by three dispatched seams on `intersection_operator`, each defaulting to
+the built-in area computation:
 - [`IntersectionReturnStyle`](@ref)`(op)` — how each work item's contribution is stored.
-- [`work_items`](@ref)`(op, candidate_pairs)` — the units of work the parallel loop iterates.
-- [`output_matrix_size`](@ref)`(op, src_tree, dst_tree)` — the `(nrows, ncols)` matrix shape.
+- [`work_items`](@ref)`(op, candidate_pairs)` — the units of work iterated.
+- [`output_matrix_size`](@ref)`(op, src_tree, dst_tree)` — the `(nrows, ncols)` shape.
 
-`threaded` is a `GeometryOpsCore.BoolsAsTypes` (`True()`/`False()`); pass
-`booltype(::Bool)` to convert.  When threaded, candidate work items are
-partitioned into `npartitions` chunks assembled on separate tasks.
+`threaded` is a `GeometryOpsCore.BoolsAsTypes` (`True()`/`False()`; convert via
+`booltype(::Bool)`). When threaded, work items are partitioned into `npartitions`
+chunks assembled on separate tasks.
 """
 function intersection_areas(
         manifold::M, threaded::BoolsAsTypes, dst_tree, src_tree;

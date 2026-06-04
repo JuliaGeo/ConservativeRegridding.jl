@@ -19,10 +19,7 @@ import ClimaCore.Utilities: linear_ind
 """
     coords_for_face(mesh::CubedSphereMesh, face_idx)::Matrix{UnitSphericalPoint}
 
-Get the normalized coordinates of each element vertex for a face of a cubed sphere.
-
-For example, if the cubed sphere has 8 elements in each dimension of a panel (face),
-this function will return a matrix of 9x9 points, each with normalized coordinates.
+Normalized vertex coordinates for a cubed-sphere face: an `(ne+1)×(ne+1)` matrix of points.
 """
 function coords_for_face(mesh::Meshes.AbstractCubedSphere, face_idx)
     ne = mesh.ne
@@ -104,17 +101,11 @@ Trees.treeify(manifold::GOCore.Spherical, field::ClimaCore.Fields.Field) = Trees
 """
     flat_nodal_data(data::DataLayouts.AbstractData) → Vector
 
-Flatten nodal storage to a `Vector` using ClimaCore’s [`DataLayouts.data2array`](@ref),
-which matches the memory layout (for `IJFH`-style data this is `i` fastest, then `j`,
-then remaining horizontal indices).
-
-For layouts with a vertical dimension (`VIJFH`, etc.), `data2array` is an ``N_v \\times N_h``
-matrix; we take the first vertical level so behavior matches the previous explicit
-`view(parent, :, :, 1, 1, :)` slicing.
-
-For scalar fields you can equivalently use `Fields.field2array(field)`; this helper
-accepts raw `AbstractData` (e.g. `Fields.field_values(coords.lat)` or
-`Spaces.weighted_jacobian(space)`).
+Flatten nodal storage to a `Vector` via [`DataLayouts.data2array`](@ref) (memory layout:
+for `IJFH`, `i` fastest, then `j`, then horizontal indices). For layouts with a vertical
+dimension (`VIJFH`, etc.) `data2array` is an ``N_v \\times N_h`` matrix; the first vertical
+level is taken. Unlike `Fields.field2array`, accepts raw `AbstractData` (e.g.
+`Fields.field_values(coords.lat)`, `Spaces.weighted_jacobian(space)`).
 """
 function flat_nodal_data(data::DataLayouts.AbstractData)
     array = DataLayouts.data2array(data)
@@ -130,9 +121,8 @@ end
 """
     se_node_positions(space) → Vector{UnitSphericalPoint}
 
-Extract the lat/lon positions of all spectral element nodes as a flat vector of
-`UnitSphericalPoint`s.  Ordering: all Nq² nodes of element 1 (i fastest),
-then element 2, etc.
+Positions of all SE nodes as a flat vector. Ordering: all Nq² nodes of element 1
+(i fastest), then element 2, etc.
 """
 function se_node_positions(space)
     coords = Fields.coordinate_field(space)
@@ -145,8 +135,8 @@ end
 """
     se_node_weights(space) → Vector{Float64}
 
-Extract the Jacobian integration weights ``W_{e,i,j}`` for all SE nodes as a
-flat vector.  Same ordering as [`se_node_positions`](@ref).
+Jacobian integration weights ``W_{e,i,j}`` for all SE nodes as a flat vector.
+Same ordering as [`se_node_positions`](@ref).
 """
 function se_node_weights(space)
     wj = Spaces.weighted_jacobian(space)
@@ -160,12 +150,10 @@ end
 """
     element_face_local_indices(topology, elem_idx) -> (face, ie, je)
 
-Return the cubed-sphere face (1–6) and the element's local 2D indices
-`(ie, je)` within that face for the global element index `elem_idx`.
-Reads `topology.elemorder`, which encodes the actual element layout —
-either face-major `CartesianIndices((ne, ne, 6))` or a space-filling-curve
-permutation `Vector{CartesianIndex{3}}`. This makes the mapping correct
-for both regular and Gilbert-ordered topologies.
+Cubed-sphere face (1–6) and local 2D indices `(ie, je)` for global element `elem_idx`.
+Reads `topology.elemorder` (face-major `CartesianIndices((ne, ne, 6))` or a space-filling
+permutation `Vector{CartesianIndex{3}}`), so it is correct for both regular and
+Gilbert-ordered topologies.
 """
 function element_face_local_indices(topology::Topologies.Topology2D, elem_idx::Int)
     ci = topology.elemorder[elem_idx]
@@ -175,15 +163,12 @@ end
 """
     inverse_element_map(space, elem_idx, x) -> (ξ, η)
 
-Given a 3D point `x` on the sphere known to lie inside element `elem_idx`,
-return its element-local reference coordinates `(ξ, η) ∈ [-1, 1]²`.
-
-Delegates to `ClimaCore.Meshes.reference_coordinates`, which handles both
-`IntrinsicMap` (closed-form equiangular inversion) and `NormalizedBilinearMap`
-(bilinear-invert against the four corner positions, the default for cubed
-spheres). Both maps share the same vertex positions, so corner GLL nodes
-agree under either; interior nodes differ, which is why a hand-rolled
-equiangular-only inverse fails for the default mesh.
+Element-local reference coordinates `(ξ, η) ∈ [-1, 1]²` of a 3D sphere point `x` known to
+lie inside element `elem_idx`. Delegates to `ClimaCore.Meshes.reference_coordinates`, which
+handles both `IntrinsicMap` (closed-form equiangular inversion) and `NormalizedBilinearMap`
+(bilinear-invert against the four corners; the cubed-sphere default). The two maps agree at
+corner GLL nodes but differ at interior nodes, so a hand-rolled equiangular-only inverse
+fails for the default mesh.
 """
 function inverse_element_map(space::ClimaCore.Spaces.AbstractSpectralElementSpace,
                              elem_idx::Int, x)
@@ -207,14 +192,13 @@ end
 """
     element_jacobian_at(space, elem_idx, ξ, η) -> Float64
 
-Evaluate the SE element's Jacobian at reference coordinates `(ξ, η)` by
-Lagrange interpolation from the nodal weighted-Jacobian values stored on
-`space` (PDF Eq. 47):
+SE element Jacobian at `(ξ, η)` via Lagrange interpolation of nodal weighted-Jacobian
+values on `space` (PDF Eq. 47):
 
     Jᵉ(ξ, η) ≈ Σ_{p,q} Jᵉₚᵩ ϕₚ(ξ) ϕᵩ(η)
 
-where `Jᵉₚᵩ = WJ[p, q, 1, elem_idx] / (wₚ wᵩ)` is the unweighted Jacobian
-recovered from ClimaCore's `Spaces.weighted_jacobian` storage.
+where `Jᵉₚᵩ = WJ[p, q, 1, elem_idx] / (wₚ wᵩ)` is the unweighted Jacobian recovered from
+`Spaces.weighted_jacobian` storage.
 """
 function element_jacobian_at(space::ClimaCore.Spaces.AbstractSpectralElementSpace,
                              elem_idx::Int, ξ, η)
@@ -242,18 +226,15 @@ end
     accumulate_principled_b(manifold, space, elem_idx, intersection_polygon;
                             triangle_quad_degree) -> Matrix{Float64}
 
-Compute the principled `B(k, (e, i, j))` weights for a single source SE
-element `e = elem_idx` and a single destination polygon `intersection_polygon`
-(physical-space polygon, on the manifold). Returns an `Nq × Nq` matrix
-`B[i, j]` such that
+Principled `B(k, (e, i, j))` weights for one source SE element `e = elem_idx` and one
+destination physical-space polygon `intersection_polygon`. Returns an `Nq × Nq` matrix with
 
     B[i, j] ≈ ∫_{intersection_polygon} ϕᵢ(ξ) ϕⱼ(η) dA_phys       (PDF Eq. 48)
 
-The Jacobian factor in PDF Eq. 18 cancels via change of variables: if we
-integrate in physical space, `∫_{ref} ϕᵢϕⱼ Jᵉ dξ dη = ∫_{phys} ϕᵢ ϕⱼ dA`.
-Approach: fan-triangulate the polygon from its centroid, apply a barycentric
-Gauss rule on each triangle, evaluate the Lagrange basis at each quadrature
-point (using `inverse_element_map` to obtain `(ξ, η)`).
+The Jacobian factor in PDF Eq. 18 cancels under change of variables:
+`∫_{ref} ϕᵢϕⱼ Jᵉ dξ dη = ∫_{phys} ϕᵢ ϕⱼ dA`. Approach: fan-triangulate the polygon from its
+centroid, apply a barycentric Gauss rule per triangle, and evaluate the Lagrange basis at
+each quadrature point (`inverse_element_map` gives `(ξ, η)`).
 """
 function accumulate_principled_b(
     manifold::GOCore.Manifold,
@@ -362,8 +343,7 @@ end
 """
     se_field_to_vec(field)
 
-Convert a ClimaCore field to a flat vector of nodal values.
-Same ordering as [`se_node_positions`](@ref).
+Flat vector of a ClimaCore field's nodal values. Same ordering as [`se_node_positions`](@ref).
 """
 function se_field_to_vec(field)
     return flat_nodal_data(Fields.field_values(field))
@@ -509,16 +489,14 @@ end
 """
     compute_local_mass_matrix(space, elem_idx) -> Matrix{Float64}
 
-Build the dense `Nq² × Nq²` mass matrix for SE element `elem_idx`,
+Dense `Nq² × Nq²` mass matrix for SE element `elem_idx`,
 
     M^{e}_{(a,b),(i,j)} = ∫_{e} ϕₐ(ξ) ϕᵦ(η) ϕᵢ(ξ) ϕⱼ(η) Jᵉ(ξ,η) dξ dη ,
 
-with the row/col flattening following ClimaCore.Utilities.linear_ind(). 
-The integrand is a polynomial of bidegree `(2(Nq-1), 2(Nq-1))` in (ξ, η) 
-(the basis-function product) plus a polynomial of bidegree `(Nq-1, Nq-1)` 
-from the Lagrange interpolation of `Jᵉ` from the SE nodal values — total 
-bidegree `(3(Nq-1), 3(Nq-1))`. A GLL rule with `n` points per direction is 
-exact for polynomials of degree `2n - 1`, so we use `n = ceil((3Nq - 2)/2) + 1`.
+row/col flattening per `ClimaCore.Utilities.linear_ind()`. The integrand has bidegree
+`(2(Nq-1), 2(Nq-1))` (basis-function product) plus `(Nq-1, Nq-1)` (Lagrange-interpolated
+`Jᵉ`), total `(3(Nq-1), 3(Nq-1))`. A GLL rule with `n` points/direction is exact to degree
+`2n - 1`, so `n = ceil((3Nq - 2)/2) + 1`.
 """
 function compute_local_mass_matrix(
     space::ClimaCore.Spaces.AbstractSpectralElementSpace, elem_idx::Int,
@@ -677,13 +655,11 @@ end
 """
     fv_to_se_l2_projection(manifold, dst, src; ...)
 
-Per-element L2 projection FV → SE. Same `B` accumulation as the principled
-path, but the per-element rows are then multiplied by the *full* local mass
-matrix inverse `(M^{e})^{-1}` (rather than divided by the lumped diagonal
-`Wᵉᵢⱼ` as in PDF Eq. 30). This preserves constants exactly and is higher-
-order accurate: for any `f_src` that is exactly representable as a constant
-in each FV cell, the projection `f_dst = (M^{e})^{-1} (Bᵀ f_src)|_e` is the
-optimal L2 fit on the SE basis over element `e`.
+Per-element L2 projection FV → SE. Same `B` accumulation as the principled path, but
+per-element rows are multiplied by the *full* mass-matrix inverse `(M^{e})^{-1}` rather than
+divided by the lumped diagonal `Wᵉᵢⱼ` (cf. PDF Eq. 30). This preserves constants exactly and
+is higher-order accurate: `f_dst = (M^{e})^{-1} (Bᵀ f_src)|_e` is the optimal L2 fit on the
+SE basis over element `e`.
 """
 function fv_to_se_l2_projection(manifold, dst, src;
                                 threaded, triangle_quad_degree, kwargs...)
