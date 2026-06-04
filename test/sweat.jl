@@ -13,93 +13,7 @@ const HealpixExt = Base.get_extension(ConservativeRegridding, :ConservativeRegri
 const RingGridsExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingRingGridsExt)
 const SpeedyWeatherExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingSpeedyWeatherExt)
 
-function test_integral_is_conserved(regridder, tree1, values1, tree2, values2, final_values; rtol = sqrt(eps(Float64)))
-    tree1_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(tree1))
-    tree2_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(tree2))
-
-    @test sum(values1 .* tree1_areas) ≈ sum(final_values .* tree2_areas) rtol=rtol
-    @test sum(values2 .* tree2_areas) ≈ sum(final_values .* tree1_areas) rtol=rtol
-end
-
-function test_intersection_areas_agree(regridder, tree1, tree2; rtol = sqrt(eps(Float64)))
-    @test sum(regridder.intersections, dims=2)[:, 1] ≈ regridder.dst_areas rtol=rtol
-    @test sum(regridder.intersections, dims=1)[1, :] ≈ regridder.src_areas rtol=rtol
-end
-
-
-function zero_field!(field, values)
-    set_field_values!(field, values, (x, y, z = 0) -> 0)
-end
-
-# function set_field_values!(field::Oceananigans.Field, values, fun)
-#     Oceananigans.set!(field, fun)
-#     values .= vec(Oceananigans.interior(field))
-# end
-# function set_field_values!(field::ClimaCore.Fields.Field, values, fun)
-#     space = getfield(field, :space)
-#     centroids_latlong = GO.UnitSpherical.GeographicFromUnitSphere().(ClimaCoreExt.get_element_centroids(space))
-#     values .= splat(fun).(centroids_latlong)
-#     # ClimaCoreExt.set_value_per_element!(field, elems)
-# end
-# function set_field_values!(field::Healpix.HealpixMap, values, fun)
-#     idxs = 1:length(field.pixels)
-#     vals = (
-#         begin
-#             theta, phi = Healpix.pix2ang(field, idx)
-#             lat = deg2rad(90-theta)
-#             lon = deg2rad(phi)
-#             fun(lon, lat)
-#         end
-#         for idx in idxs
-#     )
-
-#     values .= vals
-# end
-
-import SimplexQuad
-using LinearAlgebra: cross, dot, norm
-import IterTools
-
-struct SphericalPolygonIntegrator{X, W}
-    x::X
-    w::W
-    function SphericalPolygonIntegrator(; order=7)
-        X, W = SimplexQuad.simplexquad(order, 2)  # points in barycentric-like coords on unit simplex
-        new{typeof(X), typeof(W)}(X, W)
-    end
-end
-
-function (integrator::SphericalPolygonIntegrator)(vertices::AbstractVector{<:GO.UnitSpherical.UnitSphericalPoint}, f)
-    # Reference triangle: unit 2-simplex
-    X, W = integrator.x, integrator.w  # points in barycentric-like coords on unit simplex
-    
-    total = 0.0
-    A = vertices[1]
-    for i in 2:length(vertices)-1
-        B, C = vertices[i], vertices[i+1]
-        det_ABC = dot(A, cross(B, C))
-        for k in axes(X, 1)
-            ξ1, ξ2 = X[k, 1], X[k, 2]
-            ξ0 = 1 - ξ1 - ξ2
-            p = ξ1 * A + ξ2 * B + ξ0 * C
-            np = norm(p)
-            s = p / np
-            J = abs(det_ABC) / np^3
-            total += W[k] * f(s) * J
-        end
-    end
-    return total
-end
-
-
-function set_field_values!(field, values, fun; integrator = SphericalPolygonIntegrator(; order=7))
-    tree = Trees.treeify(field)
-    polys = IterTools.ivec(Trees.getcell(tree))
-    cell_areas = ConservativeRegridding.areas(GO.Spherical(), tree)
-    values .= Iterators.map(zip(polys, cell_areas)) do (poly, area)
-        integrator(GI.getpoint(GI.getexterior(poly)), p -> fun((GO.UnitSpherical.GeographicFromUnitSphere()(p))...)) / area
-    end
-end
+include("sweat_common.jl")
 
 
 
@@ -124,7 +38,7 @@ climacore_cubedsphere_grid = ClimaCore.CommonSpaces.CubedSphereSpace(;
     h_elem = 64,
 )
 climacore_cubedsphere_field = ClimaCore.Fields.ones(climacore_cubedsphere_grid)
-climacore_cubedsphere_vals = zeros(6*climacore_cubedsphere_grid.grid.topology.mesh.ne^2)
+climacore_cubedsphere_vals = zeros(length(ClimaCoreExt.se_field_to_vec(climacore_cubedsphere_field)))
 
 climacore_cubedsphere_gilbert_ordered_grid = let
     device = ClimaCore.ClimaComms.device()
@@ -141,7 +55,7 @@ climacore_cubedsphere_gilbert_ordered_grid = let
     )
 end
 climacore_cubedsphere_gilbert_ordered_field = ClimaCore.Fields.ones(climacore_cubedsphere_gilbert_ordered_grid)
-climacore_cubedsphere_gilbert_ordered_vals = zeros(6*climacore_cubedsphere_gilbert_ordered_grid.grid.topology.mesh.ne^2)
+climacore_cubedsphere_gilbert_ordered_vals = zeros(length(ClimaCoreExt.se_field_to_vec(climacore_cubedsphere_gilbert_ordered_field)))
 
 healpix_nested_order_field = Healpix.HealpixMap{Float64, Healpix.NestedOrder}(64)
 healpix_nested_order_vals = healpix_nested_order_field.pixels
@@ -179,11 +93,19 @@ fields = [oceananigans_fields..., climacore_fields..., healpix_fields..., speedy
 regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
 @testset "Sweat test" begin
     @testset "Sweat test: $name1 -> $name2" for (i, (name1, field1, vals1)) in enumerate(fields), (j, (name2, field2, vals2)) in enumerate(fields)
+        # SE → SE is unsupported (must go SE → FV → SE via two regridders).
+        both_se = field1 isa ClimaCore.Fields.Field && field2 isa ClimaCore.Fields.Field
+        both_se && continue
+
         tic = time()
         regridder = @test_nowarn ConservativeRegridding.Regridder(GO.Spherical(), field2, field1; normalize = false)
         toc = time()
         push!(regridder_construction_times, (name1, name2) => toc - tic)
 
+        # The intersection-area agreement check is an FV-overlap property; the
+        # principled/L2 SE matrices are not pure overlap matrices, so skip it
+        # when an SE field is involved (SE conservation is checked below).
+        has_se = field1 isa ClimaCore.Fields.Field || field2 isa ClimaCore.Fields.Field
         # Test that the areas are correct approximately
         has_tripolar = (field2 isa Oceananigans.Field && field2.grid isa Oceananigans.TripolarGrid) ||
                        (field1 isa Oceananigans.Field && field1.grid isa Oceananigans.TripolarGrid)
@@ -192,7 +114,7 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
         has_rotated = (field2 isa Oceananigans.Field && field2.grid isa Oceananigans.RotatedLatitudeLongitudeGrid) ||
                       (field1 isa Oceananigans.Field && field1.grid isa Oceananigans.RotatedLatitudeLongitudeGrid)
         areas_rtol = has_rotated ? 1e-2 : sqrt(eps(Float64))
-        if !has_tripolar
+        if !has_tripolar && !has_se
             test_intersection_areas_agree(regridder, field1, field2; rtol=areas_rtol)
         end
 
@@ -206,11 +128,9 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
         vals2_analytical = vals2[:]
 
         # Test that the areas are correct approximately
-        if !has_tripolar
+        if !has_tripolar && !has_se
             # Oceananigans tripolar grid does not cover the globe
             test_intersection_areas_agree(regridder, field1, field2; rtol=areas_rtol)
-        else
-            # continue
         end
         i == j && continue
 
@@ -248,14 +168,21 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
                     # RingGrids full grids (SpeedyWeather's FullClenshaw/FullGaussian) have the
                     # same issue by a different route: cell centers sit at lond[1] = 0°, so the
                     # first ring cell spans [-Δλ/2, +Δλ/2] and straddles the seam directly.
-                    is_dateline_straddling_source =
-                        (field1 isa Oceananigans.Field && (
-                            field1.grid isa Oceananigans.TripolarGrid ||
-                            field1.grid isa Oceananigans.RotatedLatitudeLongitudeGrid
-                        )) ||
-                        (field1 isa RingGrids.AbstractField && field1.grid isa RingGrids.AbstractFullGrid)
-                    tol = (is_dateline_straddling_source && fun_to_test isa ConservativeRegridding.LongitudeField) ? 5e-2 : 1e-2
-                    @test sum(abs.(vals2_regridded) .* regridder.dst_areas) ≈ sum(abs.(vals2_analytical) .* regridder.dst_areas) rtol=tol
+                    # Grids whose cells span the 0°/360° seam (tripolar, rotated,
+                    # RingGrids full grids, or the cubed-sphere SE panels) smear
+                    # the discontinuous `LongitudeField` by ~1% under regridding.
+                    straddles_dateline(f) =
+                        (f isa Oceananigans.Field && (f.grid isa Oceananigans.TripolarGrid ||
+                                                      f.grid isa Oceananigans.RotatedLatitudeLongitudeGrid)) ||
+                        (f isa RingGrids.AbstractField && f.grid isa RingGrids.AbstractFullGrid) ||
+                        f isa ClimaCore.Fields.Field
+                    has_dateline_seam = straddles_dateline(field1) || straddles_dateline(field2)
+                    tol = (has_dateline_seam && fun_to_test isa ConservativeRegridding.LongitudeField) ? 5e-2 : 1e-2
+                    w2 = test_integration_weights(field2, regridder)
+                    
+                    # Compare only over covered destination cells.
+                    covered = vec(sum(regridder.intersections; dims=2)) .> 0
+                    @test sum(abs.(vals2_regridded[covered]) .* w2[covered]) ≈ sum(abs.(vals2_analytical[covered]) .* w2[covered]) rtol=tol
                 end
             end
         end

@@ -30,6 +30,8 @@ export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
 export QuadtreeCursor, TopDownQuadtreeCursor
 export should_parallelize, WithParallelizePolicy
 
+include("regridder/triangle_quadrature.jl")
+
 include("regridder/regridder.jl")
 include("regridder/regrid.jl")
 include("regridder/intersection_areas.jl")

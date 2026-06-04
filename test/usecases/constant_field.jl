@@ -12,6 +12,19 @@ import Healpix
 using ClimaCore:
     CommonSpaces, Fields, Spaces, Meshes, Topologies, Domains, ClimaComms
 
+const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingClimaCoreExt)
+
+is_se_grid(g) = g isa Spaces.AbstractSpectralElementSpace
+
+# `ones`/`zeros` factories that match the grid: ClimaCore Fields for SE spaces
+# (so the Field-dispatching pipeline kicks in), flat vectors for everything else.
+ones_for(grid, n)  = is_se_grid(grid) ? Fields.ones(grid)  : ones(n)
+zeros_for(grid, n) = is_se_grid(grid) ? Fields.zeros(grid) : zeros(n)
+
+# Pull a flat numeric vector out of either a Field or a plain array.
+flat(x::Fields.Field) = ClimaCoreExt.se_field_to_vec(x)
+flat(x::AbstractVector) = x
+
 # ---------------------------------------------------------------------------
 # Helper: regrid a field of ones and check the result.
 #
@@ -19,16 +32,22 @@ using ClimaCore:
 #   - global source:     every covered dst cell should be ≈ 1.0
 #   - non-global source: undershoot is expected (uncovered regions),
 #                        but overshoot (value > 1 + atol) indicates a bug
+#
+# For SE-flavored sides we pass a ClimaCore Field through `regrid!`; the
+# Field-dispatched extract/initialize/finalize methods handle the SE conversion.
+# Transpose (backward) is only exercised for FV↔FV pairs — the SE-flavored
+# regridders are direction-specific by construction.
 # ---------------------------------------------------------------------------
-function test_constant_regrid(R, src_global, dst_global; atol=1e-3)
+function test_constant_regrid(R, src_grid, dst_grid, src_global, dst_global; atol=1e-3)
     n_dst, n_src = size(R)
     A = R.intersections
 
     # Forward: src → dst
     @testset let direction = :forward, src_covers_globe = src_global
-        src_vals = ones(n_src)
-        dst_vals = zeros(n_dst)
-        ConservativeRegridding.regrid!(dst_vals, R, src_vals)
+        src = ones_for(src_grid, n_src)
+        dst = zeros_for(dst_grid, n_dst)
+        ConservativeRegridding.regrid!(dst, R, src)
+        dst_vals = flat(dst)
         covered = vec(sum(A, dims=2)) .> 0
         if src_global
             max_dev = maximum(abs.(dst_vals[covered] .- 1.0); init=0.0)
@@ -39,20 +58,20 @@ function test_constant_regrid(R, src_global, dst_global; atol=1e-3)
         end
     end
 
-    # Backward: dst → src via transpose
-    # In the backward direction the "source" of the regrid is the dst grid of R,
-    # so dst_global determines the check.
-    @testset let direction = :backward, src_covers_globe = dst_global
-        dst_vals = ones(n_dst)
-        src_vals = zeros(n_src)
-        ConservativeRegridding.regrid!(src_vals, transpose(R), dst_vals)
-        covered = vec(sum(A, dims=1)) .> 0
-        if dst_global
-            max_dev = maximum(abs.(src_vals[covered] .- 1.0); init=0.0)
-            @test max_dev < atol
-        else
-            max_val = maximum(src_vals[covered]; init=0.0)
-            @test max_val < 1.0 + atol
+    # Backward via transpose — only valid for FV↔FV pairs.
+    if !is_se_grid(src_grid) && !is_se_grid(dst_grid)
+        @testset let direction = :backward, src_covers_globe = dst_global
+            dst_vals_in = ones(n_dst)
+            src_vals_out = zeros(n_src)
+            ConservativeRegridding.regrid!(src_vals_out, transpose(R), dst_vals_in)
+            covered = vec(sum(A, dims=1)) .> 0
+            if dst_global
+                max_dev = maximum(abs.(src_vals_out[covered] .- 1.0); init=0.0)
+                @test max_dev < atol
+            else
+                max_val = maximum(src_vals_out[covered]; init=0.0)
+                @test max_val < 1.0 + atol
+            end
         end
     end
 end
@@ -80,7 +99,7 @@ healpix_r = Healpix.HealpixMap{Float64, Healpix.RingOrder}(16)
 
 # ClimaCore – regular ordering
 climacore_r = CommonSpaces.CubedSphereSpace(;
-    radius=GO.Spherical().radius, n_quad_points=2, h_elem=16,
+    radius=GO.Spherical().radius, n_quad_points=4, h_elem=16,
 )
 
 # ClimaCore – Gilbert (space-filling curve) ordering
@@ -89,7 +108,7 @@ _context  = ClimaComms.context(_device)
 _h_mesh   = Meshes.EquiangularCubedSphere(Domains.SphereDomain{Float64}(GO.Spherical().radius), 16)
 _h_topo   = Topologies.Topology2D(_context, _h_mesh, Topologies.spacefillingcurve(_h_mesh))
 climacore_g = CommonSpaces.CubedSphereSpace(;
-    radius=_h_mesh.domain.radius, n_quad_points=2, h_elem=16,
+    radius=_h_mesh.domain.radius, n_quad_points=4, h_elem=16,
     h_mesh=_h_mesh, h_topology=_h_topo,
 )
 
@@ -116,9 +135,11 @@ grids = [
     for i in 1:length(grids), j in (i+1):length(grids)
         d = grids[i]
         s = grids[j]
+        # Skip SE ↔ SE pairs — this PR drops SE → SE regridding.
+        is_se_grid(d.grid) && is_se_grid(s.grid) && continue
         @testset "$(d.name) ↔ $(s.name)" begin
             R = ConservativeRegridding.Regridder(GO.Spherical(), d.grid, s.grid)
-            test_constant_regrid(R, s.global_coverage, d.global_coverage)
+            test_constant_regrid(R, s.grid, d.grid, s.global_coverage, d.global_coverage)
         end
     end
 end
@@ -129,5 +150,5 @@ end
 
 @testset "Constant-field regridding (planar)" begin
     R = ConservativeRegridding.Regridder(rect_a, rect_b; threaded=false)
-    test_constant_regrid(R, true, true)
+    test_constant_regrid(R, rect_b, rect_a, true, true)
 end
