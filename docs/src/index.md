@@ -123,3 +123,18 @@ In ConservativeRegridding.jl:
 ConservativeRegridding.Regridder
 ConservativeRegridding.regrid!
 ```
+
+### Intersection operator interface
+
+These functions let you plug a custom weight kernel into the shared parallel assembly.
+See [Customizing the weights: the intersection operator interface](@ref) for a walkthrough.
+
+```@docs
+ConservativeRegridding.intersection_areas
+ConservativeRegridding.DefaultIntersectionOperator
+ConservativeRegridding.IntersectionReturnStyle
+ConservativeRegridding.OutOfPlaceSingleResult
+ConservativeRegridding.InPlace
+ConservativeRegridding.work_items
+ConservativeRegridding.output_matrix_size
+```

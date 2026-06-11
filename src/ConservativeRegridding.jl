@@ -40,6 +40,10 @@ include("regridder/intersection_areas.jl")
 @public Regridder, regrid, regrid!
 @public areas
 @public AbstractDimensionalSlicer, NDSliceLoop, slice_views, extract_source_arraylike, extract_dest_arraylike
+# Intersection-operator assembly interface (operators can plug into `intersection_areas`)
+@public intersection_areas, DefaultIntersectionOperator
+@public IntersectionReturnStyle, OutOfPlaceSingleResult, InPlace
+@public work_items, output_matrix_size
 
 """
     save_esmf_weights(path, regridder;

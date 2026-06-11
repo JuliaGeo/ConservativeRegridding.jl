@@ -192,6 +192,27 @@ end
     @test isapprox(sum(fv_vals .* fv_areas), sum(src_field); rtol=1e-2, atol=10.0)
 end
 
+@testset "Threaded vs serial assembly is identical (SE↔FV)" begin
+    # Parallel and serial assembly must produce identical matrices: there are no
+    # cross-pair duplicate (row,col) entries, so chunking can't change any sum. A
+    # discrepancy signals a data race or ordering bug. Tested on regular + Gilbert.
+    coarse_latlon = LatitudeLongitudeGrid(
+        size=(72, 36, 1), longitude=(0, 360), latitude=(-90, 90),
+        z=(0, 1), radius=GO.Spherical().radius,
+    )
+    for use_sfc in (false, true)
+        space = make_cubedsphere_space(; h_elem=8, n_quad_points=4, use_sfc=use_sfc)
+
+        se_to_fv_threaded = ConservativeRegridding.Regridder(coarse_latlon, space; threaded=true)
+        se_to_fv_serial   = ConservativeRegridding.Regridder(coarse_latlon, space; threaded=false)
+        @test se_to_fv_threaded.intersections == se_to_fv_serial.intersections
+
+        fv_to_se_threaded = ConservativeRegridding.Regridder(space, coarse_latlon; threaded=true)
+        fv_to_se_serial   = ConservativeRegridding.Regridder(space, coarse_latlon; threaded=false)
+        @test fv_to_se_threaded.intersections == fv_to_se_serial.intersections
+    end
+end
+
 @testset "Oceananigans TripolarGrid to ClimaCore cubed sphere (default folding)" begin
     tripolar_grid = TripolarGrid(size=(360, 180, 1))
     space = CommonSpaces.CubedSphereSpace(;
