@@ -48,7 +48,7 @@ jobs:
 
       - uses: julia-actions/setup-julia@v3
         with:
-          version: '1.11'
+          version: '1'
       - uses: julia-actions/cache@v3
 
       # --- Parts 1 & 4: conda-free PR-vs-base construction scaling (the common path) ----------
