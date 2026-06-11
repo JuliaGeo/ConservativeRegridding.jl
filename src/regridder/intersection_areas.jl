@@ -61,6 +61,16 @@ e.g. to group all of an element's candidate cells into one unit.
 work_items(::Any, candidate_pairs) = candidate_pairs
 
 """
+    task_local_operator(op) -> op′
+
+Return the operator instance one assembly task should use. Called once per chunk
+inside the parallel COO assembly (never in the per-item hot loop), so operators
+holding mutable per-task state — e.g. allocation caches — can hand each task a
+private copy. Defaults to returning `op` unchanged.
+"""
+task_local_operator(op) = op
+
+"""
     output_matrix_size(op, src_tree, dst_tree) -> (nrows, ncols)
 
 Shape of the sparse matrix [`intersection_areas`](@ref) assembles for `op`.
@@ -126,7 +136,15 @@ end
 end
 
 # One chunk of work items → its COO triplets. `style` is passed in, not re-resolved.
+# `task_local_operator`'s return type may not be inferrable (e.g. it can depend on
+# the loaded GeometryOps), so resolve the per-task operator here and pay one dynamic
+# dispatch per chunk into the type-stable kernel below — never one per item.
 function _assemble_chunk(style, op, items, src_tree, dst_tree)
+    chunk_op = task_local_operator(op)
+    return _assemble_chunk_kernel(style, chunk_op, items, src_tree, dst_tree)
+end
+
+function _assemble_chunk_kernel(style, op, items, src_tree, dst_tree)
     rows = Int[]
     cols = Int[]
     vals = Float64[]
@@ -176,11 +194,12 @@ Assemble the sparse intersection matrix between `src_tree` and `dst_tree` on
 `manifold`. Lower-level assembly entry that intersection operators plug into;
 most users go through [`Regridder`](@ref)`(…; intersection_operator = …)`.
 
-Driven by three dispatched seams on `intersection_operator`, each defaulting to
+Driven by four dispatched seams on `intersection_operator`, each defaulting to
 the built-in area computation:
 - [`IntersectionReturnStyle`](@ref)`(op)` — how each work item's contribution is stored.
 - [`work_items`](@ref)`(op, candidate_pairs)` — the units of work iterated.
 - [`output_matrix_size`](@ref)`(op, src_tree, dst_tree)` — the `(nrows, ncols)` shape.
+- [`task_local_operator`](@ref)`(op)` — per-task operator copy (e.g. carrying a private cache).
 
 `threaded` is a `GeometryOpsCore.BoolsAsTypes` (`True()`/`False()`; convert via
 `booltype(::Bool)`). When threaded, work items are partitioned into `npartitions`

@@ -43,7 +43,7 @@ include("regridder/intersection_areas.jl")
 # Intersection-operator assembly interface (operators can plug into `intersection_areas`)
 @public intersection_areas, DefaultIntersectionOperator
 @public IntersectionReturnStyle, OutOfPlaceSingleResult, InPlace
-@public work_items, output_matrix_size
+@public work_items, output_matrix_size, task_local_operator
 
 """
     save_esmf_weights(path, regridder;

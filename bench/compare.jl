@@ -33,7 +33,12 @@ function build_scaling_env(crpath)
     code = """
     using Pkg
     Pkg.develop(path = raw"$(crpath)")
-    Pkg.add(["Oceananigans", "Healpix", "Chairmarks", "GeometryOps"])
+    Pkg.add(["Oceananigans", "Healpix", "Chairmarks"])
+    # TEMPORARY (this PR only): the Sutherland-Hodgman allocation cache needs
+    # GeometryOps#as/cache-sutherlandhodgman; revert to registered GeometryOps
+    # once that branch is released. Both refs get the same GeometryOps, so the
+    # comparison isolates ConservativeRegridding's cache wiring.
+    Pkg.add(url = "https://github.com/JuliaGeo/GeometryOps.jl", rev = "as/cache-sutherlandhodgman")
     Pkg.instantiate()
     """
     run(`julia --startup-file=no --project=$(env) -e $(code)`)
