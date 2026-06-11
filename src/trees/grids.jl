@@ -141,7 +141,8 @@ function cell_range_extent(q::ExplicitPolygonGrid{<: GO.Spherical}, irange::Unit
     end
     isempty(all_points) && return GO.UnitSpherical.SphericalCap(GO.UnitSpherical.UnitSphericalPoint(0.0, 0.0, 1.0), 0.0)
     center = LinearAlgebra.normalize(sum(all_points) / length(all_points))
-    radius = maximum(p -> GO.spherical_distance(center, p), all_points)
+    # Max great-circle angle = acos(min cosine): dot products + one acos, no per-point trig.
+    radius = acos(clamp(minimum(p -> LinearAlgebra.dot(center, p), all_points), -1.0, 1.0))
     return GO.UnitSpherical.SphericalCap(center, radius * 1.0001)
 end
 
@@ -250,26 +251,32 @@ function circle_from_four_corners(corner_points, other_points)
         (GO.UnitSphereFromGeographic()(p) for p in other_points))
 end
 
-# Build a SphericalCap covering 4 CCW corners (SW, SE, NE, NW), the slerp
-# midpoints of their 4 edges (great-circle bulge), and every point yielded by
-# `perimeter` (constant-lat/lon bulge along cell sides).
+# cos∠(center, great-circle midpoint of a, b). slerp(a, b, 0.5) == normalize(a + b), so the
+# cosine is dot(center, a+b)/‖a+b‖ — no trig. Returns 1 (i.e. no contribution to the min) when
+# a, b are ~antipodal and the midpoint is ill-defined; this happens on a large index-rectangle's
+# edge spanning ~180°, where the two endpoints already force the cap wide, so it's redundant.
+@inline function _midcos(center, a, b)
+    s = a + b
+    n2 = LinearAlgebra.dot(s, s)
+    return n2 < 1e-12 ? one(n2) : LinearAlgebra.dot(center, s) / sqrt(n2)
+end
+
+# Build a SphericalCap covering 4 CCW corners (SW, SE, NE, NW), their 4 great-circle edge
+# midpoints (edge bulge), and every point yielded by `perimeter` (constant-lat/lon bulge along
+# cell sides). Trig-free: the max great-circle angle is acos of the min cosine to those points.
 @inline function _spherical_cap(p1, p2, p3, p4, perimeter)
     center = LinearAlgebra.normalize((p1 + p2 + p3 + p4) / 4)
-    p12 = GO.UnitSpherical.slerp(p1, p2, 0.5)
-    p23 = GO.UnitSpherical.slerp(p2, p3, 0.5)
-    p34 = GO.UnitSpherical.slerp(p3, p4, 0.5)
-    p41 = GO.UnitSpherical.slerp(p4, p1, 0.5)
-    d = max(
-        GO.spherical_distance(center, p1), GO.spherical_distance(center, p2),
-        GO.spherical_distance(center, p3), GO.spherical_distance(center, p4),
-        GO.spherical_distance(center, p12), GO.spherical_distance(center, p23),
-        GO.spherical_distance(center, p34), GO.spherical_distance(center, p41),
+    cosmin = min(
+        LinearAlgebra.dot(center, p1), LinearAlgebra.dot(center, p2),
+        LinearAlgebra.dot(center, p3), LinearAlgebra.dot(center, p4),
+        _midcos(center, p1, p2), _midcos(center, p2, p3),
+        _midcos(center, p3, p4), _midcos(center, p4, p1),
     )
     for p in perimeter
-        d = max(d, GO.spherical_distance(center, p))
+        cosmin = min(cosmin, LinearAlgebra.dot(center, p))
     end
     # The 1.0001 slack guards against missed intersections from rounding error.
-    return GO.UnitSpherical.SphericalCap(center, d * 1.0001)
+    return GO.UnitSpherical.SphericalCap(center, acos(clamp(cosmin, -1.0, 1.0)) * 1.0001)
 end
 
 # Bounding cap for a range of cells on any spherical curvilinear grid: the four
