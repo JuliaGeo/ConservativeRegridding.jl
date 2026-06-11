@@ -79,10 +79,16 @@ Default intersection operator for the given manifold.
 
 Implemented for `Planar` and `Spherical` manifolds at the moment.
 Will dispatch to the appropriate intersection operator / algorithm based on the manifold.
+
+On `Spherical`, when the loaded GeometryOps provides `SutherlandHodgmanCache`,
+[`task_local_operator`](@ref) hands each assembly task a copy carrying a private
+clipping-buffer cache (caches must not be shared across tasks).
 """
-struct DefaultIntersectionOperator{M}
+struct DefaultIntersectionOperator{M, C}
     manifold::M
+    cache::C
 end
+DefaultIntersectionOperator(manifold) = DefaultIntersectionOperator(manifold, nothing)
 
 function (op::DefaultIntersectionOperator{<: GeometryOps.Planar})(p1, p2)
     intersection_polys = #=try; =#
@@ -94,12 +100,26 @@ function (op::DefaultIntersectionOperator{<: GeometryOps.Planar})(p1, p2)
 end
 
 function (op::DefaultIntersectionOperator{M})(p1, p2) where {M <: GeometryOps.Spherical}
+    alg = GeometryOps.ConvexConvexSutherlandHodgman(op.manifold)
     intersection_polys = #=try; =#
-        GeometryOps.intersection(GeometryOps.ConvexConvexSutherlandHodgman(op.manifold), p1, p2; target = GeoInterface.PolygonTrait())
+        _sutherland_hodgman_intersection(alg, p1, p2, op.cache)
     # catch
     #     throw(DefaultIntersectionFailureError(p1, p2, e))
     # end
     return GeometryOps.area(op.manifold, intersection_polys)
+end
+
+# Dispatch on the cache so the no-cache path never passes a `cache` keyword —
+# keeping the operator loadable against GeometryOps versions without one.
+_sutherland_hodgman_intersection(alg, p1, p2, ::Nothing) =
+    GeometryOps.intersection(alg, p1, p2; target = GeoInterface.PolygonTrait())
+_sutherland_hodgman_intersection(alg, p1, p2, cache) =
+    GeometryOps.intersection(alg, p1, p2; target = GeoInterface.PolygonTrait(), cache)
+
+function task_local_operator(op::DefaultIntersectionOperator{<: GeometryOps.Spherical})
+    isdefined(GeometryOps, :SutherlandHodgmanCache) || return op
+    cache = GeometryOps.SutherlandHodgmanCache(op.manifold)
+    return DefaultIntersectionOperator(op.manifold, cache)
 end
 
 function Regridder(dst, src; kwargs...)
