@@ -1,20 +1,22 @@
 # ClimaCore Spectral Element Extension
 
-ConservativeRegridding.jl provides conservative regridding between finite-volume (FV)
-grids and [ClimaCore.jl](https://github.com/CliMA/ClimaCore.jl) spectral-element (SE)
+ConservativeRegridding.jl provides conservative regridding between finite volume (FV)
+grids and [ClimaCore.jl](https://github.com/CliMA/ClimaCore.jl) spectral element (SE)
 spaces. The extension is loaded automatically when `ClimaCore` is imported alongside
 `ConservativeRegridding`.
 
-## Spectral-element and finite-volume integrals
+## Spectral element and finite volume integrals
 
-A finite-volume grid carries one mean value ``\bar f_i`` per cell, so the integral of a
+A finite volume grid carries one mean value ``\bar f_i`` per cell, so the integral of a
 field over cell ``i`` is
 
 ```math
-\int_i f \, \mathrm{d}A \approx \bar f_i \, A_i ,
+\int_i f \, \mathrm{d}A = \bar f_i \, A_i ,
 ```
 
-where ``A_i`` is the cell area. A spectral-element space carries ``N_q^2`` nodal values
+where ``A_i`` is the cell area. 
+
+A spectral element space carries ``N_q^2`` nodal values
 ``f^e_{ij}`` per element ``e`` (polynomial degree ``N_q - 1``), expanded in a tensor
 product of one-dimensional Lagrange basis polynomials,
 
@@ -51,7 +53,7 @@ defined and evaluated below.
 
 ## The intersection weights ``B``
 
-For a finite-volume cell ``k`` and a spectral element ``e``, define
+For a finite volume cell ``k`` and a spectral element ``e``, define
 
 ```math
 B(k, (e,i,j)) = \int_{k \cap e} \phi_i(\xi) \, \phi_j(\eta) \, J^e(\xi, \eta) \,
@@ -68,10 +70,10 @@ B(k, (e,i,j)) = \int_{k \cap e} \phi_i\big(\xi(x)\big) \, \phi_j\big(\eta(x)\big
                 \mathrm{d}A .
 ```
 
-The extension evaluates this physical-space form directly (`accumulate_principled_b`):
-the intersection polygon ``k \cap e`` — already computed by ConservativeRegridding.jl via
-GeometryOps.jl — is fan-triangulated from its centroid, a barycentric Gauss rule is
-applied on each triangle, and the basis functions are evaluated at each quadrature point
+The extension evaluates this physical-space form directly (`accumulate_principled_b`) by
+(1) fan-triangulating the intersection polygon ``k \cap e`` (already computed by 
+ConservativeRegridding.jl via GeometryOps.jl) from its centroid (2) using a barycentric 
+Gauss rule on each triangle, and (3) evaluating the basis functions at each quadrature point
 after inverting the element map to recover ``(\xi, \eta)``. The physical triangle areas
 carry the Jacobian, so ``J^e`` does not appear explicitly. This integration is exact to
 the quadrature order and is therefore high-order accurate in the element size.
@@ -162,7 +164,7 @@ Two corrections appear in the implementation:
 
 Direct SE ``\to`` SE regridding is not supported: the `Regridder` constructor raises an
 error for two SE arguments and directs the caller to compose the two implemented
-directions, SE ``\to`` FV ``\to`` SE, with an intermediate finite-volume grid.
+directions, SE ``\to`` FV ``\to`` SE, with an intermediate finite volume grid.
 
 ## Usage
 
@@ -172,9 +174,13 @@ directions, SE ``\to`` FV ``\to`` SE, with an intermediate finite-volume grid.
 a `ClimaCore.Fields.Field`) and selects the corresponding direction. The first argument is
 the destination, the second the source.
 
+Note that `Regridder`, `regrid!`, and `areas` are marked public but are *not* exported, so
+`using ConservativeRegridding` does not bring them into scope; import them explicitly (as
+below) or qualify them as `ConservativeRegridding.Regridder`, etc.
+
 ```julia
 using ConservativeRegridding, ClimaCore, Oceananigans
-using ConservativeRegridding: regrid!
+using ConservativeRegridding: Regridder, regrid!
 using ClimaCore: CommonSpaces
 
 space = CommonSpaces.CubedSphereSpace(; radius = 6.371e6, n_quad_points = 4, h_elem = 16)
@@ -209,8 +215,12 @@ regrid!(dst_field, R_fv2se, fv_vals)
 ```julia
 const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingClimaCoreExt)
 
+field = Fields.coordinate_field(space).lat           # an example SE field
+
 src_vec = ClimaCoreExt.se_field_to_vec(field)        # Field → flat vector
-ClimaCoreExt.vec_to_se_field!(dst_field, dst_vec)    # flat vector → Field
+
+dst_field = Fields.zeros(space)
+ClimaCoreExt.vec_to_se_field!(dst_field, src_vec)    # flat vector → Field
 
 positions = ClimaCoreExt.se_node_positions(space)    # Vector{UnitSphericalPoint}
 weights   = ClimaCoreExt.se_node_weights(space)      # nodal weights W^e_{ij}
