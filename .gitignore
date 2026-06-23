@@ -43,3 +43,6 @@ settings.json
 
 # git worktrees
 .worktrees/
+
+# benchmark outputs (graphs + serialized results)
+bench/results/
