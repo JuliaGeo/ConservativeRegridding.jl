@@ -52,11 +52,13 @@ Trees Module (grid representations + quadtree cursors for spatial indexing)
 
 **`intersection_areas`** (`intersection_areas.jl`): Two-phase approach:
 1. Dual DFS through spatial trees to find candidate cell pairs (extent-based pruning)
-2. Parallel intersection area computation on candidates, partitioned into `nthreads * 4` chunks via ChunkSplitters
+2. Parallel COO assembly on candidates, partitioned into `nthreads * 4` chunks via ChunkSplitters, fetched and `vcat`-reduced into a `SparseMatrixCSC`
 
-**Intersection operators** dispatch on manifold:
-- Planar: `FosterHormannClipping`
-- Spherical: `ConvexConvexSutherlandHodgman`
+**Intersection operator interface** (one trait + two hooks, all with defaults; the operator is the single extensible concept that drives assembly):
+- `IntersectionReturnStyle(op)` — `OutOfPlaceSingleResult` (default; `op(src_cell, dst_cell) -> area`, driver stores the triplet) vs `InPlace` (`op(rows, cols, vals, item, src_tree, dst_tree)` pushes its own COO). Resolved once at the top of `intersection_areas` and threaded through.
+- `work_items(op, candidate_pairs)` — units of parallel work (default: one candidate pair each).
+- `output_matrix_size(op, src_tree, dst_tree)` — assembled `(nrows, ncols)` (default: dst-cells × src-cells).
+- These are `@public`. `DefaultIntersectionOperator` dispatches on manifold (Planar: `FosterHormannClipping`, Spherical: `ConvexConvexSutherlandHodgman`) and uses all defaults.
 
 ### Trees Module (`src/trees/Trees.jl`)
 
@@ -103,11 +105,11 @@ The manifold affects extent computation, intersection algorithms, and area calcu
 All follow the same pattern: implement `Trees.treeify()` for domain-specific grid types.
 
 - **OceananigansExt**: LatitudeLongitudeGrid, RectilinearGrid, TripolarGrid → vertex matrices wrapped in KnownFullSphereExtentWrapper
-- **ClimaCoreExt**: Cubed sphere topologies → per-face cursors with index remapping
+- **ClimaCoreExt**: Cubed sphere topologies → per-face cursors with index remapping. Also provides custom `Regridder` constructors for spectral-element (SE) spaces: SE↔FV regridding is assembled by two `InPlace` intersection operators (`SEToFVIntersectionOperator`, `FVToSEIntersectionOperator`) that plug into the shared `intersection_areas` driver — FV→SE overrides `work_items` to make each element (not each candidate pair) the unit of parallel work for its local mass-matrix solve.
 - **HealpixExt**, **RingGridsExt**: HEALPix and SpeedyWeather grids
 - **SpeedyWeatherExt**: Requires *both* RingGrids and SpeedyWeather loaded (dual weak dependency)
 - **InterfacesExt**: Interfaces.jl contracts
 
 ### API Surface
 
-The package uses `@public` from SciMLPublic for API visibility: `Regridder`, `regrid`, `regrid!`, `areas` are public. Grid types and tree types are exported.
+The package uses `@public` from SciMLPublic for API visibility: `Regridder`, `regrid`, `regrid!`, `areas` are public, as is the intersection-operator interface (`intersection_areas`, `DefaultIntersectionOperator`, `IntersectionReturnStyle`, `OutOfPlaceSingleResult`, `InPlace`, `work_items`, `output_matrix_size`). Grid types and tree types are exported.

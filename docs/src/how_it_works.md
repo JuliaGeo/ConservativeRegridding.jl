@@ -51,4 +51,79 @@ assembled into a sparse matrix which is the regridder object.
 
 Success!  We have now constructed a regridder.  There are a couple of steps after this, normalization and so on, but those are more details.
 
+## Customizing the weights: the intersection operator interface
+
+Step 3 above is driven by a single extensible object — the **intersection operator** —
+plus three dispatched seams, each with a default that reproduces the area-based weight.
+The operator is passed as `Regridder(dst, src; intersection_operator = ...)`, or directly
+to [`ConservativeRegridding.intersection_areas`](@ref). The three seams are:
+
+1. **[`IntersectionReturnStyle`](@ref)`(op)`** — how the operator delivers a contribution
+   for one work item:
+   - [`OutOfPlaceSingleResult`](@ref) (the default): the operator is a function
+     `op(src_cell, dst_cell) -> area::Real`, and the driver stores the COO triplet.
+   - [`InPlace`](@ref): the operator is
+     `op(rows, cols, vals, item, src_tree, dst_tree) -> nothing` and pushes its own COO
+     contributions directly.
+2. **[`work_items`](@ref)`(op, candidate_pairs)`** — the units of work the parallel loop
+   iterates over (default: one candidate `(src, dst)` pair per unit). Override it to change
+   the parallel granularity — e.g. to group all of a source element's candidate cells into
+   a single work unit.
+3. **[`output_matrix_size`](@ref)`(op, src_tree, dst_tree)`** — the `(nrows, ncols)` shape
+   of the assembled matrix (default: destination-cell count × source-cell count).
+
+Everything else — candidate search, chunking, multithreaded assembly, and sparse-matrix
+construction — is shared, so whatever your operator computes runs inside the same parallel
+skeleton as the built-in area weights.
+
+### The simple case (`OutOfPlaceSingleResult`)
+
+[`OutOfPlaceSingleResult`](@ref) is the default style, so a custom scalar-weight operator
+only needs to be callable; the defaults handle work units and matrix shape:
+
+```julia
+using ConservativeRegridding
+import GeometryOps as GO
+
+# Reuse the built-in area weight, scaled by a constant factor.
+struct ScaledAreaOperator
+    factor::Float64
+end
+(op::ScaledAreaOperator)(src_cell, dst_cell) =
+    op.factor * ConservativeRegridding.DefaultIntersectionOperator(GO.Spherical())(src_cell, dst_cell)
+
+regridder = ConservativeRegridding.Regridder(dst, src; intersection_operator = ScaledAreaOperator(2.0))
+```
+
+### Emitting a block (`InPlace`)
+
+When one work item should contribute several matrix entries — as the ClimaCore
+spectral-element assemblers do, emitting an `Nq²` block per intersection — declare the
+operator [`InPlace`](@ref) and `push!` directly onto the COO vectors:
+
+```julia
+struct MyBlockOperator
+    nrows::Int
+    ncols::Int
+end
+ConservativeRegridding.IntersectionReturnStyle(::MyBlockOperator) = ConservativeRegridding.InPlace()
+ConservativeRegridding.output_matrix_size(op::MyBlockOperator, ::Any, ::Any) = (op.nrows, op.ncols)
+
+function (op::MyBlockOperator)(rows, cols, vals, (i_src, i_dst), src_tree, dst_tree)
+    src_cell = ConservativeRegridding.Trees.getcell(src_tree, i_src)
+    dst_cell = ConservativeRegridding.Trees.getcell(dst_tree, i_dst)
+    weight = ConservativeRegridding.DefaultIntersectionOperator(GO.Spherical())(src_cell, dst_cell)
+    # A real block emitter pushes several (row, col, value) entries per work item;
+    # here we push a single one to illustrate the mechanics.
+    push!(rows, i_dst)
+    push!(cols, i_src)
+    push!(vals, weight)
+    return nothing
+end
+```
+
+The ClimaCore extension (`SE → FV` and `FV → SE` regridding) is built entirely on this
+interface: each direction is an `InPlace` operator, and `FV → SE` additionally overrides
+[`work_items`](@ref) to make the per-element mass-matrix solve the unit of parallel work.
+
 ## How we actually do it
