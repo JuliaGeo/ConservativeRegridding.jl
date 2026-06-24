@@ -76,7 +76,7 @@ end
 # ## Try it out!
 
 using Oceananigans: LatitudeLongitudeGrid, RotatedLatitudeLongitudeGrid
-using ConservativeRegridding: intersection_areas, Regridder
+using ConservativeRegridding: intersection_areas, Regridder, Trees
 
 
 lonlat_grid = LatitudeLongitudeGrid(size=(36, 18, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
@@ -93,10 +93,75 @@ regridder = Regridder(
 
 using SparseArrays
 using GeoMakie, GLMakie
+ENV["PROJ_IGNORE_CELESTIAL_BODY"] = "YES"
 
-unitspherical_polygons = SparseArrays.nonzeros(regridder.intersections)
-latlong_polygons = GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), unitspherical_polygons)
-
-f, a, p = poly(latlong_polygons; strokewidth = 1, color = rand(RGBf, length(latlong_polygons)), axis = (; type = GlobeAxis))
-meshimage!(a, -180..180, -90..90, reshape([colorant"white"], 1, 1); zlevel = -300_000) # background image
+f = Figure()
+a, p = poly(
+    f[2, 1],
+    SparseArrays.nonzeros(regridder.intersections); 
+    source = "+proj=cart +R=1", axis = (; type = GlobeAxis, center = false), 
+    strokewidth = 1, color = rand(RGBf, SparseArrays.nnz(regridder.intersections))
+)
+Label(f[1, 1]; text = "Lat-long x rotated lat-long", fontsize = 16, font = :bold, tellwidth = false, tellheight = true)
 f
+
+# We can also try this with a ClimaCore cubed sphere grid:
+using ClimaCore: CommonSpaces, Fields
+
+cubedsphere_space = CommonSpaces.CubedSphereSpace(;
+    radius = GO.Spherical().radius,
+    n_quad_points = 2,
+    h_elem = 15,
+)
+cubedsphere_field = Fields.ones(cubedsphere_space)
+
+regridder = Regridder(
+    GO.Spherical(), lonlat_grid, Trees.treeify(cubedsphere_space); # Treeify needed to get around ClimaCore dispatch.
+    intersection_operator = IntersectionGridOperator(GO.Spherical()),
+    normalize = false,
+    threaded = false,
+)
+
+f, a, p = poly(
+    SparseArrays.nonzeros(regridder.intersections); 
+    source = "+proj=cart +R=1", axis = (; type = GlobeAxis, center = false), 
+    strokewidth = 1, color = rand(RGBf, SparseArrays.nnz(regridder.intersections))
+)
+Label(f[0, 1]; text = "Lat-long x cubed sphere", fontsize = 16, font = :bold, tellwidth = false, tellheight = true)
+f
+
+# Let's also test how long it takes, for a large grid.
+
+using Chairmarks
+
+large_longlat_grid = LatitudeLongitudeGrid(size=(3600, 1800, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
+large_cubedsphere_space = CommonSpaces.CubedSphereSpace(;
+    radius = GO.Spherical().radius,
+    n_quad_points = 2,
+    h_elem = 1024,
+)
+large_cubedsphere_field = Fields.ones(large_cubedsphere_space)
+large_cubedsphere_tree = Trees.treeify(large_cubedsphere_space) # Treeify needed to get around ClimaCore dispatch on `Regridder(...)`
+
+println("Single-threaded regridder construction time:")
+@be Regridder(
+    $(GO.Spherical()), $large_longlat_grid, $large_cubedsphere_tree;
+    intersection_operator = $(IntersectionGridOperator(GO.Spherical())),
+    normalize = $false,
+    threaded = $false,
+)
+
+println("Multi-threaded regridder construction time:")
+@be Regridder(
+    $(GO.Spherical()), $large_longlat_grid, $large_cubedsphere_tree;
+    intersection_operator = $(IntersectionGridOperator(GO.Spherical())),
+    normalize = $(false),
+    threaded = $(true),
+)
+
+println("Compare to: default intersection operator, FV -> FV")
+@be Regridder(
+    $(GO.Spherical()), $large_longlat_grid, $large_cubedsphere_tree;
+    normalize = $(false),
+    threaded = $(false),
+)
