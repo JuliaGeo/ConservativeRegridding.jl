@@ -54,9 +54,9 @@ Success!  We have now constructed a regridder.  There are a couple of steps afte
 ## Customizing the weights: the intersection operator interface
 
 Step 3 above is driven by a single extensible object — the **intersection operator** —
-plus three dispatched seams, each with a default that reproduces the area-based weight.
+plus four dispatched seams, each with a default that reproduces the area-based weight.
 The operator is passed as `Regridder(dst, src; intersection_operator = ...)`, or directly
-to [`ConservativeRegridding.intersection_areas`](@ref). The three seams are:
+to [`ConservativeRegridding.intersection_areas`](@ref). The four seams are:
 
 1. **[`IntersectionReturnStyle`](@ref)`(op)`** — how the operator delivers a contribution
    for one work item:
@@ -71,6 +71,9 @@ to [`ConservativeRegridding.intersection_areas`](@ref). The three seams are:
    a single work unit.
 3. **[`output_matrix_size`](@ref)`(op, src_tree, dst_tree)`** — the `(nrows, ncols)` shape
    of the assembled matrix (default: destination-cell count × source-cell count).
+4. **[`output_eltype`](@ref)`(op, src_tree, dst_tree)`** — the element type of the sparse
+   matrix (default: `Float64`). Override it when you want something other than scalar areas —
+   e.g. to build up a matrix of intersection _polygons_ rather than just areas.
 
 Everything else — candidate search, chunking, multithreaded assembly, and sparse-matrix
 construction — is shared, so whatever your operator computes runs inside the same parallel
