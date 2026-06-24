@@ -144,7 +144,7 @@ end
 
 # `True` chunks/spawns, `False` runs one chunk. `$`-interpolation keeps the
 # spawned tasks type-stable (concrete `style`/`op`/trees, no boxing).
-function _parallel_coo(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::True; npartitions, progress) where {S, O, I, T1, T2}
+function assemble_sparse_matrix_coo(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::True; npartitions, progress) where {S, O, I, T1, T2}
     # Partition the list of work items,
     partitions = ChunkSplitters.chunks(items; n = npartitions)
     if progress
@@ -171,7 +171,7 @@ function _parallel_coo(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::
     return rows, cols, vals
 end
 # Non-threaded version
-function _parallel_coo(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::False; kwargs...) where {S, O, I, T1, T2}
+function assemble_sparse_matrix_coo(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::False; kwargs...) where {S, O, I, T1, T2}
     _assemble_chunk(style, op, items, src_tree, dst_tree, output_eltype(op, src_tree, dst_tree))
 end
 
@@ -228,7 +228,7 @@ function intersection_areas(
     # COO triplets (in parallel or serially), and build the sparse matrix.
     items = work_items(intersection_operator, candidate_pairs)
     nrows, ncols = output_matrix_size(intersection_operator, src_tree, dst_tree)
-    rows, cols, vals = _parallel_coo(
+    rows, cols, vals = assemble_sparse_matrix_coo(
         style, intersection_operator, items, src_tree, dst_tree, threaded;
         npartitions, progress,
     )
