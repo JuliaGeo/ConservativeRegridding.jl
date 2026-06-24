@@ -24,19 +24,30 @@ abstract type IntersectionReturnStyle end
 """
     OutOfPlaceSingleResult <: IntersectionReturnStyle
 
-One scalar per candidate pair. Kernel `op(src_cell, dst_cell) -> area::Real`; the
-driver stores the COO triplet `(dst_index, src_index, area)` when `area > 0`.
-Default style, used by [`DefaultIntersectionOperator`](@ref).
+In this [`IntersectionReturnStyle`](@ref), the operator is a function 
+`op(src_cell, dst_cell) -> result`.
+
+The harness around it will store the result in a COO triplet `(dst_index, src_index, result)`,
+so the operator can remain relatively pure.
+
+The operator must also implement the
+[`should_store_result(op, result) -> Bool`](@ref should_store_result) method, 
+which determines whether the result should be stored in the sparse matrix.
 """
 struct OutOfPlaceSingleResult <: IntersectionReturnStyle end
 
 """
     InPlace <: IntersectionReturnStyle
 
-A block of COO contributions per work item. Kernel
-`op(rows, cols, vals, item, src_tree, dst_tree) -> nothing` `push!`es onto
-`rows`/`cols`/`vals` itself. Used by block-emitting operators such as the
-ClimaCore spectral-element assemblers.
+In this [`IntersectionReturnStyle`](@ref), the operator is a function 
+`op(rows, cols, vals, item, src_tree, dst_tree)`, pushing to the vectors
+`rows`, `cols`, and `vals` in place.
+
+Here, `item` is a single entry from the list returned by [`work_items`](@ref).
+Usually, that's a single candidate pair `(src_index, dst_index)`.
+
+This provides maximum flexibility, at the cost of a slightly more complex implementation
+being required.
 """
 struct InPlace <: IntersectionReturnStyle end
 
@@ -72,14 +83,33 @@ output_matrix_size(op, src_tree, dst_tree) =
     (prod(Trees.ncells(dst_tree)), prod(Trees.ncells(src_tree)))
 
 """
-    output_eltype(op, src_tree, dst_tree) -> eltype
+    output_eltype(op, [src_tree, dst_tree]) -> eltype
 
 Element type of the sparse matrix [`intersection_areas`](@ref) assembles for `op`.
 
 Defaults to `Float64`. Operators may override this to e.g. return a matrix of intersection polygons,
 rather than just areas.
 """
-output_eltype(op, src_tree, dst_tree) = Float64
+function output_eltype end
+output_eltype(op, src_tree, dst_tree) = output_eltype(op)
+output_eltype(op) = Float64
+
+"""
+    should_store_result(op, result) -> Bool
+
+Determine whether the result should be stored in the sparse matrix, after it has been computed.
+
+There is a default implementation for `::Number` results across all operators,
+which is simply `!iszero(result)`.  All other combinations of operator and result type
+**must** have explicit dispatches implemented.
+"""
+function should_store_result end
+should_store_result(op, result) = should_store_result(result)
+should_store_result(result::Number) = !iszero(result)
+should_store_result(result) = error("""
+    `should_store_result` is not implemented for type $(typeof(result)).
+    You must implement `should_store_result(op, result) -> Bool` for your operator.
+    """)
 
 # If the root tree is a `WithParallelizePolicy`, route the dual-DFS's
 # `(node, extent)` query through the user policy; otherwise fall back to the
@@ -114,11 +144,11 @@ end
 # is threaded through so the trait is never looked up in the hot loop.
 
 # Run the operator for one work item and store its COO contribution(s).
-@inline function _run_and_store!(::OutOfPlaceSingleResult, op, rows, cols, vals, (i1, i2), src_tree, dst_tree)
+@inline function _run_and_store!(::OutOfPlaceSingleResult, op::O, rows::R, cols::C, vals::V, (i1, i2), src_tree::T1, dst_tree::T2) where {O, R, C, V, T1, T2}
     p1 = Trees.getcell(src_tree, i1)
     p2 = Trees.getcell(dst_tree, i2)
-    area_of_intersection = op(p1, p2)
-    if !iszero(area_of_intersection)
+    result = op(p1, p2) # usually an area of intersection, by default
+    if should_store_result(op, result)
         push!(rows, i2)   # row = destination index
         push!(cols, i1)   # col = source index
         push!(vals, area_of_intersection)
@@ -126,7 +156,7 @@ end
     return nothing
 end
 
-@inline function _run_and_store!(::InPlace, op, rows, cols, vals, item, src_tree, dst_tree)
+@inline function _run_and_store!(::InPlace, op::O, rows::R, cols::C, vals::V, item::I, src_tree::T1, dst_tree::T2) where {O, R, C, V, I, T1, T2}
     op(rows, cols, vals, item, src_tree, dst_tree)   # the operator stores in place
     return nothing
 end
