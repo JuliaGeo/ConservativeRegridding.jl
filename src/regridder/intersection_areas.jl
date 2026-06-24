@@ -71,6 +71,16 @@ rows, src cells as columns. Operators whose counts differ from cell counts
 output_matrix_size(op, src_tree, dst_tree) =
     (prod(Trees.ncells(dst_tree)), prod(Trees.ncells(src_tree)))
 
+"""
+    output_eltype(op, src_tree, dst_tree) -> eltype
+
+Element type of the sparse matrix [`intersection_areas`](@ref) assembles for `op`.
+
+Defaults to `Float64`. Operators may override this to e.g. return a matrix of intersection polygons,
+rather than just areas.
+"""
+output_eltype(op, src_tree, dst_tree) = Float64
+
 # If the root tree is a `WithParallelizePolicy`, route the dual-DFS's
 # `(node, extent)` query through the user policy; otherwise fall back to the
 # default `should_parallelize` dispatch. The wrapper is *not* a dispatch axis
@@ -108,7 +118,7 @@ end
     p1 = Trees.getcell(src_tree, i1)
     p2 = Trees.getcell(dst_tree, i2)
     area_of_intersection = op(p1, p2)
-    if area_of_intersection > 0
+    if !iszero(area_of_intersection)
         push!(rows, i2)   # row = destination index
         push!(cols, i1)   # col = source index
         push!(vals, area_of_intersection)
@@ -122,10 +132,10 @@ end
 end
 
 # One chunk of work items → its COO triplets. `style` is passed in, not re-resolved.
-function _assemble_chunk(style, op, items, src_tree, dst_tree)
+function _assemble_chunk(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::ValType) where {S, O, I, T1, T2, ValType}
     rows = Int[]
     cols = Int[]
-    vals = Float64[]
+    vals = ValType[]
     for item in items
         _run_and_store!(style, op, rows, cols, vals, item, src_tree, dst_tree)
     end
@@ -134,18 +144,19 @@ end
 
 # `True` chunks/spawns, `False` runs one chunk. `$`-interpolation keeps the
 # spawned tasks type-stable (concrete `style`/`op`/trees, no boxing).
-function _parallel_coo(style, op, items, src_tree, dst_tree, ::True; npartitions, progress)
+function _parallel_coo(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::True; npartitions, progress) where {S, O, I, T1, T2}
     # Partition the list of work items,
     partitions = ChunkSplitters.chunks(items; n = npartitions)
     if progress
         progress_meter = ProgressMeter.Progress(length(partitions); desc = "Computing intersection areas")
     end
+    ValType = output_eltype(op, src_tree, dst_tree)
     # and assemble the COO triplets for each partition in parallel.
     # This is a bit oversubscribed though I guess.  But Julia's dynamic
     # scheduler should handle it fine.
     result_tasks = [
         StableTasks.@spawn begin
-            ret = _assemble_chunk($style, $op, partition, $src_tree, $dst_tree)
+            ret = _assemble_chunk($style, $op, partition, $src_tree, $dst_tree, $ValType)
             $(progress ? :(ProgressMeter.next!(progress_meter)) : :())
             ret
         end
@@ -159,9 +170,10 @@ function _parallel_coo(style, op, items, src_tree, dst_tree, ::True; npartitions
     vals = reduce(vcat, getindex.(all_results, 3))
     return rows, cols, vals
 end
-
-_parallel_coo(style, op, items, src_tree, dst_tree, ::False; kwargs...) =
-    _assemble_chunk(style, op, items, src_tree, dst_tree)
+# Non-threaded version
+function _parallel_coo(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::False; kwargs...) where {S, O, I, T1, T2}
+    _assemble_chunk(style, op, items, src_tree, dst_tree, output_eltype(op, src_tree, dst_tree))
+end
 
 """
     intersection_areas(manifold, threaded, dst_tree, src_tree;
@@ -184,11 +196,9 @@ This calls out to four functions, which dispatch on `intersection_operator`:
 - [`output_matrix_size(intersection_operator, src_tree, dst_tree)`](@ref output_matrix_size): return the 
   `(nrows, ncols)` shape of the sparse matrix.  For the regular operator, this is `(ncells(dst_tree), ncells(src_tree))`.
   For the spectral element regridder, this is more complex.
-Driven by three dispatched seams on `intersection_operator`, each defaulting to
-the built-in area computation:
-- [`IntersectionReturnStyle`](@ref)`(op)` — how each work item's contribution is stored.
-- [`work_items`](@ref)`(op, candidate_pairs)` — the units of work iterated.
-- [`output_matrix_size`](@ref)`(op, src_tree, dst_tree)` — the `(nrows, ncols)` shape.
+- [`output_eltype(intersection_operator, src_tree, dst_tree)`](@ref output_eltype): return the element type of the sparse matrix.
+  This is usually `Float64`, but may be different, especially if you wish to build up e.g. a matrix of intersection _polygons_,
+  rather than just areas.
 
 `threaded` is a `GeometryOpsCore.BoolsAsTypes` (`True()`/`False()`; convert via
 `booltype(::Bool)`). When threaded, work items are partitioned into `npartitions`
