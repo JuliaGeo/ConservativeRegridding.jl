@@ -151,7 +151,7 @@ end
     if should_store_result(op, result)
         push!(rows, i2)   # row = destination index
         push!(cols, i1)   # col = source index
-        push!(vals, area_of_intersection)
+        push!(vals, result)
     end
     return nothing
 end
@@ -162,7 +162,7 @@ end
 end
 
 # One chunk of work items → its COO triplets. `style` is passed in, not re-resolved.
-function _assemble_chunk(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::ValType) where {S, O, I, T1, T2, ValType}
+function _assemble_chunk(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::Type{ValType}) where {S, O, I, T1, T2, ValType}
     rows = Int[]
     cols = Int[]
     vals = ValType[]
