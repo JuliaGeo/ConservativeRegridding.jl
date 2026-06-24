@@ -186,19 +186,23 @@ function inverse_element_map(space::ClimaCore.Spaces.AbstractSpectralElementSpac
 end
 
 # ────────────────────────────────────────────────────────────────────────────
-# Element Jacobian interpolator (Task 5, PDF Eq. 47)
+# Element Jacobian interpolator
+# (docs/src/extensions/climacore.md, "FV → SE")
 # ────────────────────────────────────────────────────────────────────────────
 
 """
     element_jacobian_at(space, elem_idx, ξ, η) -> Float64
 
 SE element Jacobian at `(ξ, η)` via Lagrange interpolation of nodal weighted-Jacobian
-values on `space` (PDF Eq. 47):
+values on `space`:
 
     Jᵉ(ξ, η) ≈ Σ_{p,q} Jᵉₚᵩ ϕₚ(ξ) ϕᵩ(η)
 
 where `Jᵉₚᵩ = WJ[p, q, 1, elem_idx] / (wₚ wᵩ)` is the unweighted Jacobian recovered from
-`Spaces.weighted_jacobian` storage.
+`Spaces.weighted_jacobian` storage. Used to evaluate the `Jᵉ` factor of the FV → SE local
+mass matrix at off-node quadrature points; the `B` weights themselves do not need it (see
+`accumulate_principled_b`). See the "FV → SE" section of
+`docs/src/extensions/climacore.md`.
 """
 function element_jacobian_at(space::ClimaCore.Spaces.AbstractSpectralElementSpace,
                              elem_idx::Int, ξ, η)
@@ -219,22 +223,30 @@ function element_jacobian_at(space::ClimaCore.Spaces.AbstractSpectralElementSpac
 end
 
 # ────────────────────────────────────────────────────────────────────────────
-# Principled B-accumulator (Task 6, PDF Eq. 48)
+# Polygon-intersection B-accumulator
+# (docs/src/extensions/climacore.md, "The intersection weights B")
 # ────────────────────────────────────────────────────────────────────────────
 
 """
     accumulate_principled_b(manifold, space, elem_idx, intersection_polygon;
                             triangle_quad_degree) -> Matrix{Float64}
 
-Principled `B(k, (e, i, j))` weights for one source SE element `e = elem_idx` and one
-destination physical-space polygon `intersection_polygon`. Returns an `Nq × Nq` matrix with
+Polygon-intersection `B(k, (e, i, j))` weights for one SE element `e = elem_idx` and one
+physical-space intersection polygon `intersection_polygon`. Returns an `Nq × Nq` block with
 
-    B[i, j] ≈ ∫_{intersection_polygon} ϕᵢ(ξ) ϕⱼ(η) dA_phys       (PDF Eq. 48)
+    B[i, j] ≈ Σ_t 2 Aₜ Σ_y wʸ ϕᵢ(ξ^{t,y}) ϕⱼ(η^{t,y}),
 
-The Jacobian factor in PDF Eq. 18 cancels under change of variables:
-`∫_{ref} ϕᵢϕⱼ Jᵉ dξ dη = ∫_{phys} ϕᵢ ϕⱼ dA`. Approach: fan-triangulate the polygon from its
-centroid, apply a barycentric Gauss rule per triangle, and evaluate the Lagrange basis at
-each quadrature point (`inverse_element_map` gives `(ξ, η)`).
+which approximates the physical-space form of the `B` definition,
+
+    B[i, j] = ∫_{intersection_polygon} ϕᵢ(ξ(x)) ϕⱼ(η(x)) dA_phys.
+
+The Jacobian factor `Jᵉ` in the reference-space definition
+`B = ∫ ϕᵢ ϕⱼ Jᵉ dξ dη` is absorbed by the change of variables `dA_phys = Jᵉ dξ dη`, so it
+must NOT appear here — the physical triangle areas `Aₜ` already carry it. Approach:
+fan-triangulate the polygon from its centroid, apply a barycentric Gauss rule per triangle,
+and evaluate the Lagrange basis at each quadrature point (`inverse_element_map` gives
+`(ξ, η)`). See the "The intersection weights B" section of
+`docs/src/extensions/climacore.md`.
 """
 function accumulate_principled_b(
     manifold::GOCore.Manifold,
@@ -375,7 +387,9 @@ const SESpaceOrField = Union{ClimaCore.Spaces.AbstractSpectralElementSpace, Clim
 se_space(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = space
 se_space(field::ClimaCore.Fields.Field) = axes(field)
 
-# SE source → FV destination (principled polygon-intersection, PDF Appendix A)
+# SE source → FV destination: area-weighted average of the source SE field over each cell,
+# with the B weights evaluated by polygon intersection. See the "SE → FV" section of
+# docs/src/extensions/climacore.md.
 function ConservativeRegridding.Regridder(
     manifold::M, dst, src::SESpaceOrField;
     triangle_quad_degree::Union{Int, Nothing} = nothing,
@@ -385,8 +399,10 @@ function ConservativeRegridding.Regridder(
     return se_to_fv_principled(manifold, dst, se_space(src); threaded, triangle_quad_degree, kwargs...)
 end
 
-# SE → FV operator (`InPlace`, principled polygon-intersection, PDF Appendix A):
-# per (elem, cell) pair, push an Nq² block of B-weights per intersection polygon.
+# SE → FV operator (`InPlace`): per (elem, cell) pair, push an Nq² block of B-weights per
+# intersection polygon. The 1/A_dst,k normalization and the sum over SE nodes are applied
+# later by `regrid!` via the stored dst areas. See the "SE → FV" section of
+# docs/src/extensions/climacore.md.
 struct SEToFVIntersectionOperator{M <: GOCore.Manifold, SP}
     manifold::M
     src_space::SP            # SE source space
@@ -489,14 +505,16 @@ end
 """
     compute_local_mass_matrix(space, elem_idx) -> Matrix{Float64}
 
-Dense `Nq² × Nq²` mass matrix for SE element `elem_idx`,
+Dense `Nq² × Nq²` FV → SE local mass matrix for SE element `elem_idx`,
 
-    M^{e}_{(a,b),(i,j)} = ∫_{e} ϕₐ(ξ) ϕᵦ(η) ϕᵢ(ξ) ϕⱼ(η) Jᵉ(ξ,η) dξ dη ,
+    M^{e}_{(a,b),(c,d)} = ∫_{e} ϕₐ(ξ) ϕᵦ(η) ϕ_c(ξ) ϕ_d(η) Jᵉ(ξ,η) dξ dη ,
 
 row/col flattening per `ClimaCore.Utilities.linear_ind()`. The integrand has bidegree
 `(2(Nq-1), 2(Nq-1))` (basis-function product) plus `(Nq-1, Nq-1)` (Lagrange-interpolated
 `Jᵉ`), total `(3(Nq-1), 3(Nq-1))`. A GLL rule with `n` points/direction is exact to degree
-`2n - 1`, so `n = ceil((3Nq - 2)/2) + 1`.
+`2n - 1`, so exactness needs `n ≥ (3Nq - 2)/2`; we use one point above that minimum,
+`n = ceil((3Nq - 2)/2) + 1`. See the "FV → SE" section of
+`docs/src/extensions/climacore.md`.
 """
 function compute_local_mass_matrix(
     space::ClimaCore.Spaces.AbstractSpectralElementSpace, elem_idx::Int,
@@ -505,7 +523,8 @@ function compute_local_mass_matrix(
     ξs_se, _ = Quadratures.quadrature_points(Float64, qs)
     Nq = length(ξs_se)
 
-    # GLL with n = (3Nq - 2) / 2 points exactly integrates
+    # Exact integration requires n ≥ (3Nq - 2)/2 GLL points;
+    # take one above the minimum for a safety margin.
     n = ceil(Int, (3Nq - 2) / 2) + 1
     qs_q = Quadratures.GLL{n}()
     ξs_q, ws_q = Quadratures.quadrature_points(Float64, qs_q)
@@ -538,9 +557,10 @@ function compute_local_mass_matrix(
     return M
 end
 
-# FV → SE operator (`InPlace`, per-element L2 projection). The per-element mass-matrix
-# solve needs all of an element's cells at once, so `work_items` makes the element
-# (not the candidate pair) the unit of work. Assembled matrix is N_nodes × N_fv.
+# FV → SE operator (`InPlace`, per-element L2 projection). The per-element mass-matrix solve
+# needs all of an element's cells at once, so `work_items` makes the element (not the
+# candidate pair) the unit of work. Assembled matrix is N_nodes × N_fv. See the "FV → SE"
+# section of docs/src/extensions/climacore.md.
 struct FVToSEIntersectionOperator{M <: GOCore.Manifold, SP}
     manifold::M
     dst_space::SP            # SE destination space
@@ -606,6 +626,8 @@ function (op::FVToSEIntersectionOperator)(rows, cols, vals, (elem, cells), src_t
 
     # Phase 2: solve Mᵉ f_dst = b for each cell column, push the COO block.
     #
+    # Quadrature-consistency rescaling (see "FV → SE" in
+    # docs/src/extensions/climacore.md):
     # Mᵉ comes from tensor-product GLL on the reference square but B from fan
     # triangulation on the great-circle physical polygon, so the two
     # quadratures integrate over slightly different domains. We rescale each
@@ -619,10 +641,11 @@ function (op::FVToSEIntersectionOperator)(rows, cols, vals, (elem, cells), src_t
         b_full .+= b_vec
     end
 
-    # If b_full == 0 it means we are hitting regions with no
-    # overlap (for example regridding a tripolar grid that ends
-    # at 80ᵒ S onto a SE grid that covers the sphere).
-    # We cover for those cases.
+    # Empty-overlap fallback (see "FV → SE" in docs/src/extensions/climacore.md):
+    # if b_full == 0 we are hitting regions with no overlap (for example
+    # regridding a tripolar grid that ends at 80ᵒ S onto a SE grid that
+    # covers the sphere). Only invert/solve on the covered nodes, leaving
+    # the uncovered destination nodes untouched.
     covered = findall(!=(0), b_full)
     isempty(covered) && return nothing
     Mᶜ = Mᵉ[covered, covered]
@@ -655,11 +678,11 @@ end
 """
     fv_to_se_l2_projection(manifold, dst, src; ...)
 
-Per-element L2 projection FV → SE. Same `B` accumulation as the principled path, but
+Per-element L2 projection FV → SE. Same `B` accumulation as the SE → FV path, but
 per-element rows are multiplied by the *full* mass-matrix inverse `(M^{e})^{-1}` rather than
-divided by the lumped diagonal `Wᵉᵢⱼ` (cf. PDF Eq. 30). This preserves constants exactly and
-is higher-order accurate: `f_dst = (M^{e})^{-1} (Bᵀ f_src)|_e` is the optimal L2 fit on the
-SE basis over element `e`.
+divided by the lumped diagonal `Wᵉᵢⱼ`. This preserves constants exactly and is higher-order
+accurate: `f_dst = (M^{e})^{-1} (Bᵀ f_src)|_e` is the optimal L2 fit on the SE basis over
+element `e`. See the "FV → SE" section of `docs/src/extensions/climacore.md`.
 """
 function fv_to_se_l2_projection(manifold, dst, src;
                                 threaded, triangle_quad_degree, kwargs...)
