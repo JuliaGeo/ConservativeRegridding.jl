@@ -66,8 +66,7 @@ end
 
 function (op::IntersectionGridOperator{<: Spherical, P})(src_cell, dst_cell) where {P}
     intersection_poly = GO.intersection(GO.ConvexConvexSutherlandHodgman(op.manifold), src_cell, dst_cell; target = GI.PolygonTrait())
-    inner_ring = GI.getexterior(intersection_poly)
-    if GI.getpoint(inner_ring, 1) == GI.getpoint(inner_ring, 2) == GI.getpoint(inner_ring, 3)
+    if iszero(GO.area(op.manifold, intersection_poly))
         return nothing
     else
         return intersection_poly
@@ -95,6 +94,9 @@ regridder = Regridder(
 using SparseArrays
 using GeoMakie, GLMakie
 
-latlong_polygons = GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), SparseArrays.nonzeros(regridder.intersections))
+unitspherical_polygons = SparseArrays.nonzeros(regridder.intersections)
+latlong_polygons = GO.transform(GO.UnitSpherical.GeographicFromUnitSphere(), unitspherical_polygons)
 
-poly(latlong_polygons; strokewidth = 1, color = :transparent, axis = (; type = GlobeAxis))
+f, a, p = poly(latlong_polygons; strokewidth = 1, color = rand(RGBf, length(latlong_polygons)), axis = (; type = GlobeAxis))
+meshimage!(a, -180..180, -90..90, reshape([colorant"white"], 1, 1); zlevel = -300_000) # background image
+f
