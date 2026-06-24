@@ -187,18 +187,22 @@ This is more of a developer level function, which pulls together the intersectio
 Users should go through [`Regridder`](@ref)`(…; intersection_operator = …)`.
 
 This calls out to four functions, which dispatch on `intersection_operator`:
-- [`IntersectionReturnStyle(intersection_operator)`](@ref IntersectionReturnStyle): return an 
-  [`IntersectionReturnStyle`](@ref) trait object, defining how the operator wants to store the 
-  results of its computation.  This is usually either [`OutOfPlaceSingleResult`](@ref) or [`InPlace`](@ref).
-- [`work_items(intersection_operator, candidate_pairs)`](@ref work_items): return a vector of "work items".
-  For the regular area-of-intersection operator, this is a vector of `(src_index, dst_index)` pairs.  But
-  it can also be more complex, as in the spectral element regridder.
-- [`output_matrix_size(intersection_operator, src_tree, dst_tree)`](@ref output_matrix_size): return the 
-  `(nrows, ncols)` shape of the sparse matrix.  For the regular operator, this is `(ncells(dst_tree), ncells(src_tree))`.
-  For the spectral element regridder, this is more complex.
-- [`output_eltype(intersection_operator, src_tree, dst_tree)`](@ref output_eltype): return the element type of the sparse matrix.
-  This is usually `Float64`, but may be different, especially if you wish to build up e.g. a matrix of intersection _polygons_,
-  rather than just areas.
+
+- [`IntersectionReturnStyle(intersection_operator)`](@ref IntersectionReturnStyle): return an
+  [`IntersectionReturnStyle`](@ref) trait object, defining how the operator wants to receive and store
+  the results of its computation.  This is usually either [`OutOfPlaceSingleResult`](@ref) or
+  [`InPlace`](@ref).
+- [`work_items(intersection_operator, candidate_pairs)`](@ref work_items): return a vector of
+  "work items".  For the regular area-of-intersection operator, this is a vector of
+  `(src_index, dst_index)` pairs.  But it can also be more complex, as in the spectral element
+  regridder.
+- [`output_matrix_size(intersection_operator, src_tree, dst_tree)`](@ref output_matrix_size):
+  return the `(nrows, ncols)` shape of the sparse matrix.  For the regular operator, this is
+  `(ncells(dst_tree), ncells(src_tree))`.  For the spectral element regridder, this is more
+  complex.
+- [`output_eltype(intersection_operator, src_tree, dst_tree)`](@ref output_eltype): return the
+  element type of the sparse matrix.  This is usually `Float64`, but may be different, especially
+  if you wish to build up e.g. a matrix of intersection _polygons_, rather than just areas.
 
 `threaded` is a `GeometryOpsCore.BoolsAsTypes` (`True()`/`False()`; convert via
 `booltype(::Bool)`). When threaded, work items are partitioned into `npartitions`
