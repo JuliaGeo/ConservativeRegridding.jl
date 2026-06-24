@@ -134,6 +134,10 @@ f
 
 using Chairmarks
 
+# These two grids are going to be roughly equal in size to each other:
+# - Long-lat: 6,480,000 cells (3600 x 1800)
+# - Cubed sphere: 6,291,456 cells (1024 x 1024 x 6)
+
 large_longlat_grid = LatitudeLongitudeGrid(size=(3600, 1800, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
 large_cubedsphere_space = CommonSpaces.CubedSphereSpace(;
     radius = GO.Spherical().radius,
@@ -143,13 +147,13 @@ large_cubedsphere_space = CommonSpaces.CubedSphereSpace(;
 large_cubedsphere_field = Fields.ones(large_cubedsphere_space)
 large_cubedsphere_tree = Trees.treeify(large_cubedsphere_space) # Treeify needed to get around ClimaCore dispatch on `Regridder(...)`
 
-println("Single-threaded regridder construction time:")
-@be Regridder(
-    $(GO.Spherical()), $large_longlat_grid, $large_cubedsphere_tree;
-    intersection_operator = $(IntersectionGridOperator(GO.Spherical())),
-    normalize = $false,
-    threaded = $false,
-)
+# println("Single-threaded regridder construction time:")
+# @be Regridder(
+#     $(GO.Spherical()), $large_longlat_grid, $large_cubedsphere_tree;
+#     intersection_operator = $(IntersectionGridOperator(GO.Spherical())),
+#     normalize = $false,
+#     threaded = $(true),
+# )
 
 println("Multi-threaded regridder construction time:")
 @be Regridder(
@@ -157,11 +161,11 @@ println("Multi-threaded regridder construction time:")
     intersection_operator = $(IntersectionGridOperator(GO.Spherical())),
     normalize = $(false),
     threaded = $(true),
-)
+) seconds=120
 
 println("Compare to: default intersection operator, FV -> FV")
 @be Regridder(
     $(GO.Spherical()), $large_longlat_grid, $large_cubedsphere_tree;
     normalize = $(false),
-    threaded = $(false),
-)
+    threaded = $(true),
+) seconds=120
