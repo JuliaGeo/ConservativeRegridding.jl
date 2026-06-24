@@ -46,36 +46,36 @@ struct InPlace <: IntersectionReturnStyle end
 Return the [`IntersectionReturnStyle`](@ref) of operator `op`. Defaults to
 [`OutOfPlaceSingleResult`](@ref); block-assembling operators override to [`InPlace`](@ref).
 """
-IntersectionReturnStyle(::Any) = OutOfPlaceSingleResult()
+IntersectionReturnStyle(op) = OutOfPlaceSingleResult()
 
 """
     work_items(op, candidate_pairs) -> items
 
-Map candidate `(src_index, dst_index)` pairs to the work units the parallel
-assembly iterates. Each item is destructured as `(src_index, dst_index)` for
-[`OutOfPlaceSingleResult`](@ref) or passed through verbatim for [`InPlace`](@ref).
+Map candidate `(src_index, dst_index)` pairs to the input you want to pass to the 
+intersection operator.  This can be used to e.g. run a grouping pass on the source index
+over the candidates, as is done for the spectral element regridder.
 
-Defaults to one unit per candidate pair. Override to change parallel granularity —
-e.g. to group all of an element's candidate cells into one unit.
+By default, this is a no-op and returns the candidate pairs as is.
 """
-work_items(::Any, candidate_pairs) = candidate_pairs
+work_items(op, candidate_pairs) = candidate_pairs
 
 """
     output_matrix_size(op, src_tree, dst_tree) -> (nrows, ncols)
 
 Shape of the sparse matrix [`intersection_areas`](@ref) assembles for `op`.
+
 Defaults to `(prod(ncells(dst_tree)), prod(ncells(src_tree)))` — dst cells as
 rows, src cells as columns. Operators whose counts differ from cell counts
-(e.g. spectral-element node counts) override this.
+(e.g. spectral-element node counts) may override this.
 """
-output_matrix_size(::Any, src_tree, dst_tree) =
+output_matrix_size(op, src_tree, dst_tree) =
     (prod(Trees.ncells(dst_tree)), prod(Trees.ncells(src_tree)))
 
 # If the root tree is a `WithParallelizePolicy`, route the dual-DFS's
 # `(node, extent)` query through the user policy; otherwise fall back to the
 # default `should_parallelize` dispatch. The wrapper is *not* a dispatch axis
 # on `should_parallelize` — detecting it here keeps the dispatch graph simple.
-@inline function _build_parallelize_closure(tree)
+@inline function _build_parallelize_closure(tree::T) where T
     if tree isa Trees.WithParallelizePolicy
         let inner = tree.tree, p = tree.policy
             return (node, extent) -> p(inner, node, extent)
@@ -86,10 +86,6 @@ output_matrix_size(::Any, src_tree, dst_tree) =
 end
 
 function get_all_candidate_pairs(threaded::True, predicate_f::F, src_tree::T1, dst_tree::T2) where {F, T1, T2}
-    # TODO: Threaded dual dfs via chunking.
-    # For now this is just serial, and is the big bottleneck for larger grids.
-    # First, run the dual depth first search to get all candidate pairs of
-    # cells that may intersect.
     par_src = _build_parallelize_closure(src_tree)
     par_dst = _build_parallelize_closure(dst_tree)
     candidate_idxs = multithreaded_dual_query(predicate_f, par_src, par_dst, src_tree, dst_tree) # from utils/MultithreadedDualDepthFirstSearch.jl
@@ -173,9 +169,21 @@ _parallel_coo(style, op, items, src_tree, dst_tree, ::False; kwargs...) =
                        npartitions = Threads.nthreads() * 4, progress = false)
 
 Assemble the sparse intersection matrix between `src_tree` and `dst_tree` on
-`manifold`. Lower-level assembly entry that intersection operators plug into;
-most users go through [`Regridder`](@ref)`(…; intersection_operator = …)`.
+`manifold`.  Returns a `SparseMatrixCSC` of the output of the intersection operator.
 
+This is more of a developer level function, which pulls together the intersection operator interface.
+Users should go through [`Regridder`](@ref)`(…; intersection_operator = …)`.
+
+This calls out to four functions, which dispatch on `intersection_operator`:
+- [`IntersectionReturnStyle(intersection_operator)`](@ref IntersectionReturnStyle): return an 
+  [`IntersectionReturnStyle`](@ref) trait object, defining how the operator wants to store the 
+  results of its computation.  This is usually either [`OutOfPlaceSingleResult`](@ref) or [`InPlace`](@ref).
+- [`work_items(intersection_operator, candidate_pairs)`](@ref work_items): return a vector of "work items".
+  For the regular area-of-intersection operator, this is a vector of `(src_index, dst_index)` pairs.  But
+  it can also be more complex, as in the spectral element regridder.
+- [`output_matrix_size(intersection_operator, src_tree, dst_tree)`](@ref output_matrix_size): return the 
+  `(nrows, ncols)` shape of the sparse matrix.  For the regular operator, this is `(ncells(dst_tree), ncells(src_tree))`.
+  For the spectral element regridder, this is more complex.
 Driven by three dispatched seams on `intersection_operator`, each defaulting to
 the built-in area computation:
 - [`IntersectionReturnStyle`](@ref)`(op)` — how each work item's contribution is stored.
@@ -184,7 +192,7 @@ the built-in area computation:
 
 `threaded` is a `GeometryOpsCore.BoolsAsTypes` (`True()`/`False()`; convert via
 `booltype(::Bool)`). When threaded, work items are partitioned into `npartitions`
-chunks assembled on separate tasks.
+chunks assembled on separate tasks via ChunkSplitters.jl.
 """
 function intersection_areas(
         manifold::M, threaded::BoolsAsTypes, dst_tree, src_tree;
