@@ -100,7 +100,7 @@ output_eltype(op) = Float64
 Determine whether the result should be stored in the sparse matrix, after it has been computed.
 
 There is a default implementation for `::Number` results across all operators,
-which is simply `!iszero(result)`.  All other combinations of operator and result type
+which is simply `result > 0`.  All other combinations of operator and result type
 **must** have explicit dispatches implemented.
 """
 function should_store_result end
