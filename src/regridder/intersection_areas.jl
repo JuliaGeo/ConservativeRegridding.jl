@@ -105,7 +105,7 @@ which is simply `!iszero(result)`.  All other combinations of operator and resul
 """
 function should_store_result end
 should_store_result(op, result) = should_store_result(result)
-should_store_result(result::Number) = !iszero(result)
+should_store_result(result::T) where T <: Number = result > zero(T)
 should_store_result(result) = error("""
     `should_store_result` is not implemented for type $(typeof(result)).
     You must implement `should_store_result(op, result) -> Bool` for your operator.
