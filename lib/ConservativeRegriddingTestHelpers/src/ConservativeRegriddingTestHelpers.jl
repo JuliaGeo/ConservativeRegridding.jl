@@ -9,6 +9,7 @@ using Test
 import GeometryOps as GO
 import GeoInterface as GI
 import IterTools
+import SparseArrays
 using LinearAlgebra: cross, dot, norm
 
 import ConservativeRegridding
@@ -16,7 +17,7 @@ using ConservativeRegridding: Trees, TriangleQuadrature
 
 
 export has_tripolar, has_rotated, has_spectral_element, has_full_ring_grid, has_cell_crossing_dateline
-export test_intersection_areas_agree, test_integration_weights
+export test_intersection_areas_agree, test_integration_weights, test_order_symmetry
 export SphericalPolygonIntegrator, set_field_values!, zero_field!
 
 """
@@ -70,6 +71,48 @@ has_cell_crossing_dateline(field) =
 function test_intersection_areas_agree(regridder, tree1, tree2; rtol = sqrt(eps(Float64)))
     @test sum(regridder.intersections, dims=2)[:, 1] ≈ regridder.dst_areas rtol=rtol
     @test sum(regridder.intersections, dims=1)[1, :] ≈ regridder.src_areas rtol=rtol
+end
+
+"""
+    test_order_symmetry(regridder, src_field, dst_field;
+                        rtol = sqrt(eps(Float64)), manifold = GO.Spherical())
+
+`@test` that the clipper is symmetric under swapping the subject/clip roles:
+each stored intersection `area(src ∩ dst)` must equal the opposite clip order
+`area(dst ∩ src)`, as a fraction of the smaller cell's area. The original
+octa↔healpix grazing bug produced order-dependent *whole-cell* discrepancies
+(`|Δ|/cell ~ O(1)`); a clean clipper stays at the float-noise floor (`~1e-13`).
+Normalizing by cell area keeps machine-eps grazing slivers (`~1e-27` of a cell)
+negligible while still tripping on a whole-cell regression.
+
+Reuses the regridder's forward areas (assumes `normalize = false`) and only
+recomputes the reverse order. Skips non-finite / zero-area (ghost) cells.
+"""
+function test_order_symmetry(regridder, src_field, dst_field;
+                             rtol = sqrt(eps(Float64)), manifold = GO.Spherical())
+    src_tree = Trees.treeify(manifold, src_field)
+    dst_tree = Trees.treeify(manifold, dst_field)
+    op = ConservativeRegridding.DefaultIntersectionOperator(manifold)
+    A = regridder.intersections                  # (dst × src); stored = area(src ∩ dst)
+    rows = SparseArrays.rowvals(A)
+    vals = SparseArrays.nonzeros(A)
+    worst = 0.0
+    for s in axes(A, 2)                           # src column
+        isempty(SparseArrays.nzrange(A, s)) && continue
+        src_cell = Trees.getcell(src_tree, s)
+        sa = regridder.src_areas[s]
+        for k in SparseArrays.nzrange(A, s)
+            d = rows[k]
+            fwd = vals[k]
+            denom = min(sa, regridder.dst_areas[d])
+            (isfinite(fwd) && denom > 0) || continue
+            rev = op(Trees.getcell(dst_tree, d), src_cell)   # opposite clip order
+            isfinite(rev) || continue
+            worst = max(worst, abs(fwd - rev) / denom)
+        end
+    end
+    @test worst < rtol
+    return worst
 end
 
 """
