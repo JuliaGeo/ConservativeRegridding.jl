@@ -6,7 +6,7 @@ using ConservativeRegridding: Trees
 using RingGrids
 
 import ConservativeRegridding.Trees: treeify
-import GeometryOpsCore: best_manifold, Manifold, Spherical
+import GeometryOpsCore: best_manifold, manifold, Manifold, Spherical
 import GeometryOps as GO
 import GeometryOps: SpatialTreeInterface as STI
 import GeoInterface as GI
