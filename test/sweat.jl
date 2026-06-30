@@ -67,6 +67,9 @@ speedyweather_full_clenshaw_vals = zeros(Float64, length(speedyweather_full_clen
 speedyweather_full_gaussian_field = rand(SpeedyWeather.FullGaussianGrid, 48)
 speedyweather_full_gaussian_vals = zeros(Float64, length(speedyweather_full_gaussian_field))
 
+ringgrids_octahealpix_field = rand(RingGrids.OctaHEALPixGrid, 32) # here, `nlat_half` must be a power of two
+ringgrids_octahealpix_vals = zeros(Float64, length(ringgrids_octahealpix_field))
+
 oceananigans_fields = [
     ("Oceananigans longitude-latitude grid", oceananigans_latlong_field, oceananigans_latlong_vals),
     ("Oceananigans tripolar grid", oceananigans_tripolar_field, oceananigans_tripolar_vals),
@@ -88,7 +91,11 @@ speedyweather_fields = [
     ("SpeedyWeather full Gaussian grid", speedyweather_full_gaussian_field, speedyweather_full_gaussian_vals),
 ]
 
-fields = [oceananigans_fields..., climacore_fields..., healpix_fields..., speedyweather_fields...]
+ringgrids_fields = [
+    ("RingGrids OctaHEALPix grid", ringgrids_octahealpix_field, ringgrids_octahealpix_vals),
+]
+
+fields = [oceananigans_fields..., climacore_fields..., healpix_fields..., speedyweather_fields..., ringgrids_fields...]
 
 regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
 @testset "Sweat test" begin
