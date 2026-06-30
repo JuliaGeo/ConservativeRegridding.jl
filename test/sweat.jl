@@ -122,10 +122,8 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
             test_intersection_areas_agree(regridder, field1, field2; rtol=areas_rtol)
         end
 
-        # The clipper must be order-symmetric: area(src∩dst) == area(dst∩src) for
-        # every cell pair. Guards the octa↔healpix grazing fix (the old bug gave
-        # order-dependent whole-cell areas). SE matrices aren't overlap areas, so
-        # skip them; tripolar is fine (the helper skips ghost cells).
+        # Clipper order symmetry: area(src∩dst) == area(dst∩src) for every cell
+        # pair. SE matrices aren't overlap areas, so skip them.
         if !either_se
             test_order_symmetry(regridder, field1, field2)
         end

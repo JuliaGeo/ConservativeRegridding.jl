@@ -77,27 +77,24 @@ end
     test_order_symmetry(regridder, src_field, dst_field;
                         rtol = sqrt(eps(Float64)), manifold = GO.Spherical())
 
-`@test` that the clipper is symmetric under swapping the subject/clip roles:
-each stored intersection `area(src ∩ dst)` must equal the opposite clip order
-`area(dst ∩ src)`, as a fraction of the smaller cell's area. The original
-octa↔healpix grazing bug produced order-dependent *whole-cell* discrepancies
-(`|Δ|/cell ~ O(1)`); a clean clipper stays at the float-noise floor (`~1e-13`).
-Normalizing by cell area keeps machine-eps grazing slivers (`~1e-27` of a cell)
-negligible while still tripping on a whole-cell regression.
+`@test` that the clipper returns the same intersection area with the source and
+destination cells in either role: for every stored pair, the forward
+`area(src ∩ dst)` and the reverse `area(dst ∩ src)` agree to within `rtol` of the
+smaller cell's area.
 
-Reuses the regridder's forward areas (assumes `normalize = false`) and only
-recomputes the reverse order. Skips non-finite / zero-area (ghost) cells.
+Reuses the regridder's forward areas (requires `normalize = false`) and
+recomputes only the reverse order. Skips non-finite and zero-area (ghost) cells.
 """
 function test_order_symmetry(regridder, src_field, dst_field;
                              rtol = sqrt(eps(Float64)), manifold = GO.Spherical())
     src_tree = Trees.treeify(manifold, src_field)
     dst_tree = Trees.treeify(manifold, dst_field)
     op = ConservativeRegridding.DefaultIntersectionOperator(manifold)
-    A = regridder.intersections                  # (dst × src); stored = area(src ∩ dst)
+    A = regridder.intersections  # rows = dst, cols = src; nonzeros are area(src ∩ dst)
     rows = SparseArrays.rowvals(A)
     vals = SparseArrays.nonzeros(A)
     worst = 0.0
-    for s in axes(A, 2)                           # src column
+    for s in axes(A, 2)  # src cell
         isempty(SparseArrays.nzrange(A, s)) && continue
         src_cell = Trees.getcell(src_tree, s)
         sa = regridder.src_areas[s]
@@ -106,7 +103,7 @@ function test_order_symmetry(regridder, src_field, dst_field;
             fwd = vals[k]
             denom = min(sa, regridder.dst_areas[d])
             (isfinite(fwd) && denom > 0) || continue
-            rev = op(Trees.getcell(dst_tree, d), src_cell)   # opposite clip order
+            rev = op(Trees.getcell(dst_tree, d), src_cell)  # reverse clip order
             isfinite(rev) || continue
             worst = max(worst, abs(fwd - rev) / denom)
         end
