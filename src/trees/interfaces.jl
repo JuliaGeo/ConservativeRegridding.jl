@@ -106,8 +106,8 @@ function treeify(manifold, grid)
         else
             error("grid is a matrix, but no element is a polygon or point - please implement `ConservativeRegridding.Trees.treeify` for this type!")
         end
-    elseif Base.isiterable(grid)
-        if all(g -> GI.trait(g) isa GI.AbstractPolygonTrait, grid)
+    elseif Base.isiterable(typeof(grid))
+        if all(g -> GI.trait(g) isa Union{GI.AbstractPolygonTrait, GI.AbstractMultiPolygonTrait}, grid)
             return STI.FlatNoTree(grid)
         else
             if GI.isgeometry(first(grid))
