@@ -103,9 +103,13 @@ Base.parent(w::WithParallelizePolicy) = w.tree
 """
     GeometryMaintainingTreeWrapper(geoms, tree)
 
-A tree that stores the geometry data along with the tree (which, per the SpatialTreeInterface, should only store integer indices).
+A tree that stores the geometry data along with the tree 
+(which, per the SpatialTreeInterface, should only store integer indices).
 
-This is mostly useful to wrap if you want to define a descent method that also requires the geometry data passed _alongside_ the tree.
+This is mostly useful to wrap if you want to define a descent method 
+that also requires the geometry data passed _alongside_ the tree.
+
+It's required that `geoms` implements `Base.getindex(geoms, i::Integer)`.
 """
 struct GeometryMaintainingTreeWrapper{Geoms, Tree}
     geoms::Geoms
@@ -121,7 +125,7 @@ STI.isleaf(wrapper::GeometryMaintainingTreeWrapper) = STI.isleaf(parent(wrapper)
 STI.child_indices_extents(wrapper::GeometryMaintainingTreeWrapper) = STI.child_indices_extents(parent(wrapper))
 STI.node_extent(wrapper::GeometryMaintainingTreeWrapper) = STI.node_extent(parent(wrapper))
 
-getcell(wrapper::GeometryMaintainingTreeWrapper, args...) = getcell(wrapper.geoms, args...)
+getcell(wrapper::GeometryMaintainingTreeWrapper, args...) = getindex(wrapper.geoms, args...)
 ncells(wrapper::GeometryMaintainingTreeWrapper, args...) = ncells(wrapper.tree, args...)
 cell_range_extent(wrapper::GeometryMaintainingTreeWrapper, args...) = cell_range_extent(wrapper.geoms, args...)
 
