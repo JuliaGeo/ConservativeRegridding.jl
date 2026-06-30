@@ -1,92 +1,28 @@
 #=
-OctaHEALPix native quadtree.
+## OctaHEALPix native quadtree
 
-Reduced HEALPix grids aren't curvilinear (points-per-ring varies), so the
-`CellBasedGrid` path used for full grids can't represent them. Instead we walk
-OctaHEALPix's own nested hierarchy: 4 octahedral base faces, each pixel splitting
-into 4 children (`child = 4·parent + offset`), leaves at `log2(nside)`. This
-mirrors `HealpixExt`'s quadtree but derives every corner from OctaHEALPix's
-closed-form geometry — per-pixel and allocation-free, no grid-sized vertex matrix.
+The reduced OctaHEALPix grid (4 octahedral faces, pole to pole). Points-per-ring
+varies, so the whole grid isn't curvilinear — but **each face is**: a quadrant is
+an `nside × nside` `(r, c)` matrix (the 45°-rotated diamond), so we treat it as an
+`OctaHEALPixFaceGrid <: AbstractCurvilinearGrid` and wrap it in a stock
+`TopDownQuadtreeCursor`. `OctaHEALPixRootNode` ties the 4 faces together as the
+full sphere.
 
-Three index spaces meet at the `(j, q, iq)` triple, which everything routes through:
+This mirrors the standard-HEALPix design (see healpix.jl). It also drops the old
+Morton hierarchy's **power-of-two restriction**: range subdivision over the `(r,c)`
+matrix needs no nested index, so any `nlat_half` works (the `(r,c) ↔ ring`
+conversions are closed-form; only the nested Morton index needed pow2).
 
-    ij      ring-order linear index   (field data layout; what `getcell` takes)
-    pixel   nested linear index       (tree hierarchy; child = 4·pixel + offset)
-    j,q,iq  ring (N→S) · quadrant (1..4) · index within the quadrant
-
-`ij → (j,q,iq)` and `pixel → (j,q,iq)` are the converters; geometry is then a pure
-function of `(j,q,iq)`. The ring-order conversions are closed-form inverses of the
-cumulative ring counts (no grid instance, no allocation); the nested conversion
-reuses RingGrids' `nest2rcq`.
+`nside == nlat_half`. Geometry is OctaHEALPix's closed form (per-pixel,
+allocation-free, reproduces `RingGrids.get_vertices` exactly).
 
 Each pixel is a diamond whose corners sit on the latitude "rails" of neighbouring
 rings — N corner on ring j-1, E/W on ring j, S on ring j+1. A rail at level
 v = 0..2nside (0 = N pole, 2nside = S pole) has latitude from z = 1 - (v/nside)²
 (Górski et al. 2005 eq. 4 with 3N²→N²); per-ring longitudes are equidistant.
-Together these reproduce `RingGrids.get_vertices` exactly.
 =#
 
-# Tree nodes and spatial-tree navigation.
-
-"""
-    OctaHEALPixRootNode(nside)
-
-Entry point for an OctaHEALPix spatial tree: the full sphere with 4 octahedral
-base-face children. `nside == nlat_half` and must be a power of two (the nested
-hierarchy only exists then). `leaf_level` caches `log2(nside)` so the dual-DFS
-hot path never recomputes it.
-"""
-struct OctaHEALPixRootNode
-    nside::Int
-    leaf_level::Int
-end
-function OctaHEALPixRootNode(nside::Integer)
-    ispow2(nside) || throw(ArgumentError(
-        """
-        OctaHEALPix conservative regridding requires `nlat_half` to be a power of two;
-        got $nside.
-        """))
-    return OctaHEALPixRootNode(Int(nside), trailing_zeros(Int(nside)))
-end
-
-"""
-    OctaHEALPixTreeNode(nside, leaf_level, level, pixel)
-
-A pixel at `level` in the OctaHEALPix hierarchy. `pixel` is the 0-based nested
-index at this level; its 4 children are `4·pixel + (0:3)`. A node is a leaf once
-`level == leaf_level` (`== log2(nside)`).
-"""
-struct OctaHEALPixTreeNode
-    nside::Int
-    leaf_level::Int
-    level::Int
-    pixel::Int
-end
-
-treeify(::Spherical, grid::RingGrids.OctaHEALPixGrid) = OctaHEALPixRootNode(grid.nlat_half)
-
-best_manifold(::OctaHEALPixRootNode) = Spherical()
-best_manifold(::OctaHEALPixTreeNode) = Spherical()
-
-Trees.ncells(node::OctaHEALPixRootNode) = 4 * node.nside^2
-
-STI.isspatialtree(::Type{<:OctaHEALPixRootNode}) = true
-STI.isleaf(::OctaHEALPixRootNode) = false
-STI.nchild(::OctaHEALPixRootNode) = 4
-STI.node_extent(::OctaHEALPixRootNode) =
-    GO.UnitSpherical.SphericalCap(GO.UnitSphericalPoint(0.0, 0.0, 1.0), Float64(π) |> nextfloat)
-
-STI.isspatialtree(::Type{<:OctaHEALPixTreeNode}) = true
-STI.isleaf(node::OctaHEALPixTreeNode) = node.level == node.leaf_level
-STI.nchild(node::OctaHEALPixTreeNode) = STI.isleaf(node) ? 0 : 4
-
-# Base faces are the root's children (level 0, pixels 0..3); deeper, child = 4·parent + offset.
-STI.getchild(root::OctaHEALPixRootNode, i::Int) =
-    OctaHEALPixTreeNode(root.nside, root.leaf_level, 0, i - 1)
-STI.getchild(node::OctaHEALPixTreeNode, i::Int) =
-    OctaHEALPixTreeNode(node.nside, node.leaf_level, node.level + 1, 4 * node.pixel + (i - 1))
-
-# Index spaces: ring-order ↔ (j, q, iq) ↔ nested.
+# Index spaces: ring-order ↔ (j, q, iq) ↔ (r, c) matrix.
 
 # cells per quadrant on ring j (the ring holds 4× this many points)
 _octa_cells_per_quadrant(j, nside) = min(j, 2nside - j)
@@ -122,10 +58,13 @@ function _octa_jqi_ring(j, q, iq, nside)
     return _octa_ring_start(j, nside) + i - 1
 end
 
-# nested pixel (0-based) at resolution `nside` → (ring j, quadrant q, in-quadrant iq), 1-based
-function _octa_nest_jqi(pixel0, nside)
-    r, c, q = RingGrids.nest2rcq(pixel0 + 1, nside)    # nested → matrix (row, col, quadrant)
-    return r + c - 1, q, min(nside - r, c - 1) + 1
+# Per-face `(r, c)` matrix (1-based) ↔ (ring j, in-quadrant iq). The cell at matrix
+# `(r, c)` sits on ring `j = r + c - 1`; `iq` runs out from the diamond's poleward tip.
+_octa_rc_jqi(r, c, nside) = (r + c - 1, min(nside - r, c - 1) + 1)
+
+# inverse: (ring j, in-quadrant iq) → matrix (r, c)
+function _octa_jqi_rc(j, iq, nside)
+    return j <= nside ? (j - iq + 1, iq) : (nside - iq + 1, j - nside + iq)
 end
 
 # Closed-form cell geometry: (j, q, iq) → corners as (lon°, lat°).
@@ -172,37 +111,104 @@ function _octa_corners(nside, j, q, iq)
     return (E = mirror(n.E), S = mirror(n.N), W = mirror(n.W), N = mirror(n.S))
 end
 
-# Bounding `SphericalCap` of cell (j,q,iq). Corners go to `circle_from_four_corners`
-# in (N,E,W,S) order so its great-circle edge midpoints land on the real diamond edges.
-function _octa_cap(nside, j, q, iq)
-    c = _octa_corners(nside, j, q, iq)
-    return Trees.circle_from_four_corners((c.N, c.E, c.W, c.S), ())
+# Vertex (lon°, lat°) of lattice point (r, c) in quadrant q — the corner shared by
+# the cells meeting there. It sits on rail v = (r-1) + (c-1); rail longitudes are
+# equidistant, indexed by `k` (north `k = c-1`, south `k = c-v+nside-1`; the two
+# agree at the equator rail v = nside). Poles are longitude-degenerate.
+function _octa_vertex_lonlat(q, r, c, nside)
+    v = (r - 1) + (c - 1)
+    lat = _octa_lat(v, nside)
+    (v == 0 || v == 2nside) && return (90.0 * (q - 1), lat)
+    m, k = v <= nside ? (v, c - 1) : (2nside - v, c - v + nside - 1)
+    return (mod(90.0 * (q - 1) + k * (90.0 / m), 360.0), lat)
 end
 
-# Spatial-tree interface (leaf-level cell access).
+# Per-face curvilinear grid (one octahedral quadrant).
 
-# `getcell` is ring-indexed to match the field data layout. Corners are emitted
-# counter-clockwise (E, N, W, S) — the convex-clipping intersection kernel needs
-# CCW winding; a clockwise ring clips to empty.
+struct OctaHEALPixFaceGrid{M <: Manifold} <: Trees.AbstractCurvilinearGrid{M}
+    manifold::M
+    nside::Int
+    q::Int                                              # quadrant 1..4
+end
+
+manifold(g::OctaHEALPixFaceGrid) = g.manifold
+Trees.ncells(g::OctaHEALPixFaceGrid, ::Int) = g.nside
+
+# Cell (1-based r, c) → its diamond polygon; corners CCW (E, N, W, S) for the
+# convex-clip kernel (a clockwise ring clips to empty).
+function Trees.getcell(g::OctaHEALPixFaceGrid, r::Int, c::Int)
+    j, iq = _octa_rc_jqi(r, c, g.nside)
+    cr = _octa_corners(g.nside, j, g.q, iq)
+    f = GO.UnitSphereFromGeographic()
+    return GI.Polygon(SA[GI.LinearRing(SA[f(cr.E), f(cr.N), f(cr.W), f(cr.S), f(cr.E)])])
+end
+
+# Lattice vertex (1-based point index 1:(nside+1)); drives the generic spherical
+# `cell_range_extent` perimeter caps (OctaHEALPix's rail-following edges make the
+# perimeter walk worth keeping — unlike the corner-only cap used for HEALPix).
+Trees.getvertex(g::OctaHEALPixFaceGrid, r::Int, c::Int) =
+    GO.UnitSphereFromGeographic()(_octa_vertex_lonlat(g.q, r, c, g.nside))
+
+# Index maps target the *global* ring layout (field data order), not face-local.
+function Trees.cartesian_to_linear_idx(g::OctaHEALPixFaceGrid, idx::CartesianIndex{2})
+    j, iq = _octa_rc_jqi(idx[1], idx[2], g.nside)
+    return _octa_jqi_ring(j, g.q, iq, g.nside)
+end
+function Trees.linear_to_cartesian_idx(g::OctaHEALPixFaceGrid, idx::Integer)
+    j, _, iq = _octa_ring_jqi(idx, g.nside)
+    return CartesianIndex(_octa_jqi_rc(j, iq, g.nside))
+end
+
+# Block cap from the 4 outer corners + great-circle edge midpoints, skipping the
+# generic spherical `cell_range_extent`'s perimeter-vertex walk. Verified to contain
+# every cell at every tree level (the diamond sub-blocks are geodesically convex), so
+# the cheaper O(1) cap is sound — matching the HEALPix face design.
+function STI.node_extent(q::Trees.TopDownQuadtreeCursor{<: OctaHEALPixFaceGrid})
+    g = q.grid
+    imin, imax = extrema(q.leafranges[1]); imax += 1
+    jmin, jmax = extrema(q.leafranges[2]); jmax += 1
+    bl = Trees.getvertex(g, imin, jmin); tl = Trees.getvertex(g, imin, jmax)
+    br = Trees.getvertex(g, imax, jmin); tr = Trees.getvertex(g, imax, jmax)
+    return Trees.circle_from_four_corners((bl, tl, br, tr), ())
+end
+
+# Toplevel tree.
+
+"""
+    OctaHEALPixRootNode(manifold, nside)
+
+Entry point for an OctaHEALPix spatial tree: the full sphere with the 4 octahedral
+base faces (each a `TopDownQuadtreeCursor` over an [`OctaHEALPixFaceGrid`](@ref)) as
+children. `nside == nlat_half`. `getcell` is ring-indexed to match the field data
+layout.
+"""
+struct OctaHEALPixRootNode{M <: Manifold}
+    manifold::M
+    nside::Int
+end
+
+# OctaHEALPix is inherently spherical; default the manifold for REPL/test construction.
+OctaHEALPixRootNode(nside::Integer) = OctaHEALPixRootNode(Spherical(), nside)
+
+treeify(m::Spherical, grid::RingGrids.OctaHEALPixGrid) = OctaHEALPixRootNode(m, grid.nlat_half)
+treeify(::Spherical, node::OctaHEALPixRootNode) = node
+
+best_manifold(node::OctaHEALPixRootNode) = node.manifold
+Trees.ncells(node::OctaHEALPixRootNode) = 4 * node.nside^2
+
+STI.isspatialtree(::Type{<: OctaHEALPixRootNode}) = true
+STI.isleaf(::OctaHEALPixRootNode) = false
+STI.nchild(::OctaHEALPixRootNode) = 4
+STI.getchild(root::OctaHEALPixRootNode, i::Int) =
+    Trees.TopDownQuadtreeCursor(OctaHEALPixFaceGrid(root.manifold, root.nside, i))
+STI.node_extent(::OctaHEALPixRootNode) =
+    GO.UnitSpherical.SphericalCap(GO.UnitSphericalPoint(0.0, 0.0, 1.0), Float64(π) |> nextfloat)
+
+# `getcell` is ring-indexed to match the field data layout; corners CCW (E, N, W, S).
 function Trees.getcell(node::OctaHEALPixRootNode, ij::Int)
     j, q, iq = _octa_ring_jqi(ij, node.nside)
-    c = _octa_corners(node.nside, j, q, iq)
+    cr = _octa_corners(node.nside, j, q, iq)
     f = GO.UnitSphereFromGeographic()
-    return GI.Polygon(SA[GI.LinearRing(SA[f(c.E), f(c.N), f(c.W), f(c.S), f(c.E)])])
+    return GI.Polygon(SA[GI.LinearRing(SA[f(cr.E), f(cr.N), f(cr.W), f(cr.S), f(cr.E)])])
 end
 Trees.getcell(node::OctaHEALPixRootNode) = (Trees.getcell(node, i) for i in 1:Trees.ncells(node))
-
-# A node's extent is the bounding cap of its (coarse) pixel at resolution 2^level.
-function STI.node_extent(node::OctaHEALPixTreeNode)
-    nside_c = 1 << node.level                           # 2^level
-    j, q, iq = _octa_nest_jqi(node.pixel, nside_c)
-    return _octa_cap(nside_c, j, q, iq)
-end
-
-# A leaf wraps one grid cell: report its ring-order (data) index and bounding cap.
-function STI.child_indices_extents(node::OctaHEALPixTreeNode)
-    STI.isleaf(node) || error("child_indices_extents is only valid for leaf nodes")
-    j, q, iq = _octa_nest_jqi(node.pixel, node.nside)
-    ring_idx = _octa_jqi_ring(j, q, iq, node.nside)
-    return ((ring_idx, _octa_cap(node.nside, j, q, iq)),)
-end
