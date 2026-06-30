@@ -103,6 +103,9 @@ ringgrids_full_clenshaw_vals = zeros(Float64, length(ringgrids_full_clenshaw_fie
 ringgrids_octahealpix_field = rand(RingGrids.OctaHEALPixGrid, 32)
 ringgrids_octahealpix_vals = zeros(Float64, length(ringgrids_octahealpix_field))
 
+ringgrids_healpix_field = rand(RingGrids.HEALPixGrid, 32) # 12-face HEALPix; nside = nlat_half ÷ 2
+ringgrids_healpix_vals = zeros(Float64, length(ringgrids_healpix_field))
+
 oceananigans_fields = [
     ("Oceananigans longitude-latitude grid", oceananigans_latlong_field, oceananigans_latlong_vals),
     ("Oceananigans tripolar grid (RightFaceFolded)", oceananigans_tripolar_field, oceananigans_tripolar_vals),
@@ -123,6 +126,7 @@ climacore_fields = [
 ringgrids_fields = [
     ("RingGrids full Clenshaw-Curtis grid", ringgrids_full_clenshaw_field, ringgrids_full_clenshaw_vals),
     ("RingGrids OctaHEALPix grid", ringgrids_octahealpix_field, ringgrids_octahealpix_vals),
+    ("RingGrids HEALPix grid", ringgrids_healpix_field, ringgrids_healpix_vals),
 ]
 
 fields = [oceananigans_fields..., climacore_fields..., healpix_fields..., ringgrids_fields...]

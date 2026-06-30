@@ -67,8 +67,11 @@ speedyweather_full_clenshaw_vals = zeros(Float64, length(speedyweather_full_clen
 speedyweather_full_gaussian_field = rand(SpeedyWeather.FullGaussianGrid, 48)
 speedyweather_full_gaussian_vals = zeros(Float64, length(speedyweather_full_gaussian_field))
 
-ringgrids_octahealpix_field = rand(RingGrids.OctaHEALPixGrid, 32) # here, `nlat_half` must be a power of two
+ringgrids_octahealpix_field = rand(RingGrids.OctaHEALPixGrid, 48) # here, `nlat_half` must be a power of two
 ringgrids_octahealpix_vals = zeros(Float64, length(ringgrids_octahealpix_field))
+
+ringgrids_healpix_field = rand(RingGrids.HEALPixGrid, 48) # 12-face HEALPix; nside = nlat_half ÷ 2
+ringgrids_healpix_vals = zeros(Float64, length(ringgrids_healpix_field))
 
 oceananigans_fields = [
     ("Oceananigans longitude-latitude grid", oceananigans_latlong_field, oceananigans_latlong_vals),
@@ -93,6 +96,7 @@ speedyweather_fields = [
 
 ringgrids_fields = [
     ("RingGrids OctaHEALPix grid", ringgrids_octahealpix_field, ringgrids_octahealpix_vals),
+    ("RingGrids HEALPix grid", ringgrids_healpix_field, ringgrids_healpix_vals),
 ]
 
 fields = [oceananigans_fields..., climacore_fields..., healpix_fields..., speedyweather_fields..., ringgrids_fields...]

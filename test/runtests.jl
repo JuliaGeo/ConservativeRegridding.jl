@@ -11,6 +11,7 @@ using Test, SafeTestsets
     @safetestset "Extensions: ClimaCore" begin include("extensions/climacore.jl") end
     @safetestset "Extensions: Healpix" begin include("extensions/healpix.jl") end
     @safetestset "Extensions: OctaHEALPix (RingGrids)" begin include("extensions/ringgrids_octahealpix.jl") end
+    @safetestset "Extensions: HEALPix (RingGrids)" begin include("extensions/ringgrids_healpix.jl") end
     @safetestset "Extensions: NCDatasets" begin include("extensions/ncdatasets.jl") end
   
     @safetestset "Comparison: XESMF" begin include("usecases/xesmf_comparison.jl") end
