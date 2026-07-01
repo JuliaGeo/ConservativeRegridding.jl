@@ -52,7 +52,7 @@ function treeify(manifold::Spherical, grid::RingGrids.AbstractFullGrid)
     return Trees.KnownFullSphereExtentWrapper(tree)
 end
 
-# Reduced OctaHEALPix grids need a native nested quadtree (see octahealpix.jl).
+# Reduced OctaHEALPix grids use a per-face range-subdivision quadtree (see octahealpix.jl).
 include("octahealpix.jl")
 
 # Standard 12-face HEALPix grids use a per-face range-subdivision quadtree (see healpix.jl).

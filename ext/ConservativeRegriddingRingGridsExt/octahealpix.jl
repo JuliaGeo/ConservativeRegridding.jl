@@ -2,16 +2,13 @@
 ## OctaHEALPix native quadtree
 
 The reduced OctaHEALPix grid (4 octahedral faces, pole to pole). Points-per-ring
-varies, so the whole grid isn't curvilinear — but **each face is**: a quadrant is
-an `nside × nside` `(r, c)` matrix (the 45°-rotated diamond), so we treat it as an
+varies, so the whole grid isn't curvilinear — but each face is: a quadrant is an
+`nside × nside` `(r, c)` matrix (the 45°-rotated diamond), so we treat it as an
 `OctaHEALPixFaceGrid <: AbstractCurvilinearGrid` and wrap it in a stock
-`TopDownQuadtreeCursor`. `OctaHEALPixRootNode` ties the 4 faces together as the
-full sphere.
-
-This mirrors the standard-HEALPix design (see healpix.jl). It also drops the old
-Morton hierarchy's **power-of-two restriction**: range subdivision over the `(r,c)`
-matrix needs no nested index, so any `nlat_half` works (the `(r,c) ↔ ring`
-conversions are closed-form; only the nested Morton index needed pow2).
+`TopDownQuadtreeCursor`; `OctaHEALPixRootNode` ties the 4 faces together as the
+full sphere. This mirrors the standard-HEALPix design (see healpix.jl); range
+subdivision over the `(r,c)` matrix needs no nested index, so any `nlat_half`
+works (the `(r,c) ↔ ring` conversions are closed-form).
 
 `nside == nlat_half`. Geometry is OctaHEALPix's closed form (per-pixel,
 allocation-free, reproduces `RingGrids.get_vertices` exactly).
@@ -178,8 +175,8 @@ end
     OctaHEALPixRootNode(manifold, nside)
 
 Entry point for an OctaHEALPix spatial tree: the full sphere with the 4 octahedral
-base faces (each a `TopDownQuadtreeCursor` over an [`OctaHEALPixFaceGrid`](@ref)) as
-children. `nside == nlat_half`. `getcell` is ring-indexed to match the field data
+base faces (each a [`Trees.TopDownQuadtreeCursor`](@ref) over a custom `OctaHEALPixFaceGrid`)
+as children. `nside == nlat_half`. `getcell` is ring-indexed to match the field data
 layout.
 """
 struct OctaHEALPixRootNode{M <: Manifold}

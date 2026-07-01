@@ -142,10 +142,7 @@ function Trees.linear_to_cartesian_idx(g::HEALPixFaceGrid, idx::Integer)
 end
 
 # A HEALPix pixel never bulges outside the cap of its 4 corners + great-circle edge
-# midpoints, so the block cap skips the perimeter-vertex walk the generic spherical
-# `cell_range_extent` does. Only `node_extent` sees multi-cell blocks — the cursor's
-# `child_indices_extents` always builds single-cell caps (perimeter == the 4 corners),
-# so it needs no override.
+# midpoints, so we can skip the generic method's inclusion of all perimeter vertices.
 function STI.node_extent(q::Trees.TopDownQuadtreeCursor{<: HEALPixFaceGrid})
     g = q.grid
     imin, imax = extrema(q.leafranges[1]); imax += 1
@@ -164,10 +161,10 @@ end
 """
     HEALPixRootNode(manifold, nside)
 
-Entry point for a standard HEALPix spatial tree: the full sphere with the 12 base
-faces (each a `TopDownQuadtreeCursor` over a [`HEALPixFaceGrid`](@ref)) as
-children. `nside == nlat_half ÷ 2`. `getcell` is ring-indexed to match the field
-data layout.
+Entry point for a standard HEALPix spatial tree from SpeedyWeather/RingGrids.
+This has the full sphere with all 12 base faces, and decomposes into
+[`Trees.TopDownQuadtreeCursor`](@ref)s with specialized `HEALPixFaceGrid`
+inner curvilinear grids.
 """
 struct HEALPixRootNode{M <: Manifold}
     manifold::M
@@ -191,6 +188,7 @@ STI.getchild(root::HEALPixRootNode, i::Int) =
 STI.node_extent(::HEALPixRootNode) =
     GO.UnitSpherical.SphericalCap(GO.UnitSphericalPoint(0.0, 0.0, 1.0), Float64(π) |> nextfloat)
 
+# `getcell` is ring-indexed to match the field data layout.
 function Trees.getcell(node::HEALPixRootNode, ipix::Int)
     ix, iy, face = _hp_pix2xyf(ipix, node.nside)
     return _hp_pixel_polygon(ix, iy, face, node.nside)
