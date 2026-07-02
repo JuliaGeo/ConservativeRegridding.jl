@@ -44,6 +44,11 @@ pull_from_field!(vals, field::ClimaCore.Fields.Field) = (vals .= ClimaCoreExt.se
 push_to_field!(field::Healpix.HealpixMap, vals) = (copyto!(parent(field), vals); field)
 pull_from_field!(vals, field::Healpix.HealpixMap) = (copyto!(vals, parent(field)); vals)
 
+# RingGrids: a `Field` is itself an `AbstractVector` over the grid points, in the
+# same order as `vals`, so copy straight in and out.
+push_to_field!(field::RingGrids.AbstractField, vals) = (copyto!(field, vals); field)
+pull_from_field!(vals, field::RingGrids.AbstractField) = (copyto!(vals, field); vals)
+
 # ---- Grid / field / vals setup (mirrors sweat.jl) ----
 
 oceananigans_latlong_grid = Oceananigans.LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z = (0, 1), radius = GO.Spherical().radius)
@@ -91,6 +96,16 @@ healpix_nested_order_vals = healpix_nested_order_field.pixels
 healpix_ring_order_field = Healpix.HealpixMap{Float64, Healpix.RingOrder}(64)
 healpix_ring_order_vals = healpix_ring_order_field.pixels
 
+# RingGrids: a full grid (FullClenshaw, cells crossing the 0°/360° seam) and a
+# reduced grid (OctaHEALPix, native nested-quadtree path; nlat_half a power of two).
+ringgrids_full_clenshaw_field = rand(RingGrids.FullClenshawGrid, 48)
+ringgrids_full_clenshaw_vals = zeros(Float64, length(ringgrids_full_clenshaw_field))
+ringgrids_octahealpix_field = rand(RingGrids.OctaHEALPixGrid, 32)
+ringgrids_octahealpix_vals = zeros(Float64, length(ringgrids_octahealpix_field))
+
+ringgrids_healpix_field = rand(RingGrids.HEALPixGrid, 32) # 12-face HEALPix; nside = nlat_half ÷ 2
+ringgrids_healpix_vals = zeros(Float64, length(ringgrids_healpix_field))
+
 oceananigans_fields = [
     ("Oceananigans longitude-latitude grid", oceananigans_latlong_field, oceananigans_latlong_vals),
     ("Oceananigans tripolar grid (RightFaceFolded)", oceananigans_tripolar_field, oceananigans_tripolar_vals),
@@ -108,7 +123,13 @@ climacore_fields = [
     ("ClimaCore cubed sphere grid (Gilbert ordered)", climacore_cubedsphere_gilbert_ordered_field, climacore_cubedsphere_gilbert_ordered_vals),
 ]
 
-fields = [oceananigans_fields..., climacore_fields..., healpix_fields...]
+ringgrids_fields = [
+    ("RingGrids full Clenshaw-Curtis grid", ringgrids_full_clenshaw_field, ringgrids_full_clenshaw_vals),
+    ("RingGrids OctaHEALPix grid", ringgrids_octahealpix_field, ringgrids_octahealpix_vals),
+    ("RingGrids HEALPix grid", ringgrids_healpix_field, ringgrids_healpix_vals),
+]
+
+fields = [oceananigans_fields..., climacore_fields..., healpix_fields..., ringgrids_fields...]
 
 regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
 @testset "Sweat test (field path)" begin

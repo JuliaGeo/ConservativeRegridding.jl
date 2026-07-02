@@ -6,8 +6,11 @@ using ConservativeRegridding: Trees
 using RingGrids
 
 import ConservativeRegridding.Trees: treeify
-import GeometryOpsCore: best_manifold, Manifold, Spherical
+import GeometryOpsCore: best_manifold, manifold, Manifold, Spherical
 import GeometryOps as GO
+import GeometryOps: SpatialTreeInterface as STI
+import GeoInterface as GI
+import StaticArrays: SA
 
 
 best_manifold(grid::RingGrids.AbstractGrid) = Spherical()
@@ -48,5 +51,11 @@ function treeify(manifold::Spherical, grid::RingGrids.AbstractFullGrid)
     tree      = Trees.ReorderedTopDownQuadtreeCursor(cell_grid, ordering)
     return Trees.KnownFullSphereExtentWrapper(tree)
 end
+
+# Reduced OctaHEALPix grids use a per-face range-subdivision quadtree (see octahealpix.jl).
+include("octahealpix.jl")
+
+# Standard 12-face HEALPix grids use a per-face range-subdivision quadtree (see healpix.jl).
+include("healpix.jl")
 
 end

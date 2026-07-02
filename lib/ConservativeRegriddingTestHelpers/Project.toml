@@ -9,6 +9,7 @@ GeoInterface = "cf35fbd7-0cd7-5166-be24-54bfbe79505f"
 GeometryOps = "3251bfac-6a57-4b6d-aa61-ac1fef2975ab"
 IterTools = "c8e1da08-722c-5040-9ed9-7db0dc04731e"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [weakdeps]
