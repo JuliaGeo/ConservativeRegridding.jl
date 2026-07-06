@@ -40,6 +40,65 @@ using SparseArrays
     end
 end
 
+@testset "IntersectionGridOperator" begin
+    function make_grid(nx, ny)
+        polys = Matrix{GI.Polygon}(undef, nx, ny)
+        for j in 1:ny, i in 1:nx
+            x0, x1 = (i-1)/nx, i/nx
+            y0, y1 = (j-1)/ny, j/ny
+            ring = GI.LinearRing([(x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0)])
+            polys[i,j] = GI.Polygon([ring])
+        end
+        polys
+    end
+
+    @testset "Planar" begin
+        src, dst = make_grid(2, 2), make_grid(3, 3)
+        op = ConservativeRegridding.IntersectionGridOperator(GO.Planar())
+        r = ConservativeRegridding.Regridder(GO.Planar(), dst, src; intersection_operator = op, normalize = false, threaded = false)
+        A = r.intersections
+
+        @test eltype(A) <: GI.Polygon
+        @test isconcretetype(eltype(A))
+        @test size(A) == (9, 4)
+        # Both grids tile the unit square, so the intersection polygons cover it exactly.
+        @test sum(p -> GO.area(GO.Planar(), p), nonzeros(A)) ≈ 1.0
+
+        # Areas of the stored polygons reproduce the default (area-weight) regridder.
+        r_default = ConservativeRegridding.Regridder(GO.Planar(), dst, src; normalize = false, threaded = false)
+        rows, cols, polys = findnz(A)
+        @test all(
+            GO.area(GO.Planar(), poly) ≈ r_default.intersections[i, j]
+            for (i, j, poly) in zip(rows, cols, polys)
+        )
+    end
+
+    @testset "Spherical" begin
+        tf = GO.UnitSpherical.UnitSphereFromGeographic()
+        corners(lons, lats) = [tf((lon, lat)) for lon in lons, lat in lats]
+        src_pts = corners(range(-180, 180; length = 9), range(-90, 90; length = 5))
+        dst_pts = corners(range(-180, 180; length = 7), range(-90, 90; length = 4))
+
+        op = ConservativeRegridding.IntersectionGridOperator(GO.Spherical())
+        r = ConservativeRegridding.Regridder(GO.Spherical(), dst_pts, src_pts; intersection_operator = op, normalize = false, threaded = false)
+        A = r.intersections
+
+        @test all(p -> GI.trait(p) isa Union{GI.MultiPolygonTrait, GI.PolygonTrait}, SparseArrays.nonzeros(A))
+        @test isconcretetype(eltype(A))
+        @test size(A) == (18, 32)
+        # Both grids cover the full sphere, so the intersection polygons do too.
+        total_area = sum(p -> GO.area(GO.Spherical(), p), nonzeros(A))
+        @test total_area ≈ 4π * GO.Spherical().radius^2
+
+        r_default = ConservativeRegridding.Regridder(GO.Spherical(), dst_pts, src_pts; normalize = false, threaded = false)
+        rows, cols, polys = findnz(A)
+        @test all(
+            isapprox(GO.area(GO.Spherical(), poly), r_default.intersections[i, j]; rtol = 1e-10)
+            for (i, j, poly) in zip(rows, cols, polys)
+        )
+    end
+end
+
 import GeometryOpsCore
 
 @testset "regrid! dense vs strided dispatch" begin

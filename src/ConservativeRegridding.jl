@@ -35,15 +35,18 @@ include("regridder/triangle_quadrature.jl")
 include("regridder/regridder.jl")
 include("regridder/regrid.jl")
 include("regridder/intersection_areas.jl")
+# Intersection operators, implementing the interface defined in intersection_areas.jl
+include("regridder/intersection_operators/default_intersection_operator.jl")
+include("regridder/intersection_operators/intersection_grid_operator.jl")
 
 
 @public Regridder, regrid, regrid!
 @public areas
 @public AbstractDimensionalSlicer, NDSliceLoop, slice_views, extract_source_arraylike, extract_dest_arraylike
 # Intersection-operator assembly interface (operators can plug into `intersection_areas`)
-@public intersection_areas, DefaultIntersectionOperator
+@public intersection_areas, DefaultIntersectionOperator, IntersectionGridOperator
 @public IntersectionReturnStyle, OutOfPlaceSingleResult, InPlace
-@public work_items, output_matrix_size
+@public work_items, output_matrix_size, output_eltype, should_store_result
 
 """
     save_esmf_weights(path, regridder;

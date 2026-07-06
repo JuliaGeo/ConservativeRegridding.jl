@@ -60,7 +60,11 @@ Trees Module (grid representations + quadtree cursors for spatial indexing)
 - `work_items(op, candidate_pairs)` — units of parallel work (default: one candidate pair each).
 - `output_matrix_size(op, src_tree, dst_tree)` — assembled `(nrows, ncols)` (default: dst-cells × src-cells).
 - `output_eltype(op, [src_tree, dst_tree])` — element type of the assembled matrix (default: `Float64`); override to store something other than areas, e.g. a matrix of intersection polygons.
-- `IntersectionReturnStyle`, `work_items`, and `output_matrix_size` are `@public`; `output_eltype` is documented alongside them but is **not** yet added to the `@public` list — likely an oversight, check before assuming it's exported. `DefaultIntersectionOperator` dispatches on manifold (Planar: `FosterHormannClipping`, Spherical: `ConvexConvexSutherlandHodgman`) and uses all defaults.
+- The whole interface is `@public` (including `output_eltype` and `should_store_result`).
+
+**Concrete operators** (`intersection_operators/`, one file each):
+- `DefaultIntersectionOperator` dispatches on manifold (Planar: `FosterHormannClipping`, Spherical: `ConvexConvexSutherlandHodgman`) and uses all defaults, storing intersection areas.
+- `IntersectionGridOperator` stores the raw intersection *polygons* instead of areas (overrides `output_eltype`/`should_store_result`); requires `normalize = false`. Demo in `examples/intersection_grid_assembler.jl`.
 
 ### Trees Module (`src/trees/Trees.jl`)
 
@@ -114,4 +118,4 @@ All follow the same pattern: implement `Trees.treeify()` for domain-specific gri
 
 ### API Surface
 
-The package uses `@public` from SciMLPublic for API visibility: `Regridder`, `regrid`, `regrid!`, `areas` are public; so is the N-D regridding interface (`AbstractDimensionalSlicer`, `NDSliceLoop`, `slice_views`, `extract_source_arraylike`, `extract_dest_arraylike`); so is the intersection-operator interface (`intersection_areas`, `DefaultIntersectionOperator`, `IntersectionReturnStyle`, `OutOfPlaceSingleResult`, `InPlace`, `work_items`, `output_matrix_size` — `output_eltype` is not currently included). Grid types and tree types are exported.
+The package uses `@public` from SciMLPublic for API visibility: `Regridder`, `regrid`, `regrid!`, `areas` are public; so is the N-D regridding interface (`AbstractDimensionalSlicer`, `NDSliceLoop`, `slice_views`, `extract_source_arraylike`, `extract_dest_arraylike`); so is the intersection-operator interface (`intersection_areas`, `DefaultIntersectionOperator`, `IntersectionGridOperator`, `IntersectionReturnStyle`, `OutOfPlaceSingleResult`, `InPlace`, `work_items`, `output_matrix_size`, `output_eltype`, `should_store_result`). Grid types and tree types are exported.

@@ -61,47 +61,6 @@ function LinearAlgebra.normalize!(regridder::Regridder)
     return regridder
 end
 
-struct DefaultIntersectionFailureError{T1, T2, E} <: Base.Exception
-    p1::T1
-    p2::T2
-    e::E
-end
-
-function Base.showerror(io::IO, e::DefaultIntersectionFailureError)
-    print(io, "Intersection failed with the following error.  Capture this error object and access `err.p1` and `err.p2` to access the polygons that failed to intersect.")
-    Base.showerror(io, e.e)
-end
-
-"""
-    DefaultIntersectionOperator(manifold::GeometryOps.Manifold)
-
-Default intersection operator for the given manifold.
-
-Implemented for `Planar` and `Spherical` manifolds at the moment.
-Will dispatch to the appropriate intersection operator / algorithm based on the manifold.
-"""
-struct DefaultIntersectionOperator{M}
-    manifold::M
-end
-
-function (op::DefaultIntersectionOperator{<: GeometryOps.Planar})(p1, p2)
-    intersection_polys = #=try; =#
-        GeometryOps.intersection(GO.FosterHormannClipping(GO.Planar()), p1, p2; target = GeoInterface.PolygonTrait())
-    # catch
-    #     throw(DefaultIntersectionFailureError(p1, p2, e))
-    # end
-    return GeometryOps.area(GO.Planar(), intersection_polys)
-end
-
-function (op::DefaultIntersectionOperator{M})(p1, p2) where {M <: GeometryOps.Spherical}
-    intersection_polys = #=try; =#
-        GeometryOps.intersection(GeometryOps.ConvexConvexSutherlandHodgman(op.manifold), p1, p2; target = GeoInterface.PolygonTrait())
-    # catch
-    #     throw(DefaultIntersectionFailureError(p1, p2, e))
-    # end
-    return GeometryOps.area(op.manifold, intersection_polys)
-end
-
 function Regridder(dst, src; kwargs...)
     dst_manifold = GOCore.best_manifold(dst)
     src_manifold = GOCore.best_manifold(src)
