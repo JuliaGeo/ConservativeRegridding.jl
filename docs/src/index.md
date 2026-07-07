@@ -131,10 +131,20 @@ See [Customizing the weights: the intersection operator interface](@ref) for a w
 
 ```@docs
 ConservativeRegridding.intersection_areas
-ConservativeRegridding.DefaultIntersectionOperator
 ConservativeRegridding.IntersectionReturnStyle
 ConservativeRegridding.OutOfPlaceSingleResult
 ConservativeRegridding.InPlace
 ConservativeRegridding.work_items
 ConservativeRegridding.output_matrix_size
+ConservativeRegridding.output_eltype
+ConservativeRegridding.should_store_result
 ```
+
+These are the various intersection operators already implemented:
+
+```@docs
+ConservativeRegridding.DefaultIntersectionOperator
+ConservativeRegridding.IntersectionGridOperator
+```
+
+and there are two more in the ClimaCore extension, for spectral element based regridding.

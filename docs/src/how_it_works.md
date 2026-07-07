@@ -73,7 +73,8 @@ to [`ConservativeRegridding.intersection_areas`](@ref). The four seams are:
    of the assembled matrix (default: destination-cell count × source-cell count).
 4. **[`output_eltype`](@ref)`(op, src_tree, dst_tree)`** — the element type of the sparse
    matrix (default: `Float64`). Override it when you want something other than scalar areas —
-   e.g. to build up a matrix of intersection _polygons_ rather than just areas.
+   e.g. to build up a matrix of intersection _polygons_ rather than just areas, as the
+   shipped [`IntersectionGridOperator`](@ref) does.
 
 Everything else — candidate search, chunking, multithreaded assembly, and sparse-matrix
 construction — is shared, so whatever your operator computes runs inside the same parallel

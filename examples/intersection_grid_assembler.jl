@@ -17,18 +17,22 @@ intersection computation, which may speed things up significantly.
 
 The way that we do this is by defining a custom intersection operator, and in fact that is all we have to do.
 In this case, for convenience, we'll use the `OutOfPlaceSingleResult` return style.
+
+Note that ConservativeRegridding ships this exact operator as the public
+`ConservativeRegridding.IntersectionGridOperator` - here we rebuild it from scratch to show
+how the intersection-operator machinery works.
 =#
 
 # ## Implementation
 
-import ConservativeRegridding: IntersectionReturnStyle, OutOfPlaceSingleResult, 
+import ConservativeRegridding: IntersectionReturnStyle, OutOfPlaceSingleResult,
                                output_eltype, should_store_result
 import GeometryOpsCore: Manifold, Planar, Spherical
 
 import GeoInterface as GI, GeometryOps as GO
 
 # This is a simple helper function to get a polygon type out.
-_get_poly_type(point_type = Tuple{T, T}, z = false) =
+_get_poly_type(point_type, z = false) =
     GI.Polygon{z, false, Vector{GI.LinearRing{z, false, Vector{point_type}, Nothing, Nothing}}, Nothing, Nothing}
 
 # Now let's define the intersection operator, and implement the ConservativeRegridding intersection operator
