@@ -39,6 +39,8 @@ struct ExplicitPolygonGrid{M <: GOCore.Manifold, PolyMatrixType <: AbstractMatri
     polygons::PolyMatrixType
 end
 GOCore.manifold(grid::ExplicitPolygonGrid) = grid.manifold
+_rebuild_manifold(grid::ExplicitPolygonGrid, manifold::GOCore.Manifold) =
+    ExplicitPolygonGrid(manifold, grid.polygons)
 
 ExplicitPolygonGrid(polygons::AbstractMatrix) = ExplicitPolygonGrid(GO.Planar(), polygons)
 
@@ -67,6 +69,8 @@ function CellBasedGrid(points::AbstractMatrix)
 end
 
 GOCore.manifold(grid::CellBasedGrid) = grid.manifold
+_rebuild_manifold(grid::CellBasedGrid, manifold::GOCore.Manifold) =
+    CellBasedGrid(manifold, grid.points)
 
 Base.@propagate_inbounds function getcell(grid::CellBasedGrid, i::Int, j::Int)
     @boundscheck begin
@@ -101,6 +105,8 @@ end
 RegularGrid(x, y) = RegularGrid(GO.Planar(), x, y)
 
 GOCore.manifold(grid::RegularGrid) = grid.manifold
+_rebuild_manifold(grid::RegularGrid, manifold::GOCore.Manifold) =
+    RegularGrid(manifold, grid.x, grid.y)
 
 ncells(quadtree::RegularGrid, dim::Int) = length(dim == 1 ? quadtree.x : quadtree.y) - 1
 function getcell(quadtree::RegularGrid, i::Int, j::Int)
