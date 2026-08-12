@@ -65,15 +65,16 @@ const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeReg
         ne = Topologies.mesh(Spaces.topology(space)).ne
 
         coords = Fields.coordinate_field(space)
-        long_data = parent(Fields.field_values(coords.long))
-        lat_data  = parent(Fields.field_values(coords.lat))
+        # ClimaCore 0.15 DataLayout indexing is (v, i, j, h); avoid parent(...).
+        long_data = Fields.field_values(coords.long)
+        lat_data  = Fields.field_values(coords.lat)
         transform = GO.UnitSphereFromGeographic()
 
         for face in 1:6
             elem_idx = (face - 1) * ne^2 + 1
             for (i, j) in ((1, 1), (Nq, Nq), (2, 3), (3, 2))
-                lon = long_data[i, j, 1, elem_idx]
-                lat = lat_data[i, j, 1, elem_idx]
+                lon = long_data[1, i, j, elem_idx]
+                lat = lat_data[1, i, j, elem_idx]
                 x = transform((lon, lat))
                 ξ, η = ClimaCoreExt.inverse_element_map(space, elem_idx, x)
                 @test ξ ≈ ξs[i] atol=1e-10
@@ -92,10 +93,10 @@ const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeReg
         ξs, ws = Quadratures.quadrature_points(Float64, qs)
         Nq = length(ξs)
 
-        WJ = parent(Spaces.weighted_jacobian(space))
+        WJ = Spaces.weighted_jacobian(space)
         elem_idx = 1
         for j in 1:Nq, i in 1:Nq
-            Jᵢⱼ = WJ[i, j, 1, elem_idx] / (ws[i] * ws[j])
+            Jᵢⱼ = WJ[1, i, j, elem_idx] / (ws[i] * ws[j])
             Jq = ClimaCoreExt.element_jacobian_at(space, elem_idx, ξs[i], ξs[j])
             @test Jq ≈ Jᵢⱼ atol=1e-10
         end
