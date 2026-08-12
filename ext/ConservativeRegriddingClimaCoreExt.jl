@@ -101,20 +101,17 @@ Trees.treeify(manifold::GOCore.Spherical, field::ClimaCore.Fields.Field) = Trees
 """
     flat_nodal_data(data::DataLayouts.AbstractData) → Vector
 
-Flatten nodal storage to a `Vector` via [`DataLayouts.data2array`](@ref) (memory layout:
-for `IJFH`, `i` fastest, then `j`, then horizontal indices). For layouts with a vertical
-dimension (`VIJFH`, etc.) `data2array` is an ``N_v \\times N_h`` matrix; the first vertical
-level is taken. Unlike `Fields.field2array`, accepts raw `AbstractData` (e.g.
-`Fields.field_values(coords.lat)`, `Spaces.weighted_jacobian(space)`).
+Flatten nodal storage to a `Vector`. Parent arrays are always 5-D
+`(v, i, j, f, h)` with logical DataLayout indexing `(v, i, j, h)`. For multi-level data
+the first vertical level is taken. Unlike `Fields.field2array`, accepts raw `AbstractData`
+(e.g. `Fields.field_values(coords.lat)`, `Spaces.weighted_jacobian(space)`).
 """
 function flat_nodal_data(data::DataLayouts.AbstractData)
-    array = DataLayouts.data2array(data)
-    if array isa AbstractVector
-        return vec(array)
-    elseif ndims(array) == 2
-        return vec(view(array, 1, :))
+    Nv = DataLayouts.nlevels(data)
+    if Nv == 1
+        return vec(parent(data))
     else
-        error("Unexpected data2array shape: $(size(array))")
+        return vec(view(reshape(parent(data), Nv, :), 1, :))
     end
 end
 
@@ -198,11 +195,11 @@ values on `space`:
 
     Jᵉ(ξ, η) ≈ Σ_{p,q} Jᵉₚᵩ ϕₚ(ξ) ϕᵩ(η)
 
-where `Jᵉₚᵩ = WJ[p, q, 1, elem_idx] / (wₚ wᵩ)` is the unweighted Jacobian recovered from
-`Spaces.weighted_jacobian` storage. Used to evaluate the `Jᵉ` factor of the FV → SE local
-mass matrix at off-node quadrature points; the `B` weights themselves do not need it (see
-`accumulate_principled_b`). See the "FV → SE" section of
-`docs/src/extensions/climacore.md`.
+where `Jᵉₚᵩ = WJ[1, p, q, elem_idx] / (wₚ wᵩ)` is the unweighted Jacobian recovered from
+`Spaces.weighted_jacobian` storage (ClimaCore 0.15 DataLayout indexing `(v, i, j, h)`).
+Used to evaluate the `Jᵉ` factor of the FV → SE local mass matrix at off-node quadrature
+points; the `B` weights themselves do not need it (see `accumulate_principled_b`). See the
+"FV → SE" section of `docs/src/extensions/climacore.md`.
 """
 function element_jacobian_at(space::ClimaCore.Spaces.AbstractSpectralElementSpace,
                              elem_idx::Int, ξ, η)
@@ -210,13 +207,14 @@ function element_jacobian_at(space::ClimaCore.Spaces.AbstractSpectralElementSpac
     ξs, ws = Quadratures.quadrature_points(Float64, qs)
     Nq = length(ξs)
 
-    WJ = parent(Spaces.weighted_jacobian(space))
+    # Index the DataLayout, not parent(...): parent arrays are 5-D `(v,i,j,f,h)`.
+    WJ = Spaces.weighted_jacobian(space)
     Mξ = Quadratures.interpolation_matrix(SVector(ξ), ξs)
     Mη = Quadratures.interpolation_matrix(SVector(η), ξs)
 
     Jᵉ = 0.0
     @inbounds for q in 1:Nq, p in 1:Nq
-        Jₚᵩ = WJ[p, q, 1, elem_idx] / (ws[p] * ws[q])
+        Jₚᵩ = WJ[1, p, q, elem_idx] / (ws[p] * ws[q])
         Jᵉ += Jₚᵩ * Mξ[1, p] * Mη[1, q]
     end
     return Jᵉ
@@ -368,15 +366,9 @@ Copy values from a flat nodal vector back into a ClimaCore field.
 Inverse of [`se_field_to_vec`](@ref).
 """
 function vec_to_se_field!(field, v::AbstractVector)
-    p = parent(Fields.field_values(field))
-    Nq = size(p, 1)
-    if ndims(p) == 4
-        Nh = size(p, 4)
-        view(p, :, :, 1, :) .= reshape(v, Nq, Nq, Nh)
-    elseif ndims(p) == 5
-        Nh = size(p, 5)
-        view(p, :, :, 1, 1, :) .= reshape(v, Nq, Nq, Nh)
-    end
+    # Prefer field2array so we stay layout-agnostic across ClimaCore parent-shape
+    # changes (4-D IJFH → 5-D VIJFH in 0.15).
+    Fields.field2array(field) .= v
     return field
 end
 
