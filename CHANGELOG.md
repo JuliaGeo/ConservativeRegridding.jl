@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Breaking**: `Regridder(dst, src)` no longer promotes a `Planar`/`Spherical` mismatch to `Spherical` — any mismatch now throws, and the manifold to compute on must be passed explicitly as `Regridder(manifold, dst, src)`.
 
+## v0.2.8
+
+### Changed
+- ClimaCore extension updated for ClimaCore 0.15: nodal flatten/copy and Jacobian
+  access now use DataLayout `(v, i, j, h)` indexing / `Fields.field2array` instead of
+  the removed `DataLayouts.data2array` and 4-D `parent(...)` IJFH indexing.
+- ClimaCore weak-dependency compat bumped from `0.14` to `0.15`.
+
 ## v0.2.7
 
 ### Added
