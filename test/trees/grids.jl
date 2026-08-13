@@ -200,6 +200,7 @@ end
 # (replacing the private `_pt_at` accessor and the `PerimeterPoints` state machine).
 # ===========================================================================
 import GeometryOps as GO
+import ConstructionBase
 import LinearAlgebra
 
 # Regional spherical grids — chosen away from poles/antipodes so the bounding cap
@@ -270,16 +271,9 @@ end
     end
 end
 
-# ===========================================================================
-# Declared manifolds. A grid carries the manifold it was built on, so
-# `best_manifold` reports it verbatim and `Regridder(dst, src)` computes on it -
-# no need for the caller to restate it in a three-argument constructor.
-#
-# The radius is the point: the WGS84 *authalic* (equal-area) sphere below is
-# 1.6 m smaller than `Spherical()`'s mean radius, i.e. ~5e-7 in area, so a grid
-# whose radius silently reverted to the default would show up in the invariants.
-# ===========================================================================
-
+# Declared manifolds.  The WGS84 authalic (equal-area) sphere below is 1.6 m smaller than
+# `Spherical()`'s mean radius, so a radius that silently reverted to the default shows up
+# in the area invariants.
 const _AUTHALIC = GOCore.Spherical(; radius = 6371007.180918474)   # WGS84 R_A
 
 _authalic_corners(nlon, nlat) = [
@@ -297,7 +291,6 @@ _authalic_corners(nlon, nlat) = [
     @test GOCore.best_manifold(CellBasedGrid(_SPH_PTS)) == GOCore.Spherical()
     @test GOCore.best_manifold(RegularGrid(_SPH_LONS, _SPH_LATS)) == GOCore.Planar()
 
-    # A declared manifold is reported verbatim, radius and all.
     for grid in (ExplicitPolygonGrid(_AUTHALIC, polygons),
                  CellBasedGrid(_AUTHALIC, _SPH_PTS),
                  RegularGrid(_AUTHALIC, _SPH_LONS, _SPH_LATS))
@@ -305,38 +298,50 @@ _authalic_corners(nlon, nlat) = [
     end
 end
 
-@testset "treeify coerces the grid onto the manifold it is given" begin
+@testset "grids are ConstructionBase-compatible" begin
+    # `setproperties` is what `treeify`'s manifold override is built on.
+    cbg = ConstructionBase.setproperties(CellBasedGrid(_AUTHALIC, _SPH_PTS), (; manifold = GO.Planar()))
+    @test GOCore.manifold(cbg) === GO.Planar()
+    @test cbg.points === _SPH_PTS               # geometry shared, not copied
+
+    polygons = make_polygon_matrix(_SPH_PTS)
+    epg = ConstructionBase.setproperties(ExplicitPolygonGrid(_AUTHALIC, polygons), (; manifold = GO.Planar()))
+    @test GOCore.manifold(epg) === GO.Planar()
+    @test epg.polygons === polygons
+
+    rg = ConstructionBase.setproperties(RegularGrid(_AUTHALIC, _SPH_LONS, _SPH_LATS), (; manifold = GO.Planar()))
+    @test GOCore.manifold(rg) === GO.Planar()
+    @test rg.x === _SPH_LONS && rg.y === _SPH_LATS
+end
+
+@testset "treeify overrides the grid's manifold with the one it is given" begin
     treeify = ConservativeRegridding.Trees.treeify
+    getgrid = ConservativeRegridding.Trees.getgrid
     grid = CellBasedGrid(_AUTHALIC, _SPH_PTS)
 
-    # One-argument `treeify` routes through `best_manifold`, so the grid's own
-    # declaration is what is used, and the grid is passed through untouched.
+    # One-argument `treeify` routes through `best_manifold`, i.e. the grid's own.
     tree = treeify(grid)
     @test tree isa TopDownQuadtreeCursor
-    @test ConservativeRegridding.Trees.getgrid(tree) === grid
+    @test getgrid(tree) === grid
     @test GOCore.best_manifold(tree) == _AUTHALIC
 
-    # Naming the grid's own manifold is likewise a pass-through, not a rebuild.
-    @test ConservativeRegridding.Trees.getgrid(treeify(_AUTHALIC, grid)) === grid
+    # Naming the grid's own manifold is a pass-through, not a rebuild.
+    @test getgrid(treeify(_AUTHALIC, grid)) === grid
 
-    # A named manifold that differs is an instruction, not a contradiction: the
-    # argument wins and the grid is rebuilt onto it, so the tree it produces is
-    # self-consistent (this is what `cell_range_extent` dispatches on).
+    # A different manifold overrides the grid's own, so the tree stays self-consistent
+    # (this is what `cell_range_extent` dispatches on).
     for m in (GOCore.Spherical(), GOCore.Spherical(; radius = 1.0), GO.Planar())
-        coerced = treeify(m, grid)
-        @test coerced isa TopDownQuadtreeCursor
-        @test GOCore.manifold(ConservativeRegridding.Trees.getgrid(coerced)) === m
-        @test GOCore.best_manifold(coerced) === m
-        # Only the manifold moves — the geometry is the same array, not a copy.
-        @test ConservativeRegridding.Trees.getgrid(coerced).points === grid.points
+        overridden = treeify(m, grid)
+        @test overridden isa TopDownQuadtreeCursor
+        @test GOCore.manifold(getgrid(overridden)) === m
+        @test GOCore.best_manifold(overridden) === m
+        @test getgrid(overridden).points === grid.points   # geometry shared, not copied
     end
 
-    # Coercion is defined for every grid type, not just CellBasedGrid.
     for g in (ExplicitPolygonGrid(_AUTHALIC, make_polygon_matrix(_SPH_PTS)),
               CellBasedGrid(_AUTHALIC, _SPH_PTS),
               RegularGrid(_AUTHALIC, _SPH_LONS, _SPH_LATS))
-        coerced = treeify(GO.Planar(), g)
-        @test GOCore.manifold(ConservativeRegridding.Trees.getgrid(coerced)) === GO.Planar()
+        @test GOCore.manifold(getgrid(treeify(GO.Planar(), g))) === GO.Planar()
     end
 end
 
@@ -348,14 +353,26 @@ end
     @test size(r) == (18, 32)
 
     # Both grids tile the whole sphere, so areas and intersections sum to 4πR² -
-    # at the *declared* radius, not at `Spherical()`'s.
+    # at the declared radius, not at `Spherical()`'s.
     sphere = 4π * _AUTHALIC.radius^2
     @test sum(r.intersections) ≈ sphere
     @test sum(r.src_areas) ≈ sphere
     @test sum(r.dst_areas) ≈ sphere
     @test !isapprox(sphere, 4π * GOCore.Spherical().radius^2; rtol = 1e-8)  # the radii really do differ
+end
 
-    # Two genuinely different spheres are still rejected, loudly.
+@testset "Regridder refuses to guess between two manifolds" begin
+    src = CellBasedGrid(_AUTHALIC, _authalic_corners(9, 5))
+
+    # Two spheres of different radii.
     dst_mean_radius = CellBasedGrid(GOCore.Spherical(), _authalic_corners(7, 4))
     @test_throws "manifolds must be the same" ConservativeRegridding.Regridder(dst_mean_radius, src)
+
+    # Planar against spherical is no longer promoted to spherical either.
+    dst_planar = CellBasedGrid(GO.Planar(), _authalic_corners(7, 4))
+    @test_throws "Regridder(manifold, dst, src)" ConservativeRegridding.Regridder(dst_planar, src)
+
+    # Naming the manifold is what gets you past it.
+    r = ConservativeRegridding.Regridder(_AUTHALIC, dst_planar, src; normalize = false, threaded = false)
+    @test sum(r.intersections) ≈ 4π * _AUTHALIC.radius^2
 end

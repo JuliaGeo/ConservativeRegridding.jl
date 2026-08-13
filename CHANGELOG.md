@@ -8,29 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
-- `GeometryOpsCore.best_manifold(::AbstractCurvilinearGrid)` returns the manifold the grid
-  was constructed with, and `Trees.treeify(manifold, ::AbstractCurvilinearGrid)` wraps an
-  already-constructed grid in a `TopDownQuadtreeCursor`. Together these let
-  `Regridder(dst, src)` accept a grid object directly and compute on the radius that grid
-  declares — e.g. `Regridder(CellBasedGrid(Spherical(; radius = R_authalic), points), src)`
-  — rather than having to restate the manifold in the three-argument constructor.
-  Where the manifold passed to `treeify` differs from the grid's own, the argument wins
-  and the grid is rebuilt onto it, sharing its geometry array rather than copying; the
-  grid's own declaration is the default that one-argument `treeify(grid)` resolves
-  through `best_manifold`. Guarding against an unintended surface stays with `Regridder`,
-  which compares its destination's manifold against its source's. Grid types outside this
-  package need a `Trees._rebuild_manifold` method to be coercible.
+- `best_manifold(::AbstractCurvilinearGrid)` and `Trees.treeify(manifold, ::AbstractCurvilinearGrid)`, so a grid can be passed straight to `Regridder(dst, src)` and computed on the manifold it declares — e.g. `Regridder(CellBasedGrid(Spherical(; radius = R_authalic), points), src)`.  A `manifold` passed to `treeify` overrides the grid's own, rebuilding it with ConstructionBase.
+- The grid types are ConstructionBase-compatible, so `setproperties(grid, (; manifold))` rebuilds a grid onto another manifold, sharing its geometry rather than copying.
 
 ### Changed
-- `Planar`/`Spherical` promotion in `Regridder(dst, src)` promotes to the spherical side's
-  own manifold, radius included, instead of only recognizing the default `Spherical()` and
-  collapsing to it. A planar grid paired with a sphere of non-default radius is therefore
-  no longer rejected as a manifold mismatch (whether the promoted pair can then be clipped
-  is unchanged — mixing lon/lat tuples with unit-sphere points is a separate limitation).
-- The "Destination and source manifolds must be the same" error now names which manifold
-  came from which side and explains how to declare one, since the common cause is a
-  *guessed* manifold (a bare point matrix defaults to `Spherical()`, i.e. the WGS84 mean
-  radius) meeting a declared one such as the authalic sphere.
+- **Breaking**: `Regridder(dst, src)` no longer promotes a `Planar`/`Spherical` mismatch to `Spherical` — any mismatch now throws, and the manifold to compute on must be passed explicitly as `Regridder(manifold, dst, src)`.
 
 ## v0.2.7
 

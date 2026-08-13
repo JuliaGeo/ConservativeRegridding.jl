@@ -65,41 +65,14 @@ function Regridder(dst, src; kwargs...)
     dst_manifold = GOCore.best_manifold(dst)
     src_manifold = GOCore.best_manifold(src)
 
-    manifold = if dst_manifold != src_manifold
-        # Implicitly promote to spherical.  `Planar` on one side is the fallback for
-        # coordinates that declare no surface, not a claim that the grid is flat, so the
-        # `Spherical` side wins - and it wins whole, radius included.
-        if dst_manifold isa GO.Planar && src_manifold isa GO.Spherical
-            src_manifold
-        elseif dst_manifold isa GO.Spherical && src_manifold isa GO.Planar
-            dst_manifold
-        else
-            error(
-                """
-                Destination and source manifolds must be the same.  Got $dst_manifold (destination) and $src_manifold (source).
+    # Manifolds are never promoted implicitly: `best_manifold` guesses for input that
+    # declares none, so a mismatch is as likely a bad guess as a deliberate mix.
+    dst_manifold == src_manifold || throw(ArgumentError("""
+    Destination and source manifolds must be the same.  Got $dst_manifold (destination) and $src_manifold (source).
 
-                Two spheres of different radii are a real difference, not a rounding one - areas
-                scale with R², so they cannot be mixed in a single regridder.
+    Pass the manifold to compute on explicitly: `Regridder(manifold, dst, src)`."""))
 
-                If one of these is not the manifold you meant, note that `best_manifold` *guesses*
-                for input that carries no manifold of its own: a bare matrix of `UnitSphericalPoint`s,
-                for instance, is assumed to be on `Spherical()`, whose radius is the WGS84 mean
-                radius ($(GO.Spherical().radius) m) - and the equal-area (authalic) sphere is a
-                different one.  Declare the manifold you want to compute on, either at the regridder:
-
-                    Regridder(manifold, dst, src)
-
-                or on the grid itself, which then carries it through `best_manifold`:
-
-                    Regridder(CellBasedGrid(manifold, points), src)
-                """
-            )
-        end
-    else
-        dst_manifold
-    end
-
-    return Regridder(manifold, dst, src; kwargs...)
+    return Regridder(dst_manifold, dst, src; kwargs...)
 end
 
 function Regridder(

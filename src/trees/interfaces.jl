@@ -15,6 +15,7 @@ thing that is returned implements the `SpatialTreeInterface` methods.
 import GeometryOpsCore as GOCore
 import GeometryOps as GO
 import GeometryOps: SpatialTreeInterface as STI
+import ConstructionBase
 import Extents
 import SortTileRecursiveTree # in order to implement the `getcell/ncell` interface
 
@@ -166,66 +167,20 @@ and then you may also want to specialize on `STI.node_extent(::QuadtreeCursor{<:
 """
 abstract type AbstractCurvilinearGrid{M <: GOCore.Manifold} end
 
-#=
-### Manifolds and `treeify` for grids
-
-A curvilinear grid *carries* the manifold it was built on (`GOCore.manifold`, defined per
-grid type in `grids.jl`), so unlike a bare matrix of points there is nothing to guess -
-`best_manifold` is simply that declaration.  This is what lets a grid built on a
-non-default sphere, e.g. `CellBasedGrid(Spherical(; radius = R), points)`, carry `R`
-through `Regridder(dst, src)`, which resolves its compute manifold via `best_manifold`.
-
-(These live here, rather than up with the other `treeify` methods, because they dispatch
-on `AbstractCurvilinearGrid` - which only exists from this point in the file onwards.)
-=#
-
+# A grid carries the manifold it was built on, so there is nothing to guess.
 GOCore.best_manifold(grid::AbstractCurvilinearGrid) = GOCore.manifold(grid)
 
 """
     treeify(manifold::GOCore.Manifold, grid::AbstractCurvilinearGrid)
 
-Wrap an already-constructed grid in a [`Trees.TopDownQuadtreeCursor`](@ref), on `manifold`.
-
-A named `manifold` is an instruction, not an assertion: where it differs from the grid's
-own [`GOCore.manifold`](@ref) the argument wins and the grid is rebuilt onto it, sharing
-its geometry array rather than copying.  The rebuild is what keeps the tree
-self-consistent, since [`cell_range_extent`](@ref) dispatches on the grid's own manifold
-type - a coerced grid that still declared the old one would compute its node extents on a
-surface nobody asked for.
-
-The grid's declaration is therefore a *default*: it is what the one-argument
-`treeify(grid)` resolves through [`GOCore.best_manifold`](@ref) when no manifold is named.
-Guarding against an unintended surface belongs where two independently-derived manifolds
-meet - [`Regridder`](@ref) compares its destination's against its source's and refuses a
-mismatch - not here, where the caller has named one outright.
+Wrap `grid` in a [`Trees.TopDownQuadtreeCursor`](@ref), overriding the grid's own manifold
+with `manifold` if they differ.  The override rebuilds the grid via `ConstructionBase`,
+sharing its geometry rather than copying, since [`cell_range_extent`](@ref) dispatches on
+the grid's own manifold type.
 """
-function treeify(manifold::GOCore.Manifold, grid::AbstractCurvilinearGrid)
-    return TopDownQuadtreeCursor(_coerce_manifold(grid, manifold))
-end
-
-"""
-    _coerce_manifold(grid::AbstractCurvilinearGrid, manifold::GOCore.Manifold)
-
-`grid` rebuilt on `manifold`, sharing its geometry rather than copying it; `grid` itself
-when the manifold already matches, so the common path allocates nothing and preserves
-object identity.
-
-Each `AbstractCurvilinearGrid` needs a method: the geometry fields differ per type and
-there is no generic way to swap one field of an arbitrary struct without reaching for
-another dependency.
-"""
-_coerce_manifold(grid::AbstractCurvilinearGrid, manifold::GOCore.Manifold) =
-    GOCore.manifold(grid) === manifold ? grid : _rebuild_manifold(grid, manifold)
-
-function _rebuild_manifold(grid::AbstractCurvilinearGrid, manifold::GOCore.Manifold)
-    throw(ArgumentError("""
-    cannot rebuild a $(nameof(typeof(grid))) onto $manifold.
-
-    `treeify(manifold, grid)` coerces a grid onto the manifold it is given, which needs a \
-    `ConservativeRegridding.Trees._rebuild_manifold(::$(nameof(typeof(grid))), ::Manifold)` \
-    method returning the same grid on the new manifold. Define one, or build the grid on \
-    $manifold to begin with."""))
-end
+treeify(manifold::GOCore.Manifold, grid::AbstractCurvilinearGrid) = TopDownQuadtreeCursor(
+    GOCore.manifold(grid) === manifold ? grid : ConstructionBase.setproperties(grid, (; manifold))
+)
 
 """
     getcell(grid::AbstractCurvilinearGrid, i::Int, j::Int) -> GI.Polygon
