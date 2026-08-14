@@ -71,6 +71,16 @@ By default, this is a no-op and returns the candidate pairs as is.
 work_items(op, candidate_pairs) = candidate_pairs
 
 """
+    task_local_operator(op) -> op′
+
+Return the operator instance one assembly task should use. Called once per chunk
+inside the parallel COO assembly (never in the per-item hot loop), so operators
+holding mutable per-task state — e.g. allocation caches — can hand each task a
+private copy. Defaults to returning `op` unchanged.
+"""
+task_local_operator(op) = op
+
+"""
     output_matrix_size(op, src_tree, dst_tree) -> (nrows, ncols)
 
 Shape of the sparse matrix [`intersection_areas`](@ref) assembles for `op`.
@@ -162,7 +172,15 @@ end
 end
 
 # One chunk of work items → its COO triplets. `style` is passed in, not re-resolved.
-function _assemble_chunk(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::Type{ValType}) where {S, O, I, T1, T2, ValType}
+# `task_local_operator`'s return type may not be inferrable, so resolve the per-task
+# operator here and pay one dynamic dispatch per chunk into the type-stable kernel
+# below — never one per item.
+function _assemble_chunk(style, op, items, src_tree, dst_tree, ValType)
+    chunk_op = task_local_operator(op)
+    return _assemble_chunk_kernel(style, chunk_op, items, src_tree, dst_tree, ValType)
+end
+
+function _assemble_chunk_kernel(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::Type{ValType}) where {S, O, I, T1, T2, ValType}
     rows = Int[]
     cols = Int[]
     vals = ValType[]
@@ -216,7 +234,7 @@ Assemble the sparse intersection matrix between `src_tree` and `dst_tree` on
 This is more of a developer level function, which pulls together the intersection operator interface.
 Users should go through [`Regridder`](@ref)`(…; intersection_operator = …)`.
 
-This calls out to four functions, which dispatch on `intersection_operator`:
+This calls out to five functions, which dispatch on `intersection_operator`:
 
 - [`IntersectionReturnStyle(intersection_operator)`](@ref IntersectionReturnStyle): return an
   [`IntersectionReturnStyle`](@ref) trait object, defining how the operator wants to receive and store
@@ -233,6 +251,8 @@ This calls out to four functions, which dispatch on `intersection_operator`:
 - [`output_eltype(intersection_operator, src_tree, dst_tree)`](@ref output_eltype): return the
   element type of the sparse matrix.  This is usually `Float64`, but may be different, especially
   if you wish to build up e.g. a matrix of intersection _polygons_, rather than just areas.
+- [`task_local_operator(intersection_operator)`](@ref task_local_operator): return a private
+  operator for each assembly task, for operators that carry mutable state such as caches.
 
 `threaded` is a `GeometryOpsCore.BoolsAsTypes` (`True()`/`False()`; convert via
 `booltype(::Bool)`). When threaded, work items are partitioned into `npartitions`

@@ -26,10 +26,15 @@ Dispatches to the appropriate intersection algorithm based on the manifold:
 Foster-Hormann clipping on `Planar`, and convex-convex Sutherland-Hodgman on `Spherical`.
 It uses all the defaults of the intersection-operator interface
 ([`OutOfPlaceSingleResult`](@ref) return style, `Float64` element type).
+
+On `Spherical`, [`task_local_operator`](@ref) hands each assembly task a copy carrying
+a private clipping-buffer cache; caches must not be shared across tasks.
 """
-struct DefaultIntersectionOperator{M}
+struct DefaultIntersectionOperator{M, C}
     manifold::M
+    cache::C
 end
+DefaultIntersectionOperator(manifold) = DefaultIntersectionOperator(manifold, nothing)
 
 function (op::DefaultIntersectionOperator{<: GeometryOps.Planar})(p1, p2)
     intersection_polys = #=try; =#
@@ -41,10 +46,21 @@ function (op::DefaultIntersectionOperator{<: GeometryOps.Planar})(p1, p2)
 end
 
 function (op::DefaultIntersectionOperator{M})(p1, p2) where {M <: GeometryOps.Spherical}
+    alg = GeometryOps.ConvexConvexSutherlandHodgman(op.manifold)
     intersection_polys = #=try; =#
-        GeometryOps.intersection(GeometryOps.ConvexConvexSutherlandHodgman(op.manifold), p1, p2; target = GeoInterface.PolygonTrait())
+        _sutherland_hodgman_intersection(alg, p1, p2, op.cache)
     # catch
     #     throw(DefaultIntersectionFailureError(p1, p2, e))
     # end
     return GeometryOps.area(op.manifold, intersection_polys)
+end
+
+_sutherland_hodgman_intersection(alg, p1, p2, ::Nothing) =
+    GeometryOps.intersection(alg, p1, p2; target = GeoInterface.PolygonTrait())
+_sutherland_hodgman_intersection(alg, p1, p2, cache) =
+    GeometryOps.intersection(alg, p1, p2; target = GeoInterface.PolygonTrait(), cache)
+
+function task_local_operator(op::DefaultIntersectionOperator{<: GeometryOps.Spherical})
+    cache = GeometryOps.SutherlandHodgmanCache(op.manifold)
+    return DefaultIntersectionOperator(op.manifold, cache)
 end

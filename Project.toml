@@ -23,6 +23,9 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StableTasks = "91464d47-22a1-43fe-8b7f-2d57ee82463f"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
+[sources]
+GeometryOps = {url = "https://github.com/JuliaGeo/GeometryOps.jl", rev = "main"}
+
 [weakdeps]
 ClimaCore = "d414da3d-4745-48bb-8d80-42e94e092884"
 Healpix = "9f4e344d-96bc-545a-84a3-ae6b9e1b672b"
