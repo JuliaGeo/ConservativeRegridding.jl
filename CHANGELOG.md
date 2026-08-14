@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+- `best_manifold(::AbstractCurvilinearGrid)` and `Trees.treeify(manifold, ::AbstractCurvilinearGrid)`, so a grid can be passed straight to `Regridder(dst, src)` and computed on the manifold it declares — e.g. `Regridder(CellBasedGrid(Spherical(; radius = R_authalic), points), src)`.  A `manifold` passed to `treeify` overrides the grid's own, rebuilding it with ConstructionBase.
+- The grid types are ConstructionBase-compatible, so `setproperties(grid, (; manifold))` rebuilds a grid onto another manifold, sharing its geometry rather than copying.
+
+### Changed
+- **Breaking**: `Regridder(dst, src)` no longer promotes a `Planar`/`Spherical` mismatch to `Spherical` — any mismatch now throws, and the manifold to compute on must be passed explicitly as `Regridder(manifold, dst, src)`.
+
 ## v0.2.8
 
 ### Changed

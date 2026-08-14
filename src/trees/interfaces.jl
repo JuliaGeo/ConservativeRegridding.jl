@@ -15,6 +15,7 @@ thing that is returned implements the `SpatialTreeInterface` methods.
 import GeometryOpsCore as GOCore
 import GeometryOps as GO
 import GeometryOps: SpatialTreeInterface as STI
+import ConstructionBase
 import Extents
 import SortTileRecursiveTree # in order to implement the `getcell/ncell` interface
 
@@ -165,6 +166,21 @@ cell_range_extent(grid, irange::UnitRange{Int}, jrange::UnitRange{Int})
 and then you may also want to specialize on `STI.node_extent(::QuadtreeCursor{<: YourQuadtreeType}) -> GO.UnitSpherical.SphericalCap{Float64}`
 """
 abstract type AbstractCurvilinearGrid{M <: GOCore.Manifold} end
+
+# A grid carries the manifold it was built on, so there is nothing to guess.
+GOCore.best_manifold(grid::AbstractCurvilinearGrid) = GOCore.manifold(grid)
+
+"""
+    treeify(manifold::GOCore.Manifold, grid::AbstractCurvilinearGrid)
+
+Wrap `grid` in a [`Trees.TopDownQuadtreeCursor`](@ref), overriding the grid's own manifold
+with `manifold` if they differ.  The override rebuilds the grid via `ConstructionBase`,
+sharing its geometry rather than copying, since [`cell_range_extent`](@ref) dispatches on
+the grid's own manifold type.
+"""
+treeify(manifold::GOCore.Manifold, grid::AbstractCurvilinearGrid) = TopDownQuadtreeCursor(
+    GOCore.manifold(grid) === manifold ? grid : ConstructionBase.setproperties(grid, (; manifold))
+)
 
 """
     getcell(grid::AbstractCurvilinearGrid, i::Int, j::Int) -> GI.Polygon

@@ -65,20 +65,14 @@ function Regridder(dst, src; kwargs...)
     dst_manifold = GOCore.best_manifold(dst)
     src_manifold = GOCore.best_manifold(src)
 
-    manifold = if dst_manifold != src_manifold
-        # Implicitly promote to spherical
-        if dst_manifold == GO.Planar() && src_manifold == GO.Spherical()
-            GO.Spherical()
-        elseif dst_manifold == GO.Spherical() && src_manifold == GO.Planar()
-            GO.Spherical()
-        else
-            error("Destination and source manifolds must be the same.  Got $dst_manifold and $src_manifold.")
-        end
-    else
-        dst_manifold
-    end
+    # Manifolds are never promoted implicitly: `best_manifold` guesses for input that
+    # declares none, so a mismatch is as likely a bad guess as a deliberate mix.
+    dst_manifold == src_manifold || throw(ArgumentError("""
+    Destination and source manifolds must be the same.  Got $dst_manifold (destination) and $src_manifold (source).
 
-    return Regridder(manifold, dst, src; kwargs...)
+    Pass the manifold to compute on explicitly: `Regridder(manifold, dst, src)`."""))
+
+    return Regridder(dst_manifold, dst, src; kwargs...)
 end
 
 function Regridder(

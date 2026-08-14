@@ -9,6 +9,7 @@ projects = ["test", "docs", "bench", "lib/ConservativeRegriddingTestHelpers"]
 
 [deps]
 ChunkSplitters = "ae650224-84b6-46f8-82ea-d812ca08434e"
+ConstructionBase = "187b0558-2788-49d3-abe0-74a17ed4e7c9"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 Extents = "411431e0-e8b7-467b-b5e0-f676ba4f2910"
 GeoInterface = "cf35fbd7-0cd7-5166-be24-54bfbe79505f"
@@ -42,6 +43,7 @@ ConservativeRegriddingRingGridsExt = "RingGrids"
 [compat]
 ChunkSplitters = "3"
 ClimaCore = "0.15.0"
+ConstructionBase = "1"
 DocStringExtensions = "0.8, 0.9"
 Extents = "0.1"
 GeoInterface = "1"
