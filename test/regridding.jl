@@ -433,3 +433,45 @@ end
     @test size(r) == (16*16, 8*8)
     @test sum(r.intersections) > 0
 end
+
+# Two trees that share no intersecting cell pair must yield an all-zero matrix, not an
+# error. The threaded path used to hit `reduce` over an empty collection at two places,
+# one per stage, and each stage is reached with a different parallelize policy:
+#   * decline to parallelize → the dual DFS descends, no child pair passes the predicate,
+#     and it spawns no tasks at all (MultithreadedDualDepthFirstSearch);
+#   * parallelize at the root → one task runs, returns no candidate pair, and the COO
+#     assembly is then handed zero partitions (assemble_sparse_matrix_coo).
+# Both must agree with the sequential path, which has always handled this correctly.
+@testset "Threaded intersection with no intersecting pairs" begin
+    function make_grid(nx, ny; x0 = 0.0, y0 = 0.0)
+        polys = Matrix{GI.Polygon}(undef, nx, ny)
+        for j in 1:ny, i in 1:nx
+            a, b = x0 + (i-1)/nx, x0 + i/nx
+            c, d = y0 + (j-1)/ny, y0 + j/ny
+            polys[i,j] = GI.Polygon([GI.LinearRing([(a,c),(b,c),(b,d),(a,d),(a,c)])])
+        end
+        polys
+    end
+
+    # Grids must be big enough that neither root cursor is a leaf, or the dual DFS
+    # short-circuits into a task before it can come up empty.
+    src_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), make_grid(8, 8))
+    dst_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), make_grid(16, 16; x0 = 10.0, y0 = 10.0))
+
+    expected = ConservativeRegridding.intersection_areas(
+        GeometryOpsCore.Planar(), GeometryOpsCore.False(), dst_tree, src_tree)
+    @test nnz(expected) == 0
+
+    for parallelize in (false, true)
+        src_w = ConservativeRegridding.Trees.WithParallelizePolicy(
+            src_tree, (tree, node, extent) -> parallelize)
+        dst_w = ConservativeRegridding.Trees.WithParallelizePolicy(
+            dst_tree, (tree, node, extent) -> parallelize)
+
+        A = ConservativeRegridding.intersection_areas(
+            GeometryOpsCore.Planar(), GeometryOpsCore.True(), dst_w, src_w)
+        @test A == expected
+        @test size(A) == size(expected)
+        @test eltype(A) == eltype(expected)
+    end
+end

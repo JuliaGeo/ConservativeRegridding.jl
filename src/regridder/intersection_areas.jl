@@ -195,9 +195,11 @@ function assemble_sparse_matrix_coo(style::S, op::O, items::I, src_tree::T1, dst
     # Fetch the results of `result_tasks`
     all_results = map(fetch, result_tasks)
     # Concatenate the per-chunk COO vectors into single vectors, in partition order.
-    rows = reduce(vcat, getindex.(all_results, 1))
-    cols = reduce(vcat, getindex.(all_results, 2))
-    vals = reduce(vcat, getindex.(all_results, 3))
+    # `init` is load-bearing: there are no partitions when `items` is empty, which is
+    # what a candidate search that found no intersecting pair returns.
+    rows = reduce(vcat, getindex.(all_results, 1); init = Int[])
+    cols = reduce(vcat, getindex.(all_results, 2); init = Int[])
+    vals = reduce(vcat, getindex.(all_results, 3); init = ValType[])
     return rows, cols, vals
 end
 # Non-threaded version

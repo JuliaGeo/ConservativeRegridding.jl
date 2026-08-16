@@ -61,7 +61,9 @@ function multithreaded_dual_query(
         _inner_dfs_f, predicate, parallelize1, parallelize2, tasks,
         node1, ext1, node2, ext2,
     )
-    return reduce(vcat, map(fetch, tasks))
+    # `init` is load-bearing: `tasks` is empty whenever no child pair of the two
+    # roots satisfies the predicate, i.e. the trees do not intersect at all.
+    return reduce(vcat, map(fetch, tasks); init = Tuple{Int, Int}[])
 end
 
 export multithreaded_dual_depth_first_search, multithreaded_dual_query
