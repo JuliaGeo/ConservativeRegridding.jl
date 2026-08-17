@@ -61,8 +61,8 @@ function multithreaded_dual_query(
         _inner_dfs_f, predicate, parallelize1, parallelize2, tasks,
         node1, ext1, node2, ext2,
     )
-    # `init` is load-bearing: `tasks` is empty whenever no child pair of the two
-    # roots satisfies the predicate, i.e. the trees do not intersect at all.
+    # Because we insist on integer indices anyway, we can set init to an empty vector.
+    # If the threaded search finds no candidate pairs, this prevents the dreaded `Reducing over an empty collection`
     return reduce(vcat, map(fetch, tasks); init = Tuple{Int, Int}[])
 end
 
