@@ -61,7 +61,9 @@ function multithreaded_dual_query(
         _inner_dfs_f, predicate, parallelize1, parallelize2, tasks,
         node1, ext1, node2, ext2,
     )
-    return reduce(vcat, map(fetch, tasks))
+    # Because we insist on integer indices anyway, we can set init to an empty vector.
+    # If the threaded search finds no candidate pairs, this prevents the dreaded `Reducing over an empty collection`
+    return reduce(vcat, map(fetch, tasks); init = Tuple{Int, Int}[])
 end
 
 export multithreaded_dual_depth_first_search, multithreaded_dual_query
