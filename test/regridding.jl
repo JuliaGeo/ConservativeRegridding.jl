@@ -6,6 +6,18 @@ import GeometryOpsCore
 import Extents
 using SparseArrays
 
+@testset "DefaultIntersectionOperator task-local cache" begin
+    op = ConservativeRegridding.DefaultIntersectionOperator(GO.Spherical())
+    task_op = ConservativeRegridding.task_local_operator(op)
+
+    @test op.cache === nothing
+    @test task_op.cache isa GO.SutherlandHodgmanCache
+    @test task_op.cache !== ConservativeRegridding.task_local_operator(op).cache
+
+    planar_op = ConservativeRegridding.DefaultIntersectionOperator(GO.Planar())
+    @test ConservativeRegridding.task_local_operator(planar_op) === planar_op
+end
+
 @testset "Custom intersection_operator" begin
     make_square() = GI.Polygon([GI.LinearRing([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)])])
 

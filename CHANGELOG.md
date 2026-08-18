@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The grid types are ConstructionBase-compatible, so `setproperties(grid, (; manifold))` rebuilds a grid onto another manifold, sharing its geometry rather than copying.
 
 ### Changed
-- **Breaking**: `Regridder(dst, src)` no longer promotes a `Planar`/`Spherical` mismatch to `Spherical` — any mismatch now throws, and the manifold to compute on must be passed explicitly as `Regridder(manifold, dst, src)`.
+- Semi-breaking: `Regridder(dst, src)` no longer promotes a `Planar`/`Spherical` mismatch to `Spherical` — any mismatch now throws, and the manifold to compute on must be passed explicitly as `Regridder(manifold, dst, src)`.  This was always technically illegal and should never have been done.
+- `DefaultIntersectionOperator` now uses a task-local cache (SutherlandHodgmanCache from GeometryOps) to minimize overhead when computing spherical polygon intersections.  [#131](https://github.com/JuliaGeo/ConservativeRegridding.jl/pull/131)
 
 ### Fixed
 - The threaded intersection path no longer passes `init` to `reduce(vcat, ...)`, which bypassed `vcat`'s pre-sized specialisation and made merging the per-task results quadratic in the number of tasks. Emptiness is guarded explicitly instead.
