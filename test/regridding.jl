@@ -5,6 +5,9 @@ import GeometryOps as GO, GeoInterface as GI
 import GeometryOpsCore
 import Extents
 using SparseArrays
+using GeometryOps: SpatialTreeInterface as STI
+const MDDFS = ConservativeRegridding.MultithreadedDualDepthFirstSearch
+const StableTasks = ConservativeRegridding.StableTasks
 
 @testset "Custom intersection_operator" begin
     make_square() = GI.Polygon([GI.LinearRing([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)])])
@@ -474,4 +477,46 @@ end
         @test size(A) == size(expected)
         @test eltype(A) == eltype(expected)
     end
+end
+
+# Follow-up to #133: the dual walk used to require *both* policies before spawning, so a
+# destination policy that never fires forced the source to be split all the way down to
+# its leaves — one task per source leaf, however many that is.
+@testset "Dual DFS stops at the first tree to reach granularity" begin
+    src_tree = ConservativeRegridding.Trees.treeify(
+        ConservativeRegridding.RegularGrid(range(0, 1; length = 17), range(0, 1; length = 17)))
+    dst_tree = ConservativeRegridding.Trees.treeify(
+        ConservativeRegridding.RegularGrid(range(0, 1; length = 129), range(0, 1; length = 129)))
+
+    par_src = (node, extent) -> prod(ConservativeRegridding.Trees.ncells(node)) <= 16
+    par_dst = (node, extent) -> false
+
+    # Record the source node each task is spawned on, then run the real inner search.
+    spawned_on = Int[]
+    spawn_lock = ReentrantLock()
+    inner = function (predicate, node1, node2)
+        n = prod(ConservativeRegridding.Trees.ncells(node1))
+        lock(spawn_lock) do; push!(spawned_on, n); end
+        return MDDFS._inner_dfs_f(predicate, node1, node2)
+    end
+
+    tasks = StableTasks.StableTask{Vector{Tuple{Int, Int}}}[]
+    MDDFS.multithreaded_dual_depth_first_search(
+        inner, Extents.intersects, par_src, par_dst, tasks,
+        src_tree, STI.node_extent(src_tree), dst_tree, STI.node_extent(dst_tree),
+    )
+    threaded_pairs = reduce(vcat, map(fetch, tasks))
+
+    @test length(spawned_on) == length(tasks)
+    # Every task sits on a 4x4 source block - the granularity `par_src` asked for - not
+    # on a 2x2 source leaf.
+    @test all(==(16), spawned_on)
+
+    serial_pairs = Tuple{Int, Int}[]
+    STI.dual_depth_first_search(Extents.intersects, src_tree, dst_tree) do i1, i2
+        push!(serial_pairs, (i1, i2))
+    end
+    # Spawning earlier only cuts the same walk higher up, so the pairs match exactly,
+    # in order.
+    @test threaded_pairs == serial_pairs
 end

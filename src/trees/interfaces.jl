@@ -31,6 +31,10 @@ purpose of further parallelism and runs the subtree as a single parallel
 unit. Returning `false` means *keep descending* — the node is still too
 coarse and a task at this level would create unbalanced work.
 
+The dual walk spawns as soon as *either* tree's policy fires, since one side
+reaching its granularity already bounds the pair's work; a policy that fires
+early therefore caps the task count for both trees.
+
 `extent` is the bounding region of `node` (e.g. an `Extents.Extent` for
 planar grids or a `SphericalCap` for spherical grids). It is passed
 explicitly so implementations and the dual DFS share one computation per

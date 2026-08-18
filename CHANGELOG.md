@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking**: `Regridder(dst, src)` no longer promotes a `Planar`/`Spherical` mismatch to `Spherical` — any mismatch now throws, and the manifold to compute on must be passed explicitly as `Regridder(manifold, dst, src)`.
 
 ### Fixed
+- The threaded dual-tree walk now spawns a task as soon as *either* tree's `should_parallelize` fires rather than requiring both, so a tree whose policy fires late no longer forces the other tree to be split down to its leaves.
 - The threaded intersection path no longer passes `init` to `reduce(vcat, ...)`, which bypassed `vcat`'s pre-sized specialisation and made merging the per-task results quadratic in the number of tasks. Emptiness is guarded explicitly instead.
 
 ## v0.2.8

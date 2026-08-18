@@ -5,10 +5,11 @@ using GeometryOps.LoopStateMachine: @controlflow
 import ProgressMeter
 import StableTasks
 
-# Walk through both trees and kick off a task whenever both nodes' parallelize
-# predicates fire. Each parallelize_k closure is `(node, extent) -> Bool` and is
-# pre-bound to its tree by the caller. Extents are computed exactly once per
-# node and threaded through the recursion.
+# Walk through both trees and kick off a task as soon as either node's parallelize
+# predicate fires, since one side reaching its granularity already bounds the pair's
+# work. Each parallelize_k closure is `(node, extent) -> Bool` and is pre-bound to its
+# tree by the caller. Extents are computed exactly once per node and threaded through
+# the recursion.
 function multithreaded_dual_depth_first_search(
     inner_dfs_f::IF, predicate::P,
     parallelize1::A1, parallelize2::A2,
@@ -21,7 +22,7 @@ function multithreaded_dual_depth_first_search(
         push!(tasks, StableTasks.@spawn $inner_dfs_f($predicate, node1, node2))
     else
         # neither node is a leaf, recurse into both children
-        if parallelize1(node1, ext1) && parallelize2(node2, ext2)
+        if parallelize1(node1, ext1) || parallelize2(node2, ext2)
             push!(tasks, StableTasks.@spawn $inner_dfs_f($predicate, node1, node2))
         else
             for child1 in STI.getchild(node1)
