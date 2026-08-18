@@ -73,10 +73,11 @@ work_items(op, candidate_pairs) = candidate_pairs
 """
     task_local_operator(op) -> op′
 
-Return the operator instance one assembly task should use. Called once per chunk
-inside the parallel COO assembly (never in the per-item hot loop), so operators
-holding mutable per-task state — e.g. allocation caches — can hand each task a
-private copy. Defaults to returning `op` unchanged.
+Return the operator instance which the current assembly task should use. 
+
+This is mainly to enable intersection operators to materialize task-local caches.
+
+Defaults to returning `op` unchanged.  For any threadsafe operator, this is a no-op.
 """
 task_local_operator(op) = op
 
