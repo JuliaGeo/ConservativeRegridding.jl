@@ -61,8 +61,7 @@ function multithreaded_dual_query(
         _inner_dfs_f, predicate, parallelize1, parallelize2, tasks,
         node1, ext1, node2, ext2,
     )
-    # Guard emptiness instead of passing `init`, which would cost `vcat`'s pre-sized
-    # specialization and make the merge quadratic in the number of tasks.
+    # `init` would cost `vcat`'s pre-sized specialisation, making this quadratic in the task count.
     results = map(fetch, tasks)
     return isempty(results) ? Tuple{Int, Int}[] : reduce(vcat, results)
 end
