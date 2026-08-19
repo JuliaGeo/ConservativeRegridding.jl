@@ -77,11 +77,10 @@ keep working.
     WithParallelizePolicy(tree, policy)
 
 !!! warning "Deprecated"
-    `policy` is no longer consulted. The multithreaded dual-tree traversal now
-    picks its task granularity with a budget frontier sized by
-    [`Trees.split_weight`](@ref), so a wrapped tree regrids exactly as the tree
-    it wraps does. The type is kept so existing call sites keep working, and is
-    slated for removal in a future breaking release.
+    `policy` is no longer consulted - the traversal sizes its tasks with a budget
+    frontier keyed on [`Trees.split_weight`](@ref), so a wrapped tree regrids
+    exactly as the tree it wraps does.  Kept so existing call sites keep working;
+    slated for removal in a breaking release.
 
 Formerly: wrap `tree` so the dual-tree DFS used `policy(tree, node, extent) -> Bool`
 instead of [`Trees.should_parallelize`](@ref) to decide where to spawn tasks.
@@ -92,6 +91,10 @@ All SpatialTreeInterface methods forward to the wrapped tree
 struct WithParallelizePolicy{T, F} <: AbstractTreeWrapper
     tree::T
     policy::F
+    function WithParallelizePolicy(tree::T, policy::F) where {T, F}
+        Base.depwarn("`WithParallelizePolicy` is deprecated - its policy is ignored, so wrapping is a no-op.  Define `Trees.split_weight` to tune task balance.", :WithParallelizePolicy)
+        return new{T, F}(tree, policy)
+    end
 end
 Base.parent(w::WithParallelizePolicy) = w.tree
 

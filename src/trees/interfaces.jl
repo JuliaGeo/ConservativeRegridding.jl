@@ -23,39 +23,33 @@ import SortTileRecursiveTree # in order to implement the `getcell/ncell` interfa
     should_parallelize(node, extent) -> Bool
 
 !!! warning "Deprecated"
-    The multithreaded dual-tree traversal no longer consults this function.
-    Task granularity is now chosen by the budget frontier in
-    `multithreaded_dual_query`, which sizes tasks from
-    [`Trees.split_weight`](@ref) instead. The generic function and
-    [`WithParallelizePolicy`](@ref) are kept so existing method definitions and
-    wrapped trees keep loading and working, and are slated for removal in a
-    future breaking release.
+    The multithreaded dual-tree traversal no longer consults this function - it
+    sizes its tasks from [`Trees.split_weight`](@ref) instead.  Kept so existing
+    method definitions keep loading; slated for removal in a breaking release.
 
-Formerly: decide whether to spawn a parallel task at `node` during the
-multithreaded dual-tree traversal used to find candidate intersecting cell
-pairs, given `extent`, the bounding region of `node`.
-
-To influence task balance now, define [`Trees.split_weight`](@ref) for your
-node type.
+Formerly: decide whether to spawn a parallel task at `node`, whose bounding
+region is `extent`, during the multithreaded dual-tree traversal.
 """
 function should_parallelize end
+
+# Nothing in the package calls this any more; the fallback is only here to warn.
+function should_parallelize(node, extent)
+    Base.depwarn("`Trees.should_parallelize` is no longer consulted by the multithreaded traversal - define `Trees.split_weight` instead.", :should_parallelize)
+    return false
+end
 
 """
     split_weight(node) -> Int
 
-An O(1) estimate of how much work lives under `node` - by default, the number
-of grid cells beneath it.
+A fast estimate of how many leaves live under `node`.
 
-Used only to order the split heap that the multithreaded dual-tree traversal
-builds its task frontier from: a wrong answer costs load balance, never
-correctness.
+This is used to build a multithreading plan in `multithreaded_dual_query`.
+A wrong answer here will impact runtime, but not correctness.
 
-The generic method answers from [`Trees.ncells`](@ref) when the node type
-defines it, and returns `1` otherwise, so most tree types need no method at
-all. Define one for a node type whose `ncells` is missing or expensive, or
-whose cells are unevenly distributed across its subtrees.
+By default, this has a fallback that tries to check `Trees.ncells(node)`,
+and returns `1` if that is not applicable for the node.
 """
-function split_weight(node)
+function split_weight(node::N) where N
     applicable(ncells, node) || return 1
     n = ncells(node)
     return n isa Tuple ? Int(prod(n)) : Int(n)

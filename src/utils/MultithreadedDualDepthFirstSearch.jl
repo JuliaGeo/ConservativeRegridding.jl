@@ -7,26 +7,14 @@ import StableTasks
 import ..Trees: split_weight
 
 #=
-The dual-tree search is parallelized by a *budget frontier*: a short serial
-descent splits the root pair into at least `nchunks` independent node pairs,
-then one task per pair runs the plain serial dual DFS on it.
-
-Phase 1 keeps a max-heap of node pairs keyed by `pair_weight` (an estimate of
-the work under the pair) and repeatedly splits the heaviest pair, so the
-frontier is sized by estimated work rather than by tree depth. It stops once
-`nchunks` pairs exist and none of them still claims more than a `1/nchunks`
-share of the estimated work, which keeps a pair the estimate cannot tell apart
-from its neighbours - but that really holds a quarter of the traversal - from
-surviving as a single task. Phase 2 spawns the tasks and concatenates their
-results in DFS pre-order, which makes the output bit-identical - and
-order-identical - to a full serial dual DFS.
+The dual-tree search is parallelized by a *budget frontier*: a serial pass splits the
+root pair into at least `nchunks` independent node pairs, always splitting the heaviest
+by estimated work, then runs the serial dual DFS on each in its own task.  The results
+are concatenated in DFS pre-order, so the output matches the serial search exactly.
 =#
 
-# A cap that covers the whole sphere, including the all-NaN cap GeometryOps
-# returns for a point set with no usable centre - a grid spanning both poles
-# has one. It localises nothing, and NaN must not reach the weights: a NaN
-# never compares greater, so a NaN-weighted pair sinks to the bottom of the
-# max-heap and is never split.
+# Whole-sphere caps, including the all-NaN cap GeometryOps returns for a pole-spanning
+# point set: `!(radius < π)` also catches NaN, which must never reach the weights.
 @inline _is_global(c::GO.UnitSpherical.SphericalCap) = !(c.radius < π)
 
 @inline _cap_area(c::GO.UnitSpherical.SphericalCap) =
@@ -44,9 +32,8 @@ order-identical - to a full serial dual DFS.
     return _cap_area(small) * clamp((a.radius + b.radius - d) / (2 * min(a.radius, b.radius)), 0.0, 1.0)
 end
 
-# Work estimate for a node pair: the area both nodes cover, times the cell
-# density each contributes there. The generic fallback has no notion of
-# overlap, so it just multiplies the two subtree sizes.
+# Work under a node pair: the area both cover, times the cell density each brings to it.
+# The generic fallback has no notion of overlap, so it multiplies the subtree sizes.
 @inline function pair_weight(n1, e1::GO.UnitSpherical.SphericalCap, n2, e2::GO.UnitSpherical.SphericalCap)
     A = _overlap_area(e1, e2)
     A <= 0 && return 0.0
@@ -59,16 +46,14 @@ end
 """
     MAX_EXTRA_PAIRS
 
-How many pairs beyond `nchunks` [`frontier`](@ref) may split into while its
-work estimate still calls the frontier unbalanced. Extents coarse enough to tie
-genuinely unequal pairs (a lat-lon block's bounding cap can be a whole
-hemisphere) leave the frontier no choice but to overshoot, and this bounds what
-the overshoot costs in spawns.
+How far past `nchunks` [`frontier`](@ref) may split while its estimate still calls the
+frontier unbalanced.  Coarse extents can tie genuinely unequal pairs, and this caps what
+the resulting overshoot costs in spawns.
 """
 const MAX_EXTRA_PAIRS = 512
 
-# Binary max-heap over (weight, item), typed on the weight so the comparisons
-# stay concrete even though the items are heterogeneous node pairs.
+# Binary max-heap over (weight, item), typed on the weight so comparisons stay concrete
+# even though the items are heterogeneous node pairs.
 @inline function _heap_up!(ws::Vector{Float64}, xs::Vector{Any}, i::Int)
     while i > 1
         p = i >> 1
@@ -109,25 +94,21 @@ end
 """
     frontier(predicate, root1, root2; nchunks) -> Vector
 
-Split the root node pair into at least `nchunks` independent node pairs by
-repeatedly splitting the heaviest one, and return them in DFS pre-order.
+Split the root node pair into at least `nchunks` independent node pairs by repeatedly
+splitting the heaviest one, and return them in DFS pre-order.
 
-Splitting continues past `nchunks` while the heaviest pair still claims more
-than a `1/nchunks` share of the frontier's estimated work, and stops for good
-at `nchunks + MAX_EXTRA_PAIRS` pairs. `pair_weight` only orders the queue, so
-a coarse extent can tie pairs whose real work differs by orders of magnitude;
-the share test keeps the budget on the pairs that are still too big instead
-of spending it on whichever tied pair the heap happened to surface.
+Splitting continues past `nchunks` while the heaviest pair still claims more than a
+`1/nchunks` share of the estimated work, and stops at `nchunks + MAX_EXTRA_PAIRS`.
 
-A pair is splittable unless BOTH sides are leaves, so a leaf facing a large
-subtree is handled by descending the large side only. Children failing
-`predicate` are dropped exactly as the serial dual DFS would prune them, so
-running the serial search on every returned pair visits each candidate pair
-exactly once.
+A pair is splittable unless BOTH sides are leaves, so a leaf facing a large subtree
+descends the large side only.  Children failing `predicate` are pruned exactly as the
+serial dual DFS prunes them, so the serial search over the returned pairs visits every
+candidate pair exactly once.
 """
 function frontier(predicate::P, root1, root2; nchunks::Int) where {P}
     e1 = STI.node_extent(root1)
     e2 = STI.node_extent(root2)
+    # `Any` because the pairs are heterogeneously typed - not trim-compatible yet.
     ws = Float64[]; xs = Any[]          # splittable pairs, as a max-heap
     done = Any[]                        # leaf/leaf pairs, cannot split further
     root = (root1, e1, root2, e2, Int[])
@@ -180,8 +161,8 @@ function frontier(predicate::P, root1, root2; nchunks::Int) where {P}
     return pairs
 end
 
-# Files the pair on the heap or, for a leaf/leaf pair, on `done`, and returns
-# its weight so the caller can keep the frontier's work total up to date.
+# Files the pair on the heap, or on `done` if neither side can split, and returns its
+# weight so the caller can keep the frontier's work total up to date.
 @inline function _emit!(ws, xs, done, n1, e1, n2, e2, key)
     w = pair_weight(n1, e1, n2, e2)
     if STI.isleaf(n1) && STI.isleaf(n2)
@@ -200,8 +181,7 @@ function _inner_dfs_f(predicate::P, node1::N1, node2::N2) where {P, N1, N2}
     return ret
 end
 
-# The frontier's pairs are heterogeneously typed, so one dynamic dispatch per
-# task lands here and the spawned closure is concrete from there on.
+# One dynamic dispatch per task lands here; the spawned closure is concrete from there on.
 function _spawn_pair(inner::IF, predicate::P, node1::N1, node2::N2) where {IF, P, N1, N2}
     return StableTasks.@spawn $inner($predicate, $node1, $node2)
 end
@@ -213,14 +193,10 @@ Find every leaf-index pair `(i1, i2)` whose extents satisfy `predicate`, in
 parallel, returning them in the same order as a serial
 `STI.dual_depth_first_search` over the same trees.
 
-`chunks_per_thread` sets the task budget: the traversal is split into at
-least `Threads.nthreads() * chunks_per_thread` node pairs (see
-[`frontier`](@ref)), one task each. Raising it costs more spawns but tolerates
-more skew between pairs; lowering it does the reverse. It cannot change the
-result.
-
-Per-node work estimates come from `Trees.split_weight`, which is the hook to
-define if a tree type balances badly.
+`chunks_per_thread` sets the task budget: the traversal is split into at least
+`Threads.nthreads() * chunks_per_thread` node pairs (see [`frontier`](@ref)), one task
+each.  Raising it costs more spawns but tolerates more skew between pairs; it cannot
+change the result.  Work estimates come from `Trees.split_weight`.
 """
 function multithreaded_dual_query(
     predicate::P, node1::N1, node2::N2;
@@ -228,10 +204,8 @@ function multithreaded_dual_query(
 ) where {P, N1, N2}
     nchunks = max(1, Threads.nthreads() * chunks_per_thread)
     pairs = frontier(predicate, node1, node2; nchunks)
-    tasks = Any[]
-    sizehint!(tasks, length(pairs))
-    for p in pairs
-        push!(tasks, _spawn_pair(_inner_dfs_f, predicate, p[1], p[3]))
+    tasks = map(pairs) do pair
+        _spawn_pair(_inner_dfs_f, predicate, pair[1], pair[3])
     end
     results = Vector{Tuple{Int, Int}}[fetch(t)::Vector{Tuple{Int, Int}} for t in tasks]
     # `init` would cost `vcat`'s pre-sized specialisation, making this quadratic in the task count.
