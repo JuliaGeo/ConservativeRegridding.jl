@@ -429,6 +429,24 @@ end
     @test r.intersections == plain.intersections
 end
 
+# Forwards a real tree but reports one fixed `split_weight` everywhere, the way a tree
+# whose `Trees.ncells` answers for its whole grid does at every node.
+struct LyingWeightTree{T}
+    tree::T
+    total::Int
+end
+GO.SpatialTreeInterface.isspatialtree(::Type{<:LyingWeightTree}) = true
+GO.SpatialTreeInterface.isleaf(w::LyingWeightTree) = GO.SpatialTreeInterface.isleaf(w.tree)
+GO.SpatialTreeInterface.node_extent(w::LyingWeightTree) = GO.SpatialTreeInterface.node_extent(w.tree)
+GO.SpatialTreeInterface.nchild(w::LyingWeightTree) = GO.SpatialTreeInterface.nchild(w.tree)
+GO.SpatialTreeInterface.getchild(w::LyingWeightTree) =
+    (LyingWeightTree(c, w.total) for c in GO.SpatialTreeInterface.getchild(w.tree))
+GO.SpatialTreeInterface.getchild(w::LyingWeightTree, i::Int) =
+    LyingWeightTree(GO.SpatialTreeInterface.getchild(w.tree, i), w.total)
+GO.SpatialTreeInterface.child_indices_extents(w::LyingWeightTree) =
+    GO.SpatialTreeInterface.child_indices_extents(w.tree)
+ConservativeRegridding.Trees.split_weight(w::LyingWeightTree) = w.total
+
 # Two trees that share no intersecting cell pair must yield an all-zero matrix, not an
 # error. The threaded path used to hit `reduce` over an empty collection at two places:
 # the merge of the per-task results (MultithreadedDualDepthFirstSearch), and the COO
@@ -522,5 +540,38 @@ end
             @test threaded == serial
             @test nnz(threaded) > 1000
         end
+    end
+end
+
+# A `split_weight` that answers the whole grid at every node makes `pair_weight`
+# cancel to a constant: splits then inflated the frontier's estimated total until the
+# share test stalled, leaving single pairs holding up to half the traversal (measured
+# 50% on a raster-to-DGG regrid). The frontier now conserves its estimate across
+# splits, so even a saturated weight yields a balanced frontier. Counts are exact:
+# the frontier and the per-pair searches are serial and deterministic.
+@testset "Frontier stays balanced when split_weight saturates" begin
+    MDDFS = ConservativeRegridding.MultithreadedDualDepthFirstSearch
+
+    sphere_points(nx, ny) =
+        [GO.UnitSpherical.UnitSphereFromGeographic()((lon, lat))
+         for lon in range(-180, 180, length = nx + 1), lat in range(-80, 80, length = ny + 1)]
+
+    for sizes in (((120, 80), (12, 8)), ((120, 80), (120, 80)))
+        src = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(sizes[1]...))
+        dst = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(sizes[2]...))
+        w1 = LyingWeightTree(src, prod(sizes[1]))
+        w2 = LyingWeightTree(dst, prod(sizes[2]))
+        pred = GO.UnitSpherical._intersects
+
+        pairs = MDDFS.frontier(pred, w1, w2; nchunks = 64)
+        chunks = [MDDFS._inner_dfs_f(pred, p[1], p[3]) for p in pairs]
+
+        # Weights only order the splits: concatenation still matches the serial search.
+        @test reduce(vcat, chunks) == MDDFS._inner_dfs_f(pred, src, dst)
+
+        # No frontier pair keeps more than a tenth of the candidate pairs (the
+        # broken estimator left 23-25% on both grid pairs; the fix leaves 5-6%).
+        counts = map(length, chunks)
+        @test maximum(counts) <= sum(counts) ÷ 10
     end
 end

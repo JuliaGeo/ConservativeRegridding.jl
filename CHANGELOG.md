@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The default `Trees.should_parallelize` methods.  Nothing calls it any more, so a tree type needs no method to be traversed in parallel.
 
 ### Fixed
+- The budget frontier conserves its work estimate across splits: surviving children whose `pair_weight`s sum past their parent's are scaled back to the parent's weight.  Estimates that saturate under splitting — loose bounding caps, or a `split_weight` fallback answering the whole grid at every node — used to inflate the frontier's total until the share test stalled, leaving one task with up to half the traversal (measured: a 512² raster → IGEO7 plan at 8 threads kept 50% of all candidate pairs in one task and ran 2.5x slower than the pre-frontier policy; the largest share is now ~1.6%).
 - Threaded regridding of planar grids no longer needs a `should_parallelize` method: planar trees thread through the frontier's generic pair weighting like any other ([#66](https://github.com/JuliaGeo/ConservativeRegridding.jl/issues/66)).
 - The threaded intersection path no longer passes `init` to `reduce(vcat, ...)`, which bypassed `vcat`'s pre-sized specialisation and made merging the per-task results quadratic in the number of tasks. Emptiness is guarded explicitly instead.
 
