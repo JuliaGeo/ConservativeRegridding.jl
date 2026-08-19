@@ -8,21 +8,35 @@ import ..Trees: split_weight
 
 #=
 The dual-tree search is parallelized by a *budget frontier*: a short serial
-descent splits the root pair into `nchunks` independent node pairs, then one
-task per pair runs the plain serial dual DFS on it.
+descent splits the root pair into at least `nchunks` independent node pairs,
+then one task per pair runs the plain serial dual DFS on it.
 
 Phase 1 keeps a max-heap of node pairs keyed by `pair_weight` (an estimate of
 the work under the pair) and repeatedly splits the heaviest pair, so the
-frontier is sized by estimated work rather than by tree depth. Phase 2 spawns
-the tasks and concatenates their results in DFS pre-order, which makes the
-output bit-identical - and order-identical - to a full serial dual DFS.
+frontier is sized by estimated work rather than by tree depth. It stops once
+`nchunks` pairs exist and none of them still claims more than a `1/nchunks`
+share of the estimated work, which keeps a pair the estimate cannot tell apart
+from its neighbours - but that really holds a quarter of the traversal - from
+surviving as a single task. Phase 2 spawns the tasks and concatenates their
+results in DFS pre-order, which makes the output bit-identical - and
+order-identical - to a full serial dual DFS.
 =#
 
-@inline _cap_area(c::GO.UnitSpherical.SphericalCap) = 2π * (1 - cos(c.radius))
+# A cap that covers the whole sphere, including the all-NaN cap GeometryOps
+# returns for a point set with no usable centre - a grid spanning both poles
+# has one. It localises nothing, and NaN must not reach the weights: a NaN
+# never compares greater, so a NaN-weighted pair sinks to the bottom of the
+# max-heap and is never split.
+@inline _is_global(c::GO.UnitSpherical.SphericalCap) = !(c.radius < π)
+
+@inline _cap_area(c::GO.UnitSpherical.SphericalCap) =
+    _is_global(c) ? 4π : 2π * (1 - cos(c.radius))
 
 # Area of the overlap of two caps: exact when they are disjoint or nested,
 # linearly ramped in between. Only feeds `pair_weight`, so it may be rough.
 @inline function _overlap_area(a::GO.UnitSpherical.SphericalCap, b::GO.UnitSpherical.SphericalCap)
+    _is_global(a) && return _cap_area(b)      # a whole-sphere cap contains the other
+    _is_global(b) && return _cap_area(a)
     d = GO.UnitSpherical.spherical_distance(a.point, b.point)
     d >= a.radius + b.radius && return 0.0
     small = a.radius <= b.radius ? a : b
@@ -41,6 +55,17 @@ end
     return A * (sqrt(d1) + sqrt(d2))^2
 end
 @inline pair_weight(n1, e1, n2, e2) = float(split_weight(n1)) * float(split_weight(n2))
+
+"""
+    MAX_EXTRA_PAIRS
+
+How many pairs beyond `nchunks` [`frontier`](@ref) may split into while its
+work estimate still calls the frontier unbalanced. Extents coarse enough to tie
+genuinely unequal pairs (a lat-lon block's bounding cap can be a whole
+hemisphere) leave the frontier no choice but to overshoot, and this bounds what
+the overshoot costs in spawns.
+"""
+const MAX_EXTRA_PAIRS = 512
 
 # Binary max-heap over (weight, item), typed on the weight so the comparisons
 # stay concrete even though the items are heterogeneous node pairs.
@@ -84,8 +109,15 @@ end
 """
     frontier(predicate, root1, root2; nchunks) -> Vector
 
-Split the root node pair into at most `nchunks` independent node pairs by
+Split the root node pair into at least `nchunks` independent node pairs by
 repeatedly splitting the heaviest one, and return them in DFS pre-order.
+
+Splitting continues past `nchunks` while the heaviest pair still claims more
+than a `1/nchunks` share of the frontier's estimated work, and stops for good
+at `nchunks + MAX_EXTRA_PAIRS` pairs. `pair_weight` only orders the queue, so
+a coarse extent can tie pairs whose real work differs by orders of magnitude;
+the share test keeps the budget on the pairs that are still too big instead
+of spending it on whichever tied pair the heap happened to surface.
 
 A pair is splittable unless BOTH sides are leaves, so a leaf facing a large
 subtree is handled by descending the large side only. Children failing
@@ -99,12 +131,20 @@ function frontier(predicate::P, root1, root2; nchunks::Int) where {P}
     ws = Float64[]; xs = Any[]          # splittable pairs, as a max-heap
     done = Any[]                        # leaf/leaf pairs, cannot split further
     root = (root1, e1, root2, e2, Int[])
+    total = pair_weight(root1, e1, root2, e2)   # estimated work in the frontier
     if STI.isleaf(root1) && STI.isleaf(root2)
         push!(done, root)
     else
-        _heap_push!(ws, xs, pair_weight(root1, e1, root2, e2), root)
+        _heap_push!(ws, xs, total, root)
     end
-    while !isempty(ws) && length(ws) + length(done) < nchunks
+    maxpairs = nchunks + MAX_EXTRA_PAIRS
+    while !isempty(ws)
+        npairs = length(ws) + length(done)
+        npairs < maxpairs || break
+        # Below the chunk count always split; above it, only while the heaviest
+        # pair is over its even share of the estimate.
+        npairs < nchunks || ws[1] * nchunks > total || break
+        total -= ws[1]
         (n1, a1, n2, a2, key) = _heap_pop!(ws, xs)
         if STI.isleaf(n1)                        # descend side 2 only
             k = 0
@@ -112,7 +152,7 @@ function frontier(predicate::P, root1, root2; nchunks::Int) where {P}
                 k += 1
                 f2 = STI.node_extent(c2)
                 predicate(a1, f2) || continue
-                _emit!(ws, xs, done, n1, a1, c2, f2, vcat(key, k))
+                total += _emit!(ws, xs, done, n1, a1, c2, f2, vcat(key, k))
             end
         elseif STI.isleaf(n2)                    # descend side 1 only
             k = 0
@@ -120,7 +160,7 @@ function frontier(predicate::P, root1, root2; nchunks::Int) where {P}
                 k += 1
                 f1 = STI.node_extent(c1)
                 predicate(f1, a2) || continue
-                _emit!(ws, xs, done, c1, f1, n2, a2, vcat(key, k))
+                total += _emit!(ws, xs, done, c1, f1, n2, a2, vcat(key, k))
             end
         else                                     # child cross product, side 1 major
             ch1 = collect(STI.getchild(n1)); ch2 = collect(STI.getchild(n2))
@@ -130,7 +170,7 @@ function frontier(predicate::P, root1, root2; nchunks::Int) where {P}
             for i in eachindex(ch1), j in eachindex(ch2)
                 k += 1
                 predicate(ce1[i], ce2[j]) || continue
-                _emit!(ws, xs, done, ch1[i], ce1[i], ch2[j], ce2[j], vcat(key, k))
+                total += _emit!(ws, xs, done, ch1[i], ce1[i], ch2[j], ce2[j], vcat(key, k))
             end
         end
     end
@@ -140,13 +180,16 @@ function frontier(predicate::P, root1, root2; nchunks::Int) where {P}
     return pairs
 end
 
+# Files the pair on the heap or, for a leaf/leaf pair, on `done`, and returns
+# its weight so the caller can keep the frontier's work total up to date.
 @inline function _emit!(ws, xs, done, n1, e1, n2, e2, key)
+    w = pair_weight(n1, e1, n2, e2)
     if STI.isleaf(n1) && STI.isleaf(n2)
         push!(done, (n1, e1, n2, e2, key))
     else
-        _heap_push!(ws, xs, pair_weight(n1, e1, n2, e2), (n1, e1, n2, e2, key))
+        _heap_push!(ws, xs, w, (n1, e1, n2, e2, key))
     end
-    return nothing
+    return w
 end
 
 function _inner_dfs_f(predicate::P, node1::N1, node2::N2) where {P, N1, N2}
@@ -170,10 +213,11 @@ Find every leaf-index pair `(i1, i2)` whose extents satisfy `predicate`, in
 parallel, returning them in the same order as a serial
 `STI.dual_depth_first_search` over the same trees.
 
-`chunks_per_thread` sets the task budget: the traversal is split into
-`Threads.nthreads() * chunks_per_thread` node pairs (see [`frontier`](@ref)),
-one task each. Raising it costs more spawns but tolerates more skew between
-pairs; lowering it does the reverse. It cannot change the result.
+`chunks_per_thread` sets the task budget: the traversal is split into at
+least `Threads.nthreads() * chunks_per_thread` node pairs (see
+[`frontier`](@ref)), one task each. Raising it costs more spawns but tolerates
+more skew between pairs; lowering it does the reverse. It cannot change the
+result.
 
 Per-node work estimates come from `Trees.split_weight`, which is the hook to
 define if a tree type balances badly.
