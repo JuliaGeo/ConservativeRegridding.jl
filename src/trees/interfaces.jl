@@ -22,74 +22,44 @@ import SortTileRecursiveTree # in order to implement the `getcell/ncell` interfa
 """
     should_parallelize(node, extent) -> Bool
 
-Decide whether to spawn a parallel task at `node` during the multithreaded
-dual-tree traversal used to find candidate intersecting cell pairs.
+!!! warning "Deprecated"
+    The multithreaded dual-tree traversal no longer consults this function.
+    Task granularity is now chosen by the budget frontier in
+    `multithreaded_dual_query`, which sizes tasks from
+    [`Trees.split_weight`](@ref) instead. The generic function and
+    [`WithParallelizePolicy`](@ref) are kept so existing method definitions and
+    wrapped trees keep loading and working, and are slated for removal in a
+    future breaking release.
 
-Returning `true` means *this node is the granularity at which a task is
-spawned*: the dual DFS stops descending recursively into children for the
-purpose of further parallelism and runs the subtree as a single parallel
-unit. Returning `false` means *keep descending* — the node is still too
-coarse and a task at this level would create unbalanced work.
+Formerly: decide whether to spawn a parallel task at `node` during the
+multithreaded dual-tree traversal used to find candidate intersecting cell
+pairs, given `extent`, the bounding region of `node`.
 
-`extent` is the bounding region of `node` (e.g. an `Extents.Extent` for
-planar grids or a `SphericalCap` for spherical grids). It is passed
-explicitly so implementations and the dual DFS share one computation per
-node.
-
-Dispatch is on `(node_type, extent_type)` only — the root tree is *not*
-a dispatch axis. To express tree-aware logic (e.g. "spawn when subtree
-covers ≤ 1/N of the root grid"), wrap the root tree with
-[`WithParallelizePolicy`](@ref); the wrapper plumbs the tree into a
-local closure that the dual DFS calls without participating in dispatch.
-
-# Defaults
-
-- `(::AbstractQuadtreeCursor, ::SphericalCap | ::Extents.Extent)`: leaf-count
-  test using `node.grid` for total cells. Spawns once the subtree covers
-  ≤ `prod(ncells(node.grid)) ÷ (Threads.nthreads() * 32)` leaves. Defined
-  in `quadtree_cursors.jl`.
-- `(::Any, ::SphericalCap)`: spawns once the cap covers less than ¼ of the
-  unit sphere — a coarse heuristic for foreign tree types where leaf count
-  isn't cheap.
-- `(::Any, ::Extents.Extent)`: errors. Planar extents have no canonical
-  scale — tree authors must supply their own method (or wrap with
-  [`WithParallelizePolicy`](@ref)).
-
-# Customization
-
-Two paths:
-
-1. **Tree-type-specific override** — define a node-type-specific method:
-
-   ```julia
-   ConservativeRegridding.Trees.should_parallelize(
-       node::MyCursorType, extent::Extents.Extent,
-   ) = prod(ncells(node)) ≤ prod(ncells(node.grid)) ÷ (Threads.nthreads() * 4)
-   ```
-
-2. **Instance-level wrapper** — wrap the root tree at construction time:
-
-   ```julia
-   tree_with_policy = WithParallelizePolicy(my_tree, (tree, node, extent) -> ...)
-   ```
-
-   The wrapper plumbs the policy through the dual DFS via a local closure
-   in `intersection_areas.jl`, so it doesn't participate in dispatch.
+To influence task balance now, define [`Trees.split_weight`](@ref) for your
+node type.
 """
 function should_parallelize end
 
-should_parallelize(node, extent::GO.UnitSpherical.SphericalCap) =
-    (2π * (1 - cos(extent.radius))) < π
+"""
+    split_weight(node) -> Int
 
-should_parallelize(node, extent::Extents.Extent) = error(
-    """
-    `Trees.should_parallelize` has no method for planar `Extents.Extent` on node of type `$(typeof(node))`.
-    Either define a node-type-specific method:
-        `ConservativeRegridding.Trees.should_parallelize(::$(typeof(node)), extent::Extents.Extent) = ...`
-    or wrap your tree with `WithParallelizePolicy(tree, policy)` to supply an
-    instance-level callable.
-    """
-)
+An O(1) estimate of how much work lives under `node` - by default, the number
+of grid cells beneath it.
+
+Used only to order the split heap that the multithreaded dual-tree traversal
+builds its task frontier from: a wrong answer costs load balance, never
+correctness.
+
+The generic method answers from [`Trees.ncells`](@ref) when the node type
+defines it, and returns `1` otherwise, so most tree types need no method at
+all. Define one for a node type whose `ncells` is missing or expensive, or
+whose cells are unevenly distributed across its subtrees.
+"""
+function split_weight(node)
+    applicable(ncells, node) || return 1
+    n = ncells(node)
+    return n isa Tuple ? Int(prod(n)) : Int(n)
+end
 
 # Generic method to treeify "anything"
 function treeify(manifold, grid)

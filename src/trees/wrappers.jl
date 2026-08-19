@@ -24,6 +24,7 @@ STI.node_extent(wrapper::AbstractTreeWrapper) = STI.node_extent(parent(wrapper))
 getcell(wrapper::AbstractTreeWrapper, args...) = getcell(parent(wrapper), args...)
 ncells(wrapper::AbstractTreeWrapper, args...) = ncells(parent(wrapper), args...)
 cell_range_extent(wrapper::AbstractTreeWrapper, args...) = cell_range_extent(parent(wrapper), args...)
+split_weight(wrapper::AbstractTreeWrapper) = split_weight(parent(wrapper))
 
 #=
 ## KnownFullSphereExtentWrapper
@@ -67,31 +68,26 @@ STI.node_extent(w::KnownFullSphereExtentWrapper) = GO.UnitSpherical.SphericalCap
 #=
 ## WithParallelizePolicy
 
-Wraps any spatial tree so its `should_parallelize` is supplied by a
-user-provided callable — the instance-level counterpart to defining a
-node-type-specific `should_parallelize` method.
+Deprecated: used to supply a tree's `should_parallelize` from a user callable.
+The traversal no longer consults either, but the type is kept so wrapped trees
+keep working.
 =#
 
 """
     WithParallelizePolicy(tree, policy)
 
-Wrap `tree` so the dual-tree DFS uses `policy(tree, node, extent) -> Bool`
-instead of the default `Trees.should_parallelize(node, extent)`.
+!!! warning "Deprecated"
+    `policy` is no longer consulted. The multithreaded dual-tree traversal now
+    picks its task granularity with a budget frontier sized by
+    [`Trees.split_weight`](@ref), so a wrapped tree regrids exactly as the tree
+    it wraps does. The type is kept so existing call sites keep working, and is
+    slated for removal in a future breaking release.
 
-`policy` returns `true` to spawn a parallel task at `node` and stop
-descending single-threaded, `false` to keep descending. The wrapper is
-detected at the dual-DFS call site (`intersection_areas.jl`), which
-builds a local closure capturing `tree` and `policy` — so `policy`
-gets the root tree as its first arg without that becoming a Julia
-dispatch axis.
+Formerly: wrap `tree` so the dual-tree DFS used `policy(tree, node, extent) -> Bool`
+instead of [`Trees.should_parallelize`](@ref) to decide where to spawn tasks.
 
-All other SpatialTreeInterface methods forward to the wrapped tree
+All SpatialTreeInterface methods forward to the wrapped tree
 (`<: AbstractTreeWrapper`).
-
-Use this when you want to tune multithreading granularity for a
-single regridding call without defining a method on a node type.
-For per-node-type policies, define `should_parallelize(::MyNode, extent)`
-directly.
 """
 struct WithParallelizePolicy{T, F} <: AbstractTreeWrapper
     tree::T
@@ -161,6 +157,7 @@ function Trees.getcell(c::CubedSphereToplevelTree, i::Int)
 end
 
 Trees.ncells(c::CubedSphereToplevelTree) = prod(Trees.ncells(first(c.quadtrees))) * 6
+Trees.split_weight(c::CubedSphereToplevelTree) = sum(Trees.split_weight, c.quadtrees)
 
 struct IndexLocalizerRewrapperTree{T} <: AbstractTreeWrapper
     tree::T
@@ -209,3 +206,5 @@ end
 function Trees.ncells(wrapper::MultiTreeWrapper)
     return sum(prod(Trees.ncells(tree)) for tree in wrapper.trees)
 end
+
+Trees.split_weight(wrapper::MultiTreeWrapper) = sum(Trees.split_weight, wrapper.trees)

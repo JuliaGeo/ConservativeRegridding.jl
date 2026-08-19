@@ -361,12 +361,9 @@ end
     @test !(result isa ConservativeRegridding.AbstractDimensionalSlicer)
 end
 
-# Regression test for GitHub issue #66 + verifies the `should_parallelize` dispatch hook:
-# Planar grids ship no default policy, so threaded regridding requires the tree author
-# to define `should_parallelize` for their tree type. Here we override on the package's
-# own TopDownQuadtreeCursor (acting as the "tree author") and verify that:
-#   1. the override is actually invoked during the dual DFS, and
-#   2. threaded planar regridding produces correct results.
+# Regression test for GitHub issue #66: planar grids used to ship no default
+# parallelize policy, so threaded planar regridding errored. The budget-frontier
+# traversal has no policy hook at all, so planar trees now thread out of the box.
 @testset "Planar grid threaded regridding (#66)" begin
     function make_grid(nx, ny)
         polys = Matrix{GI.Polygon}(undef, nx, ny)
@@ -379,43 +376,23 @@ end
         polys
     end
 
-    # The planar default errors when called on a node type that has no
-    # specific method. Use a synthetic node type so this assertion is
-    # independent of any method added later in this session.
-    struct _UnsupportedPlanarNode end
-    @test_throws ErrorException ConservativeRegridding.Trees.should_parallelize(
-        _UnsupportedPlanarNode(), Extents.Extent(X=(0.0, 1.0), Y=(0.0, 1.0)),
-    )
-
-    # Grids must be large enough that neither tree's top-level cursor is already a
-    # leaf — otherwise the dual DFS short-circuits before consulting `should_parallelize`.
     src = make_grid(8, 8)
     dst = make_grid(16, 16)
-
-    # Inject a tree-aware policy via the `WithParallelizePolicy` wrapper and
-    # confirm it's called during construction. The wrapper is detected at the
-    # dual-DFS call site (intersection_areas.jl) and threaded through a local
-    # closure, so the policy callback gets the root tree as its first arg
-    # without that being a Julia dispatch axis.
-    call_count = Ref(0)
     src_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), src)
     dst_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), dst)
-    src_w = ConservativeRegridding.Trees.WithParallelizePolicy(
-        src_tree, (tree, node, extent) -> (call_count[] += 1; true))
-    dst_w = ConservativeRegridding.Trees.WithParallelizePolicy(
-        dst_tree, (tree, node, extent) -> (call_count[] += 1; true))
 
-    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_w, src_w; threaded=true)
-    @test call_count[] > 0
+    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_tree, src_tree; threaded=true)
     @test r isa ConservativeRegridding.Regridder
     @test size(r) == (16*16, 8*8)
-    A = r.intersections
-    @test sum(A) > 0
+    @test sum(r.intersections) > 0
+
+    serial = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_tree, src_tree; threaded=false)
+    @test r.intersections == serial.intersections
 end
 
-# Verifies the instance-level WithParallelizePolicy wrapper: dispatching
-# on the wrapper short-circuits the type-level default and calls the
-# user-supplied closure instead.
+# `WithParallelizePolicy` is deprecated - its policy is no longer consulted - but a
+# wrapped tree must still traverse (through the `AbstractTreeWrapper` forwarding) and
+# regrid to exactly what the unwrapped tree gives.
 @testset "WithParallelizePolicy wrapper" begin
     function make_grid(nx, ny)
         polys = Matrix{GI.Polygon}(undef, nx, ny)
@@ -431,29 +408,33 @@ end
     src_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), make_grid(8, 8))
     dst_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), make_grid(16, 16))
 
-    policy_calls = Ref(0)
     src_wrapped = ConservativeRegridding.Trees.WithParallelizePolicy(
-        src_tree, (tree, node, extent) -> (policy_calls[] += 1; true),
+        src_tree, (tree, node, extent) -> true,
     )
     dst_wrapped = ConservativeRegridding.Trees.WithParallelizePolicy(
-        dst_tree, (tree, node, extent) -> (policy_calls[] += 1; true),
+        dst_tree, (tree, node, extent) -> true,
     )
 
+    # The wrapper forwards `split_weight` to the tree it wraps, so the frontier sizes
+    # tasks identically either way.
+    @test ConservativeRegridding.Trees.split_weight(src_wrapped) ==
+        ConservativeRegridding.Trees.split_weight(src_tree)
+
     r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_wrapped, src_wrapped; threaded=true)
-    @test policy_calls[] > 0
     @test r isa ConservativeRegridding.Regridder
     @test size(r) == (16*16, 8*8)
     @test sum(r.intersections) > 0
+
+    plain = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_tree, src_tree; threaded=true)
+    @test r.intersections == plain.intersections
 end
 
 # Two trees that share no intersecting cell pair must yield an all-zero matrix, not an
-# error. The threaded path used to hit `reduce` over an empty collection at two places,
-# one per stage, and each stage is reached with a different parallelize policy:
-#   * decline to parallelize → the dual DFS descends, no child pair passes the predicate,
-#     and it spawns no tasks at all (MultithreadedDualDepthFirstSearch);
-#   * parallelize at the root → one task runs, returns no candidate pair, and the COO
-#     assembly is then handed zero partitions (assemble_sparse_matrix_coo).
-# Both must agree with the sequential path, which has always handled this correctly.
+# error. The threaded path used to hit `reduce` over an empty collection at two places:
+# the merge of the per-task results (MultithreadedDualDepthFirstSearch), and the COO
+# assembly handed zero partitions (assemble_sparse_matrix_coo). Both must agree with the
+# sequential path, which has always handled this correctly. The frontier reaches the
+# first at any task budget, so it is swept here.
 @testset "Threaded intersection with no intersecting pairs" begin
     function make_grid(nx, ny; x0 = 0.0, y0 = 0.0)
         polys = Matrix{GI.Polygon}(undef, nx, ny)
@@ -474,16 +455,72 @@ end
         GeometryOpsCore.Planar(), GeometryOpsCore.False(), dst_tree, src_tree)
     @test nnz(expected) == 0
 
-    for parallelize in (false, true)
-        src_w = ConservativeRegridding.Trees.WithParallelizePolicy(
-            src_tree, (tree, node, extent) -> parallelize)
-        dst_w = ConservativeRegridding.Trees.WithParallelizePolicy(
-            dst_tree, (tree, node, extent) -> parallelize)
-
+    for tree_pair in ((src_tree, dst_tree),
+                      (ConservativeRegridding.Trees.WithParallelizePolicy(src_tree, (t, n, e) -> true),
+                       ConservativeRegridding.Trees.WithParallelizePolicy(dst_tree, (t, n, e) -> true)))
         A = ConservativeRegridding.intersection_areas(
-            GeometryOpsCore.Planar(), GeometryOpsCore.True(), dst_w, src_w)
+            GeometryOpsCore.Planar(), GeometryOpsCore.True(), tree_pair[2], tree_pair[1])
         @test A == expected
         @test size(A) == size(expected)
         @test eltype(A) == eltype(expected)
+    end
+end
+
+# The threaded candidate search must be an exact stand-in for the serial one: same
+# pairs, same order, at any task budget. Two asymmetric grid pairs (a spherical one,
+# which weighs pairs by cap overlap, and a planar one, which falls back to the product
+# of subtree sizes) are checked against `dual_depth_first_search`, and the assembled
+# weight matrices are checked threaded against unthreaded.
+@testset "Threaded dual query matches the serial traversal" begin
+    MDDFS = ConservativeRegridding.MultithreadedDualDepthFirstSearch
+
+    function serial_pairs(predicate, t1, t2)
+        pairs = Tuple{Int, Int}[]
+        GO.SpatialTreeInterface.dual_depth_first_search(predicate, t1, t2) do i1, i2
+            push!(pairs, (i1, i2))
+        end
+        return pairs
+    end
+
+    sphere_points(nx, ny) =
+        [GO.UnitSpherical.UnitSphereFromGeographic()((lon, lat))
+         for lon in range(-180, 180, length = nx + 1), lat in range(-80, 80, length = ny + 1)]
+
+    cases = (
+        (name = "spherical",
+         manifold = GO.Spherical(),
+         predicate = GO.UnitSpherical._intersects,
+         src = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(60, 40)),
+         dst = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(48, 32))),
+        (name = "planar",
+         manifold = GO.Planar(),
+         predicate = Extents.intersects,
+         src = ConservativeRegridding.Trees.treeify(
+             GO.Planar(), (collect(range(0.0, 1.0, length = 61)), collect(range(0.0, 1.0, length = 41)))),
+         dst = ConservativeRegridding.Trees.treeify(
+             GO.Planar(), (collect(range(0.1, 1.1, length = 49)), collect(range(0.0, 1.0, length = 33))))),
+    )
+
+    for case in cases
+        @testset "$(case.name)" begin
+            expected = serial_pairs(case.predicate, case.src, case.dst)
+            @test length(expected) > 1000
+
+            @test MDDFS.multithreaded_dual_query(case.predicate, case.src, case.dst) == expected
+            for chunks_per_thread in (1, 8, 64)
+                @test MDDFS.multithreaded_dual_query(
+                    case.predicate, case.src, case.dst; chunks_per_thread) == expected
+            end
+            # The old five-argument shape still works; its closures are ignored.
+            @test MDDFS.multithreaded_dual_query(
+                case.predicate, (n, e) -> false, (n, e) -> false, case.src, case.dst) == expected
+
+            threaded = ConservativeRegridding.intersection_areas(
+                case.manifold, GeometryOpsCore.True(), case.dst, case.src)
+            serial = ConservativeRegridding.intersection_areas(
+                case.manifold, GeometryOpsCore.False(), case.dst, case.src)
+            @test threaded == serial
+            @test nnz(threaded) > 1000
+        end
     end
 end

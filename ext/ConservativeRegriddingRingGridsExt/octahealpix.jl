@@ -192,6 +192,7 @@ treeify(::Spherical, node::OctaHEALPixRootNode) = node
 
 best_manifold(node::OctaHEALPixRootNode) = node.manifold
 Trees.ncells(node::OctaHEALPixRootNode) = 4 * node.nside^2
+Trees.split_weight(node::OctaHEALPixRootNode) = 4 * node.nside^2
 
 STI.isspatialtree(::Type{<: OctaHEALPixRootNode}) = true
 STI.isleaf(::OctaHEALPixRootNode) = false

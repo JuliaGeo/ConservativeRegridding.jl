@@ -168,6 +168,10 @@ end
 
 Trees.ncells(node::HealpixRootNode) = 12 * node.nside_max^2
 
+# Frontier task sizing: exact O(1) cell counts.
+Trees.split_weight(node::HealpixRootNode) = 12 * node.nside_max^2
+Trees.split_weight(node::HealpixTreeNode) = (node.nside_max >> node.level)^2
+
 GOCore.best_manifold(::HealpixRootNode) = GO.Spherical()
 GOCore.best_manifold(::HealpixTreeNode) = GO.Spherical()
 
