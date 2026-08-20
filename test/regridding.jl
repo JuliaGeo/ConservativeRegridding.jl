@@ -662,3 +662,45 @@ end
     # spread over what is left.
     @test CR._window_bounds([1000; fill(1, 63)], 4) == [1, 2, 3, 4, 65]
 end
+
+# Cases the random fixtures above do not reach: a fold whose order decides the result,
+# signed zeros and subnormals, `Bool`'s `|`, ragged chunks, and the default window count.
+@testset "Windowed COO assembly: directed cases" begin
+    CR = ConservativeRegridding
+
+    # `1e16 + 1.0 - 1e16` is `0.0` in input order and `1.0` in either other order, and here
+    # the three duplicates of one coordinate sit in three different chunks.
+    cancel = [([1], [7], [1e16]), ([1], [7], [1.0]), ([1], [7], [-1e16])]
+    for nwindows in (2, 3, 8)
+        @test CR._sparse_from_chunks(cancel, 4, 20_000, nwindows).nzval == [0.0]
+    end
+
+    # `-0.0 + 0.0` is `+0.0`, and two subnormals add without rounding.
+    signs = [([1, 2], [3, 5], [-0.0, 5.0e-324]), ([1, 2], [3, 5], [0.0, 5.0e-324])]
+    bools = [([1, 2], [3, 5], [true, false]), ([1, 2], [3, 5], [false, false])]
+    for chunks in (cancel, signs, bools)
+        rows, cols, vals = CR._concat_chunks(chunks)
+        expected = sparse(rows, cols, vals, 4, 20_000)
+        for nwindows in (2, 3, 8)
+            got = CR._sparse_from_chunks(chunks, 4, 20_000, nwindows)
+            @test got.colptr == expected.colptr
+            @test got.rowval == expected.rowval
+            @test reinterpret(UInt8, got.nzval) == reinterpret(UInt8, expected.nzval)
+        end
+    end
+
+    # A chunk whose three vectors disagree in length is an error, as it is for `sparse`,
+    # not a silent truncation or an unchecked read.
+    @test_throws ArgumentError CR._sparse_from_chunks([([1, 1], [1], [2.0, 3.0])], 1, 20_000, 2)
+
+    # The default window count depends on `Threads.nthreads()`; the result must not.
+    let nrows = 64, ncols = 30_000, rng = MersenneTwister(20260821)
+        chunks = [(rand(rng, 1:nrows, 45_000), rand(rng, 1:ncols, 45_000), randn(rng, 45_000)) for _ in 1:3]
+        rows, cols, vals = CR._concat_chunks(chunks)
+        expected = sparse(rows, cols, vals, nrows, ncols)
+        got = CR._sparse_from_chunks(chunks, nrows, ncols)
+        @test got.colptr == expected.colptr
+        @test got.rowval == expected.rowval
+        @test reinterpret(UInt64, got.nzval) == reinterpret(UInt64, expected.nzval)
+    end
+end

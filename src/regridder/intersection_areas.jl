@@ -229,7 +229,8 @@ function _column_blocks(ncols::Int)
     return cld(ncols, blockwidth), blockwidth
 end
 
-# Bounds-checked on purpose: this is where an out-of-range column index is caught.
+# Bounds-checked on purpose: `_bucket_chunk!` indexes `windowof` with these block numbers
+# under `@inbounds`, so a column far outside `1:ncols` has to be caught here.
 function _count_blocks!(hist::Matrix{Int}, c::Int, cols::Vector{Int}, blockwidth::Int)
     for col in cols
         hist[_blockof(col, blockwidth), c] += 1
@@ -250,6 +251,15 @@ function _window_bounds(blockcount::Vector{Int}, nwindows::Int)
         bnd[w] = clamp(k + 1, bnd[w - 1] + 1, nblocks - nwindows + w)
     end
     return bnd
+end
+
+# `sparse` rejects ragged triplets; the windowed route would read `rows`/`vals` unchecked.
+function _check_chunk_lengths(chunks)
+    for (rows, cols, vals) in chunks
+        length(rows) == length(cols) == length(vals) || throw(ArgumentError(
+            "the COO vectors of a chunk must have equal lengths, got $(length(rows)), $(length(cols)) and $(length(vals))"))
+    end
+    return nothing
 end
 
 # Scatter one chunk's triplets into the window they belong to, columns shifted to be
@@ -314,6 +324,7 @@ function _sparse_from_chunks(chunks, nrows::Int, ncols::Int)
 end
 
 function _sparse_from_chunks(chunks, nrows::Int, ncols::Int, nwindows::Int)
+    _check_chunk_lengths(chunks)
     nblocks, blockwidth = _column_blocks(ncols)
     nwindows = min(nwindows, nblocks)
     if nwindows < 2
