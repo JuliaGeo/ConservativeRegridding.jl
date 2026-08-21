@@ -36,6 +36,7 @@ include("regridder/triangle_quadrature.jl")
 
 include("regridder/regridder.jl")
 include("regridder/regrid.jl")
+include("regridder/sparse_assembly.jl")
 include("regridder/intersection_areas.jl")
 # Intersection operators, implementing the interface defined in intersection_areas.jl
 include("regridder/intersection_operators/default_intersection_operator.jl")
