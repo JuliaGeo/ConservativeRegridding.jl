@@ -95,6 +95,9 @@ function STI.node_extent(q::IndexOffsetQuadtreeCursor)
     return Trees.cell_range_extent(q.grid, q.leafranges[1], q.leafranges[2])
 end
 
+STI.node_extent_is_expensive(::Type{<: IndexOffsetQuadtreeCursor{G}}) where {G} =
+    Trees.extent_is_expensive(G)
+
 function Trees.getcell(q::IndexOffsetQuadtreeCursor)
     return (Trees.getcell(q.grid, ij) for ij in CartesianIndices(q.leafranges))
 end
@@ -246,6 +249,9 @@ end
 function STI.node_extent(q::ReorderedTopDownQuadtreeCursor)
     return Trees.cell_range_extent(q.grid, q.leafranges[1], q.leafranges[2])
 end
+
+STI.node_extent_is_expensive(::Type{<: ReorderedTopDownQuadtreeCursor{G}}) where {G} =
+    Trees.extent_is_expensive(G)
 
 function Trees.getcell(q::ReorderedTopDownQuadtreeCursor)
     order = sortperm(vec(q.ordering.cart2lin[q.leafranges[1], q.leafranges[2]]))

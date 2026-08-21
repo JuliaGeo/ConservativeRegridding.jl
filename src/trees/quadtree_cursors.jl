@@ -183,6 +183,10 @@ function STI.node_extent(q::QuadtreeCursor)
     return cell_range_extent(q.grid, leaf_idxs(q)...)
 end
 
+# A cursor holds no extent: every call walks its leaf range.  `CachedDualDepthFirstSearch`
+# reads this and derives a node's child extents once instead of once per opposing child.
+STI.node_extent_is_expensive(::Type{<: QuadtreeCursor{G}}) where {G} = extent_is_expensive(G)
+
 function istoplevel(q::QuadtreeCursor)
     max_level = ceil(Int, log2(max(ncells(q.grid, 1), ncells(q.grid, 2)))) + 1
     return q.level == max_level && q.idx == CartesianIndex(1, 1)
@@ -276,6 +280,8 @@ end
 function STI.node_extent(q::TopDownQuadtreeCursor)
     return cell_range_extent(q.grid, q.leafranges[1], q.leafranges[2])
 end
+
+STI.node_extent_is_expensive(::Type{<: TopDownQuadtreeCursor{G}}) where {G} = extent_is_expensive(G)
 
 function getcell(q::TopDownQuadtreeCursor)
     return (getcell(q.grid, i, j) for i in q.leafranges[1], j in q.leafranges[2])

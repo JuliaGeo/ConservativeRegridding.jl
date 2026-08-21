@@ -255,6 +255,24 @@ STI.isleaf(cursor::AbstractQuadtreeCursor) = error("GO.STI.isleaf not implemente
 STI.child_indices_extents(cursor::AbstractQuadtreeCursor) = error("GO.STI.child_indices_extents not implemented for $(typeof(cursor))")
 STI.node_extent(cursor::AbstractQuadtreeCursor) = error("GO.STI.node_extent not implemented for $(typeof(cursor))")
 
+"""
+    extent_is_expensive(grid) -> Bool
+
+Whether `cell_range_extent(grid, irange, jrange)` *computes* the range's bounding extent
+rather than reading it off a couple of coordinate vectors.  True for every grid but the
+planar regular one, where the answer is four array reads.
+
+This is the grid-level fact behind `STI.node_extent_is_expensive` for the quadtree
+cursors: a cursor's `node_extent` is exactly `cell_range_extent` over its leaf range, so
+it is expensive precisely when the grid's is.  The search in
+[`ConservativeRegridding.CachedDualDepthFirstSearch`](@ref) reads the cursor-level trait
+to decide whether caching a node's child extents pays for itself.
+
+Defined on the type, so it stays a compile-time constant; the instance method forwards.
+"""
+extent_is_expensive(grid) = extent_is_expensive(typeof(grid))
+extent_is_expensive(::Type{<: AbstractCurvilinearGrid}) = true
+
 
 # ## Implementations for external types
 function ncells(tree::STI.FlatNoTree)

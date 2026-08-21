@@ -157,6 +157,10 @@ function cell_range_extent(q::RegularGrid{<: GO.Planar}, irange::UnitRange{Int},
     return Extents.Extent(; X=xrange, Y=yrange)
 end
 
+# Four array reads, independent of the range's size - the one grid whose cursors have
+# nothing to gain from caching their child extents.  See `extent_is_expensive`.
+extent_is_expensive(::Type{<: RegularGrid{<: GO.Planar}}) = false
+
 #=
 ### `Spherical` manifolds
 
