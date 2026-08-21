@@ -19,6 +19,12 @@ using SciMLPublic: @public
 include("utils/example_data.jl")
 export ExampleFieldFunction, LongitudeField, SinusoidField, HarmonicField, GulfStreamField, VortexField
 
+# The caching dual-tree search, for trees whose extents are computed rather than stored.
+# It needs only the SpatialTreeInterface, so it comes before the trees that use it.
+include("utils/CachedDualDepthFirstSearch.jl")
+using .CachedDualDepthFirstSearch
+import .CachedDualDepthFirstSearch: children_extent_type
+
 include("trees/Trees.jl")
 using .Trees
 
@@ -48,6 +54,8 @@ include("regridder/intersection_operators/intersection_grid_operator.jl")
 # Intersection-operator assembly interface (operators can plug into `intersection_areas`)
 @public intersection_areas, DefaultIntersectionOperator, IntersectionGridOperator
 @public IntersectionReturnStyle, OutOfPlaceSingleResult, InPlace
+# The caching dual-tree search, and the one trait a tree may need for it
+@public cached_dual_depth_first_search, children_extent_type
 @public work_items, output_matrix_size, output_eltype, should_store_result, task_local_operator
 
 """
