@@ -5,6 +5,7 @@ import GeometryOps as GO
 import StableTasks
 
 import ..Trees: split_weight
+import ..CachedDualDepthFirstSearch: cached_dual_depth_first_search
 
 #=
 The dual-tree search is parallelized by a *budget frontier*: a serial pass splits the
@@ -192,7 +193,9 @@ end
 
 function _inner_dfs_f(predicate::P, node1::N1, node2::N2) where {P, N1, N2}
     ret = Tuple{Int, Int}[]
-    STI.dual_depth_first_search(predicate, node1, node2) do i1, i2
+    # Each frontier pair is descended by its own task, so each gets its own scratch
+    # stack; nothing is shared across tasks.
+    cached_dual_depth_first_search(predicate, node1, node2) do i1, i2
         push!(ret, (i1, i2))
     end
     return ret
