@@ -245,12 +245,13 @@ end
         (_SPH_PTS[imin, jmin] + _SPH_PTS[imax, jmin] +
          _SPH_PTS[imax, jmax] + _SPH_PTS[imin, jmax]) / 4)
 
-    PP = ConservativeRegridding.Trees.CurvilinearGridPerimeterPoints
+    cellbased = _cellbased_sph()
     raw_radius = maximum(p -> GO.spherical_distance(expected_center, p),
-        PP(_cellbased_sph(), imin, imax, jmin, jmax))
+        ConservativeRegridding.Trees.CurvilinearGridPerimeterPoints(
+            cellbased, imin, imax, jmin, jmax))
     expected_radius = nextfloat(raw_radius * 1.0001)
 
-    for g in (_regular_sph(), _cellbased_sph())
+    for g in (_regular_sph(), cellbased)
         cap = cell_range_extent(g, ir, jr)
         @test isapprox(cap.point, expected_center; atol = 1e-12)
         @test cap.radius == expected_radius
@@ -275,14 +276,13 @@ const _SPH_PTS32 = _float32_point.(_SPH_PTS)
         ConservativeRegridding.Trees.getvertex(regular, i, j)
         for i in axes(_SPH_PTS32, 1), j in axes(_SPH_PTS32, 2)
     ]
-    PP = ConservativeRegridding.Trees.CurvilinearGridPerimeterPoints
-
     for (grid, points) in ((regular, regular_points), (cellbased, _SPH_PTS32))
         expected_center = LinearAlgebra.normalize(
             (points[imin, jmin] + points[imax, jmin] +
              points[imax, jmax] + points[imin, jmax]) / 4)
         raw_radius = maximum(p -> GO.spherical_distance(expected_center, p),
-            PP(grid, imin, imax, jmin, jmax))
+            ConservativeRegridding.Trees.CurvilinearGridPerimeterPoints(
+                grid, imin, imax, jmin, jmax))
         expected_radius = nextfloat(Float32(raw_radius * Float32(1.0001)))
         cap = cell_range_extent(grid, ir, jr)
         @test cap isa GO.UnitSpherical.SphericalCap{Float32}

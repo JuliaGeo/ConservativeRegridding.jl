@@ -6,7 +6,7 @@ import GeoInterface as GI, GeometryOps as GO
 import GeometryOps: SpatialTreeInterface as STI
 import Extents
 
-const CDFS = ConservativeRegridding.CachedDualDepthFirstSearch
+import ConservativeRegridding.CachedDualDepthFirstSearch as CDFS
 using ConservativeRegridding.CachedDualDepthFirstSearch: cached_dual_depth_first_search, children_extent_type
 
 #=

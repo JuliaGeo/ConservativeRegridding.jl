@@ -51,10 +51,8 @@ const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeReg
         # Weighted integral via sum(field) should match manual dot(weights, values)
         weights = ClimaCoreExt.se_node_weights(cubedsphere_space)
         weighted_values = weights .* v
-        # The latitude integral is theoretically zero, so a relative-only tolerance is
-        # ill-posed: different valid reduction orders leave O(1) residuals after
-        # cancelling O(10^16) absolute contributions on an Earth-radius sphere.
-        cancellation_atol = 10 * eps(eltype(weighted_values)) * sum(abs, weighted_values)
+        # Scale the absolute tolerance to the magnitude of the values being cancelled.
+        cancellation_atol = eps(sum(abs, weighted_values))
         @test isapprox(sum(weighted_values), sum(field); rtol=1e-10, atol=cancellation_atol)
     end
 

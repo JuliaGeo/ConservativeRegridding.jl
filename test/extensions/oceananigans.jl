@@ -17,9 +17,13 @@ const OceananigansExt = Base.get_extension(ConservativeRegridding, :Conservative
     padding_polygon = Trees.getcell(grid, 1, 1)
     padded = OceananigansExt.PaddedTreeWrapper(real, 2, padding_polygon, 10)
 
-    # The tree emits only the real IDs 11:12, but its addressable output domain
+    # Traversal emits only the real IDs 11:12, but the addressable output domain
     # also contains padded IDs 13:14, which remain zero in sparse assembly.
-    @test vec(first.(collect(STI.child_indices_extents(padded)))) == [11, 12]
+    leaf_ids = Int[]
+    STI.depth_first_search(_ -> true, padded) do i
+        push!(leaf_ids, i)
+    end
+    @test leaf_ids == [11, 12]
     @test Trees.ncells(padded) == (4, 1)
     @test Trees.cell_index_count(padded) == 14
     @test Trees.getcell(padded, 13) === padding_polygon

@@ -232,7 +232,7 @@ function multithreaded_dual_query!(
     # Fetch and append in frontier order, preserving the serial DFS order.  The caller
     # may retain `result` in task-local scratch across repeated block builds.
     for task in tasks
-        append!(result, fetch(task)::Vector{Tuple{Int, Int}})
+        append!(result, fetch(task))
     end
     return result
 end

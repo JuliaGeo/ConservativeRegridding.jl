@@ -264,8 +264,8 @@ function circle_from_four_corners(corner_points, other_points)
 end
 
 # Build a SphericalCap covering 4 CCW corners (SW, SE, NE, NW) and every point
-# yielded by `perimeter`. Caps wider than a hemisphere are not geodesically
-# convex, so only narrower caps can conservatively stand in for their edges.
+# yielded by `perimeter`. The grid may be concave; only each cell must be
+# geodesically convex. Wider candidate caps fall back to the whole sphere below.
 @inline function _spherical_cap(p1, p2, p3, p4, perimeter)
     meanpoint = (p1 + p2 + p3 + p4) / 4
     T = eltype(meanpoint)
