@@ -124,6 +124,7 @@ end
 
 manifold(g::HEALPixFaceGrid) = g.manifold
 Trees.ncells(g::HEALPixFaceGrid, ::Int) = g.nside
+Trees.cell_index_count(g::HEALPixFaceGrid) = 12 * g.nside^2
 
 # Cell (1-based i, j) → pixel (i-1, j-1); corners come out CCW (see _hp_pixel_polygon).
 Trees.getcell(g::HEALPixFaceGrid, i::Int, j::Int) = _hp_pixel_polygon(i - 1, j - 1, g.face, g.nside)

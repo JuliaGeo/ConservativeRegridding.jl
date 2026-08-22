@@ -167,6 +167,7 @@ function Trees.getcell(node::HealpixRootNode{O}, i::Int) where O
 end
 
 Trees.ncells(node::HealpixRootNode) = 12 * node.nside_max^2
+Trees.cell_index_count(node::HealpixTreeNode) = 12 * node.nside_max^2
 
 # Frontier task sizing: exact O(1) cell counts.
 Trees.split_weight(node::HealpixRootNode) = 12 * node.nside_max^2

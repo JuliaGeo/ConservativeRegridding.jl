@@ -51,6 +51,7 @@ end
     @test face.grid isa RingGridsExt.OctaHEALPixFaceGrid
     @test face.grid.q == 1                      # quadrant 1..4
     @test face.leafranges == (1:4, 1:4)
+    @test Trees.cell_index_count(face) == 4 * 4^2
     @test STI.getchild(tree, 4).grid.q == 4
     @test STI.isleaf(face) == false
     @test STI.nchild(face) == 4                 # 4×4 block → quartered

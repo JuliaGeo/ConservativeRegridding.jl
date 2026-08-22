@@ -32,7 +32,7 @@ using .Trees
 include("utils/MultithreadedDualDepthFirstSearch.jl")
 using .MultithreadedDualDepthFirstSearch
 
-export AbstractCurvilinearGrid, ncells, getcell
+export AbstractCurvilinearGrid, ncells, cell_index_count, getcell
 export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
 export QuadtreeCursor, TopDownQuadtreeCursor
 export should_parallelize, WithParallelizePolicy

@@ -1,6 +1,8 @@
 using ConservativeRegridding.Trees
 using Test
+import ConservativeRegridding
 import GeoInterface as GI, GeometryOps as GO
+import GeometryOpsCore as GOCore
 import GeometryOps: SpatialTreeInterface as STI
 
 # Helper to build a matrix of lon/lat points covering the globe
@@ -40,6 +42,34 @@ function traverse_tree(cursor)
     end
     return true
 end
+
+function collect_leaf_indices!(out, cursor)
+    if STI.isleaf(cursor)
+        for (index, _) in STI.child_indices_extents(cursor)
+            push!(out, index)
+        end
+    else
+        for i in 1:STI.nchild(cursor)
+            collect_leaf_indices!(out, STI.getchild(cursor, i))
+        end
+    end
+    return out
+end
+
+collect_leaf_indices(cursor) = collect_leaf_indices!(Int[], cursor)
+
+function collect_leaf_shapes!(out, cursor)
+    if STI.isleaf(cursor)
+        push!(out, length.(cursor.leafranges))
+    else
+        for i in 1:STI.nchild(cursor)
+            collect_leaf_shapes!(out, STI.getchild(cursor, i))
+        end
+    end
+    return out
+end
+
+collect_leaf_shapes(cursor) = collect_leaf_shapes!(Tuple{Int, Int}[], cursor)
 
 # Create test grids
 function make_cellbased_grid(nx, ny)
@@ -211,6 +241,78 @@ end
 
         @test cursor.grid === grid
         @test cursor.leafranges == (1:16, 1:16)
+        @test cursor.leafsize == (2, 2)
+    end
+
+    @testset "Configurable leaf size" begin
+        grid = make_cellbased_grid(17, 11)
+        cursor = TopDownQuadtreeCursor(grid; leafsize = (4, 4))
+
+        @test all(shape -> shape[1] <= 4 && shape[2] <= 4,
+                  collect_leaf_shapes(cursor))
+        @test sort(collect_leaf_indices(cursor)) == collect(1:17 * 11)
+
+        # Once one dimension fits in the configured leaf, descent splits only
+        # the other dimension instead of creating unnecessary siblings.
+        strip = TopDownQuadtreeCursor(grid, (3:5, 1:11); leafsize = (4, 4))
+        @test STI.nchild(strip) == 2
+        @test all(child -> child.leafranges[1] == 3:5, STI.getchild(strip))
+
+        @test_throws ArgumentError TopDownQuadtreeCursor(grid; leafsize = (0, 4))
+    end
+
+    @testset "Restricted cursors keep global indices" begin
+        grid = make_cellbased_grid(17, 11)
+        cursor = TopDownQuadtreeCursor(grid, (3:10, 4:9); leafsize = (4, 4))
+        expected = sort([i + (j - 1) * 17 for i in 3:10 for j in 4:9])
+
+        @test sort(collect_leaf_indices(cursor)) == expected
+        @test ncells(cursor) == (8, 6)
+        @test split_weight(cursor) == 48
+        @test cell_index_count(cursor) == 17 * 11
+
+        dst_grid = make_cellbased_grid(13, 7)
+        dst = TopDownQuadtreeCursor(dst_grid, (2:6, 3:7))
+        @test ConservativeRegridding.output_matrix_size(nothing, cursor, dst) ==
+              (13 * 7, 17 * 11)
+
+        intersections = ConservativeRegridding.intersection_areas(
+            GO.Spherical(), GOCore.False(), cursor, cursor)
+        @test size(intersections) == (17 * 11, 17 * 11)
+        @test all(!iszero(intersections[i, i]) for i in expected)
+
+        wrapped = Trees.KnownFullSphereExtentWrapper(cursor)
+        @test cell_index_count(wrapped) == cell_index_count(cursor)
+        geometry_wrapper = Trees.GeometryMaintainingTreeWrapper(nothing, cursor)
+        @test cell_index_count(geometry_wrapper) == cell_index_count(cursor)
+
+        offset = Trees.IndexOffsetQuadtreeCursor(grid, 200)
+        @test cell_index_count(offset) == 200 + 17 * 11
+
+        cart2lin = reshape(collect(201:(200 + 17 * 11)), 17, 11)
+        lin2cart = vec(collect(CartesianIndices((17, 11))))
+        reordered = Trees.ReorderedTopDownQuadtreeCursor(
+            grid, Trees.Reorderer2D(cart2lin, lin2cart))
+        @test cell_index_count(reordered) == 200 + 17 * 11
+        @test cell_index_count(STI.getchild(reordered, 1)) == 200 + 17 * 11
+
+        localized = Trees.IndexLocalizerRewrapperTree(reordered, 200)
+        @test cell_index_count(localized) == 200 + 17 * 11
+    end
+
+    @testset "Direct child construction does not allocate sibling tuples" begin
+        grid = make_cellbased_grid(64, 48)
+        cursor = TopDownQuadtreeCursor(grid; leafsize = (4, 4))
+
+        # Warm compilation before measuring the accessor itself.
+        STI.getchild(cursor, 1)
+        allocated = @allocated(STI.getchild(cursor, 1))
+        @test allocated == 0
+
+        @test STI.getchild(cursor, 1).leafranges == (1:32, 1:24)
+        @test STI.getchild(cursor, 2).leafranges == (1:32, 25:48)
+        @test STI.getchild(cursor, 3).leafranges == (33:64, 1:24)
+        @test STI.getchild(cursor, 4).leafranges == (33:64, 25:48)
     end
 
     @testset "STI compliance - CellBasedGrid" begin

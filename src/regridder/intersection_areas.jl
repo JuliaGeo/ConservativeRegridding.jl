@@ -86,12 +86,13 @@ task_local_operator(op) = op
 
 Shape of the sparse matrix [`intersection_areas`](@ref) assembles for `op`.
 
-Defaults to `(prod(ncells(dst_tree)), prod(ncells(src_tree)))` — dst cells as
-rows, src cells as columns. Operators whose counts differ from cell counts
-(e.g. spectral-element node counts) may override this.
+Defaults to `(cell_index_count(dst_tree), cell_index_count(src_tree))` — the
+dense global cell-index domains for dst rows and src columns. Operators whose
+counts differ from cell index counts (e.g. spectral-element node counts) may
+override this.
 """
 output_matrix_size(op, src_tree, dst_tree) =
-    (prod(Trees.ncells(dst_tree)), prod(Trees.ncells(src_tree)))
+    (Trees.cell_index_count(dst_tree), Trees.cell_index_count(src_tree))
 
 """
     output_eltype(op, [src_tree, dst_tree]) -> eltype
@@ -438,8 +439,8 @@ This calls out to five functions, which dispatch on `intersection_operator`:
   regridder.
 - [`output_matrix_size(intersection_operator, src_tree, dst_tree)`](@ref output_matrix_size):
   return the `(nrows, ncols)` shape of the sparse matrix.  For the regular operator, this is
-  `(ncells(dst_tree), ncells(src_tree))`.  For the spectral element regridder, this is more
-  complex.
+  `(cell_index_count(dst_tree), cell_index_count(src_tree))`.  For the spectral element
+  regridder, this is more complex.
 - [`output_eltype(intersection_operator, src_tree, dst_tree)`](@ref output_eltype): return the
   element type of the sparse matrix.  This is usually `Float64`, but may be different, especially
   if you wish to build up e.g. a matrix of intersection _polygons_, rather than just areas.

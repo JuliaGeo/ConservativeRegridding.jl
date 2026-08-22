@@ -30,6 +30,7 @@ answer (`KnownFullSphereExtentWrapper`) wants the `false` default and so says no
 
 getcell(wrapper::AbstractTreeWrapper, args...) = getcell(parent(wrapper), args...)
 ncells(wrapper::AbstractTreeWrapper, args...) = ncells(parent(wrapper), args...)
+cell_index_count(wrapper::AbstractTreeWrapper) = cell_index_count(parent(wrapper))
 cell_range_extent(wrapper::AbstractTreeWrapper, args...) = cell_range_extent(parent(wrapper), args...)
 split_weight(wrapper::AbstractTreeWrapper) = split_weight(parent(wrapper))
 
@@ -137,6 +138,7 @@ STI.node_extent_is_expensive(::Type{<: GeometryMaintainingTreeWrapper{G, T}}) wh
 
 getcell(wrapper::GeometryMaintainingTreeWrapper, args...) = getindex(wrapper.geoms, args...)
 ncells(wrapper::GeometryMaintainingTreeWrapper, args...) = ncells(wrapper.tree, args...)
+cell_index_count(wrapper::GeometryMaintainingTreeWrapper) = cell_index_count(wrapper.tree)
 cell_range_extent(wrapper::GeometryMaintainingTreeWrapper, args...) = cell_range_extent(wrapper.geoms, args...)
 
 getcell(wrapper::GeometryMaintainingTreeWrapper{G, T}) where {G <: AbstractVector, T} = wrapper.geoms

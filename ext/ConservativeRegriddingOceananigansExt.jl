@@ -96,6 +96,12 @@ function Trees.ncells(w::PaddedTreeWrapper, dim::Int)
     end
 end
 
+# Unlike transparent tree wrappers, this one extends the leaf-index domain with
+# padding after an offset range, so its dense global domain ends at the last
+# padded cell rather than at the wrapped cursor's last real cell.
+Trees.cell_index_count(w::PaddedTreeWrapper) =
+    w.index_offset + Int(prod(Trees.ncells(w)))
+
 # Override getcell(w, i) for individual cell access
 function Trees.getcell(w::PaddedTreeWrapper, i::Int)
     local_i = i - w.index_offset

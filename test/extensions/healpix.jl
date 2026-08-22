@@ -36,6 +36,7 @@ const HealpixExt = Base.get_extension(ConservativeRegridding, :ConservativeRegri
         @test child isa HealpixExt.HealpixTreeNode{Healpix.NestedOrder}
         @test child.level == 0
         @test child.pixel == 0
+        @test Trees.cell_index_count(child) == 12 * 2^2
 
         child12 = STI.getchild(tree, 12)
         @test child12.pixel == 11

@@ -57,34 +57,34 @@ function STI.nchild(q::IndexOffsetQuadtreeCursor)
 end
 
 function STI.getchild(q::IndexOffsetQuadtreeCursor, i::Int)
+    n = STI.nchild(q)
+    1 <= i <= n || throw(BoundsError(q, i))
+
     i_is_one = length(q.leafranges[1]) == 1 # length-1 in i
     j_is_one = length(q.leafranges[2]) == 1 # length-1 in j
 
-    vals = if i_is_one && j_is_one
-        error("This should be unreachable - `irange` is length 1 and so is `jrange`")
-    elseif i_is_one
+    if i_is_one
         j_split_point = length(q.leafranges[2]) ÷ 2
-        (
-            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1], q.leafranges[2][1:j_split_point]), q.index_offset),
-            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1], q.leafranges[2][j_split_point+1:end]), q.index_offset)
-        )
+        jrange = i == 1 ? q.leafranges[2][1:j_split_point] :
+                          q.leafranges[2][j_split_point+1:end]
+        return IndexOffsetQuadtreeCursor(
+            q.grid, (q.leafranges[1], jrange), q.index_offset)
     elseif j_is_one
         i_split_point = length(q.leafranges[1]) ÷ 2
-        (
-            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2]), q.index_offset),
-            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2]), q.index_offset)
-        )
+        irange = i == 1 ? q.leafranges[1][1:i_split_point] :
+                          q.leafranges[1][i_split_point+1:end]
+        return IndexOffsetQuadtreeCursor(
+            q.grid, (irange, q.leafranges[2]), q.index_offset)
     else
         i_split_point = length(q.leafranges[1]) ÷ 2
         j_split_point = length(q.leafranges[2]) ÷ 2
-        (
-            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2][1:j_split_point]), q.index_offset),
-            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2][j_split_point+1:end]), q.index_offset),
-            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2][1:j_split_point]), q.index_offset),
-            IndexOffsetQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2][j_split_point+1:end]), q.index_offset)
-        )
+        irange = i <= 2 ? q.leafranges[1][1:i_split_point] :
+                          q.leafranges[1][i_split_point+1:end]
+        jrange = isodd(i) ? q.leafranges[2][1:j_split_point] :
+                            q.leafranges[2][j_split_point+1:end]
+        return IndexOffsetQuadtreeCursor(
+            q.grid, (irange, jrange), q.index_offset)
     end
-    return vals[i]
 end
 
 function STI.getchild(q::IndexOffsetQuadtreeCursor)
@@ -120,6 +120,9 @@ end
 function Trees.ncells(q::IndexOffsetQuadtreeCursor)
     return length.(q.leafranges)
 end
+
+Trees.cell_index_count(q::IndexOffsetQuadtreeCursor) =
+    q.index_offset + Trees.cell_index_count(q.grid)
 
 function istoplevel(q::IndexOffsetQuadtreeCursor)
     return length(q.leafranges[1]) == Trees.ncells(q.grid, 1) && length(q.leafranges[2]) == Trees.ncells(q.grid, 2)
@@ -212,34 +215,34 @@ function STI.nchild(q::ReorderedTopDownQuadtreeCursor)
 end
 
 function STI.getchild(q::ReorderedTopDownQuadtreeCursor, i::Int)
+    n = STI.nchild(q)
+    1 <= i <= n || throw(BoundsError(q, i))
+
     i_is_one = length(q.leafranges[1]) == 1 # length-1 in i
     j_is_one = length(q.leafranges[2]) == 1 # length-1 in j
 
-    vals = if i_is_one && j_is_one
-        error("This should be unreachable - `irange` is length 1 and so is `jrange`")
-    elseif i_is_one
+    if i_is_one
         j_split_point = length(q.leafranges[2]) ÷ 2
-        (
-            ReorderedTopDownQuadtreeCursor(q.grid, (q.leafranges[1], q.leafranges[2][1:j_split_point]), q.ordering),
-            ReorderedTopDownQuadtreeCursor(q.grid, (q.leafranges[1], q.leafranges[2][j_split_point+1:end]), q.ordering)
-        )
+        jrange = i == 1 ? q.leafranges[2][1:j_split_point] :
+                          q.leafranges[2][j_split_point+1:end]
+        return ReorderedTopDownQuadtreeCursor(
+            q.grid, (q.leafranges[1], jrange), q.ordering)
     elseif j_is_one
         i_split_point = length(q.leafranges[1]) ÷ 2
-        (
-            ReorderedTopDownQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2]), q.ordering),
-            ReorderedTopDownQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2]), q.ordering)
-        )
+        irange = i == 1 ? q.leafranges[1][1:i_split_point] :
+                          q.leafranges[1][i_split_point+1:end]
+        return ReorderedTopDownQuadtreeCursor(
+            q.grid, (irange, q.leafranges[2]), q.ordering)
     else
         i_split_point = length(q.leafranges[1]) ÷ 2
         j_split_point = length(q.leafranges[2]) ÷ 2
-        (
-            ReorderedTopDownQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2][1:j_split_point]), q.ordering),
-            ReorderedTopDownQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2][j_split_point+1:end]), q.ordering),
-            ReorderedTopDownQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2][1:j_split_point]), q.ordering),
-            ReorderedTopDownQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2][j_split_point+1:end]), q.ordering)
-        )
+        irange = i <= 2 ? q.leafranges[1][1:i_split_point] :
+                          q.leafranges[1][i_split_point+1:end]
+        jrange = isodd(i) ? q.leafranges[2][1:j_split_point] :
+                            q.leafranges[2][j_split_point+1:end]
+        return ReorderedTopDownQuadtreeCursor(
+            q.grid, (irange, jrange), q.ordering)
     end
-    return vals[i]
 end
 
 function STI.getchild(q::ReorderedTopDownQuadtreeCursor)
@@ -271,7 +274,12 @@ function Trees.ncells(q::ReorderedTopDownQuadtreeCursor)
     return length.(q.leafranges)
 end
 
+# `cart2lin` may map a local grid (for example one cubed-sphere face) into a
+# larger global data layout.  Its maximum is the end of the dense one-based
+# domain needed to store every emitted leaf index.
+Trees.cell_index_count(q::ReorderedTopDownQuadtreeCursor) =
+    maximum(q.ordering.cart2lin)
+
 function istoplevel(q::ReorderedTopDownQuadtreeCursor)
     return length(q.leafranges[1]) == Trees.ncells(q.grid, 1) && length(q.leafranges[2]) == Trees.ncells(q.grid, 2)
 end
-

@@ -201,9 +201,23 @@ The idea here is to divide the grid into four quadrants instead of assembling it
 struct TopDownQuadtreeCursor{GridType <: AbstractCurvilinearGrid} <: AbstractQuadtreeCursor
     grid::GridType
     leafranges::NTuple{2, UnitRange{Int}}
+    leafsize::NTuple{2, Int}
+    function TopDownQuadtreeCursor(
+            grid::GridType,
+            leafranges::NTuple{2, UnitRange{Int}},
+            leafsize::NTuple{2, Int},
+        ) where {GridType <: AbstractCurvilinearGrid}
+        (leafsize[1] > 0 && leafsize[2] > 0) ||
+            throw(ArgumentError("leafsize must contain positive integers; got $leafsize"))
+        return new{GridType}(grid, leafranges, leafsize)
+    end
 end
-function TopDownQuadtreeCursor(grid::AbstractCurvilinearGrid)
-    return TopDownQuadtreeCursor(grid, (1:ncells(grid, 1), 1:ncells(grid, 2)))
+function TopDownQuadtreeCursor(
+        grid::AbstractCurvilinearGrid,
+        leafranges::NTuple{2, UnitRange{Int}} = (1:ncells(grid, 1), 1:ncells(grid, 2));
+        leafsize::NTuple{2, Int} = (2, 2),
+    )
+    return TopDownQuadtreeCursor(grid, leafranges, leafsize)
 end
 
 getgrid(q::TopDownQuadtreeCursor) = q.grid
@@ -218,7 +232,8 @@ end
 STI.isspatialtree(::Type{<: TopDownQuadtreeCursor}) = true
 
 function STI.isleaf(q::TopDownQuadtreeCursor)
-    return all(length.(q.leafranges) .<= 2)
+    return length(q.leafranges[1]) <= q.leafsize[1] &&
+           length(q.leafranges[2]) <= q.leafsize[2]
 end
 
 function STI.child_indices_extents(q::TopDownQuadtreeCursor)
@@ -228,14 +243,14 @@ function STI.child_indices_extents(q::TopDownQuadtreeCursor)
 end
 
 function STI.nchild(q::TopDownQuadtreeCursor)
-    i_is_one = length(q.leafranges[1]) == 1 # length-1 in i
-    j_is_one = length(q.leafranges[2]) == 1 # length-1 in j
+    i_is_leaf = length(q.leafranges[1]) <= q.leafsize[1]
+    j_is_leaf = length(q.leafranges[2]) <= q.leafsize[2]
 
-    if i_is_one && j_is_one
-        error("This should be unreachable - `irange` is length 1 and so is `jrange`")
-    elseif i_is_one
+    if i_is_leaf && j_is_leaf
+        error("This should be unreachable - the cursor is already a leaf")
+    elseif i_is_leaf
         return 2
-    elseif j_is_one
+    elseif j_is_leaf
         return 2
     else
         return 4
@@ -243,34 +258,31 @@ function STI.nchild(q::TopDownQuadtreeCursor)
 end
 
 function STI.getchild(q::TopDownQuadtreeCursor, i::Int)
-    i_is_one = length(q.leafranges[1]) == 1 # length-1 in i
-    j_is_one = length(q.leafranges[2]) == 1 # length-1 in j
+    n = STI.nchild(q)
+    1 <= i <= n || throw(BoundsError(q, i))
 
-    vals = if i_is_one && j_is_one
-        error("This should be unreachable - `irange` is length 1 and so is `jrange`")
-    elseif i_is_one
+    i_is_leaf = length(q.leafranges[1]) <= q.leafsize[1]
+    j_is_leaf = length(q.leafranges[2]) <= q.leafsize[2]
+
+    if i_is_leaf
         j_split_point = length(q.leafranges[2]) ÷ 2
-        (
-            TopDownQuadtreeCursor(q.grid, (q.leafranges[1], q.leafranges[2][1:j_split_point])),
-            TopDownQuadtreeCursor(q.grid, (q.leafranges[1], q.leafranges[2][j_split_point+1:end]))
-        )
-    elseif j_is_one
+        jrange = i == 1 ? q.leafranges[2][1:j_split_point] :
+                          q.leafranges[2][j_split_point+1:end]
+        return TopDownQuadtreeCursor(q.grid, (q.leafranges[1], jrange), q.leafsize)
+    elseif j_is_leaf
         i_split_point = length(q.leafranges[1]) ÷ 2
-        (
-            TopDownQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2])),
-            TopDownQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2]))
-        )
+        irange = i == 1 ? q.leafranges[1][1:i_split_point] :
+                          q.leafranges[1][i_split_point+1:end]
+        return TopDownQuadtreeCursor(q.grid, (irange, q.leafranges[2]), q.leafsize)
     else
         i_split_point = length(q.leafranges[1]) ÷ 2
         j_split_point = length(q.leafranges[2]) ÷ 2
-        (
-            TopDownQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2][1:j_split_point])),
-            TopDownQuadtreeCursor(q.grid, (q.leafranges[1][1:i_split_point], q.leafranges[2][j_split_point+1:end])),
-            TopDownQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2][1:j_split_point])),
-            TopDownQuadtreeCursor(q.grid, (q.leafranges[1][i_split_point+1:end], q.leafranges[2][j_split_point+1:end]))
-        )
+        irange = i <= 2 ? q.leafranges[1][1:i_split_point] :
+                          q.leafranges[1][i_split_point+1:end]
+        jrange = isodd(i) ? q.leafranges[2][1:j_split_point] :
+                            q.leafranges[2][j_split_point+1:end]
+        return TopDownQuadtreeCursor(q.grid, (irange, jrange), q.leafsize)
     end
-    return vals[i]
 end
 
 function STI.getchild(q::TopDownQuadtreeCursor)
@@ -299,6 +311,8 @@ end
 function ncells(q::TopDownQuadtreeCursor)
     return length.(q.leafranges)
 end
+
+cell_index_count(q::TopDownQuadtreeCursor) = cell_index_count(q.grid)
 
 function istoplevel(q::TopDownQuadtreeCursor)
     return length(q.leafranges[1]) == ncells(q.grid, 1) && length(q.leafranges[2]) == ncells(q.grid, 2)

@@ -51,6 +51,7 @@ end
     @test face.grid isa RingGridsExt.HEALPixFaceGrid
     @test face.grid.face == 0
     @test face.leafranges == (1:4, 1:4)
+    @test Trees.cell_index_count(face) == 12 * 4^2
     @test STI.getchild(tree, 12).grid.face == 11
     @test STI.isleaf(face) == false
     @test STI.nchild(face) == 4                # 4×4 block → quartered

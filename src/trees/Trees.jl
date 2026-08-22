@@ -15,7 +15,7 @@ include("specialized_quadtree_cursors.jl")
 
 # private IndexOffsetQuadtreeCursor, CubedSphereToplevelTree
 
-export AbstractCurvilinearGrid, ncells, getcell
+export AbstractCurvilinearGrid, ncells, cell_index_count, getcell
 export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
 export QuadtreeCursor, TopDownQuadtreeCursor
 export should_parallelize, WithParallelizePolicy
