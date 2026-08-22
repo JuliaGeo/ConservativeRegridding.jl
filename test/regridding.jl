@@ -491,9 +491,9 @@ GO.SpatialTreeInterface.getchild(w::XYZExtentTree) =
 GO.SpatialTreeInterface.getchild(w::XYZExtentTree, i::Int) =
     XYZExtentTree(GO.SpatialTreeInterface.getchild(w.tree, i))
 GO.SpatialTreeInterface.node_extent(w::XYZExtentTree) =
-    GO.UnitSpherical.cap_xyz_extent(GO.SpatialTreeInterface.node_extent(w.tree))
+    Extents.extent(GO.SpatialTreeInterface.node_extent(w.tree))
 GO.SpatialTreeInterface.child_indices_extents(w::XYZExtentTree) =
-    ((i, GO.UnitSpherical.cap_xyz_extent(e))
+    ((i, Extents.extent(e))
      for (i, e) in GO.SpatialTreeInterface.child_indices_extents(w.tree))
 ConservativeRegridding.Trees.getcell(w::XYZExtentTree, i) =
     ConservativeRegridding.Trees.getcell(w.tree, i)
