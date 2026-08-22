@@ -12,10 +12,40 @@ using SparseArrays
 
     @test op.cache === nothing
     @test task_op.cache isa GO.SutherlandHodgmanCache
-    @test task_op.cache !== ConservativeRegridding.task_local_operator(op).cache
+    @test task_op.cache === ConservativeRegridding.task_local_operator(op).cache
+    other_task_cache = fetch(Threads.@spawn begin
+        ConservativeRegridding.task_local_operator(op).cache
+    end)
+    @test task_op.cache !== other_task_cache
 
     planar_op = ConservativeRegridding.DefaultIntersectionOperator(GO.Planar())
     @test ConservativeRegridding.task_local_operator(planar_op) === planar_op
+end
+
+@testset "Task-local assembly scratch" begin
+    first = ConservativeRegridding._acquire_assembly_scratch(Float64)
+    buffers = (first.candidate_pairs, first.rows, first.cols, first.vals)
+    append!(first.candidate_pairs, [(1, 2)])
+    push!(first.rows, 1); push!(first.cols, 2); push!(first.vals, 3.0)
+
+    # A reentrant acquisition on one task gets private storage.
+    nested = ConservativeRegridding._acquire_assembly_scratch(Float64)
+    @test nested !== first
+    ConservativeRegridding._release_assembly_scratch!(nested)
+    ConservativeRegridding._release_assembly_scratch!(first)
+
+    reused = ConservativeRegridding._acquire_assembly_scratch(Float64)
+    @test buffers === (reused.candidate_pairs, reused.rows, reused.cols, reused.vals)
+    @test all(isempty, buffers)
+    ConservativeRegridding._release_assembly_scratch!(reused)
+
+    other_task = fetch(Threads.@spawn begin
+        scratch = ConservativeRegridding._acquire_assembly_scratch(Float64)
+        result = (scratch.candidate_pairs, scratch.rows, scratch.cols, scratch.vals)
+        ConservativeRegridding._release_assembly_scratch!(scratch)
+        result
+    end)
+    @test all(a !== b for (a, b) in zip(buffers, other_task))
 end
 
 @testset "Custom intersection_operator" begin

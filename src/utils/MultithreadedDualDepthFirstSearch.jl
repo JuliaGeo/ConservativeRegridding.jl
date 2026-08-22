@@ -207,10 +207,10 @@ function _spawn_pair(inner::IF, predicate::P, node1::N1, node2::N2) where {IF, P
 end
 
 """
-    multithreaded_dual_query(predicate, node1, node2; chunks_per_thread = 8) -> Vector{Tuple{Int, Int}}
+    multithreaded_dual_query!(result, predicate, node1, node2; chunks_per_thread = 8)
 
 Find every leaf-index pair `(i1, i2)` whose extents satisfy `predicate`, in
-parallel, returning them in the same order as a serial
+parallel, writing them to an emptied `result` in the same order as a serial
 `STI.dual_depth_first_search` over the same trees.
 
 `chunks_per_thread` sets the task budget: the traversal is split into at least
@@ -218,23 +218,36 @@ parallel, returning them in the same order as a serial
 each.  Raising it costs more spawns but tolerates more skew between pairs; it cannot
 change the result.  Work estimates come from `Trees.split_weight`.
 """
-function multithreaded_dual_query(
+function multithreaded_dual_query!(
+    result::Vector{Tuple{Int, Int}},
     predicate::P, node1::N1, node2::N2;
     chunks_per_thread::Int = 8,
 ) where {P, N1, N2}
+    empty!(result)
     nchunks = max(1, Threads.nthreads() * chunks_per_thread)
     pairs = frontier(predicate, node1, node2; nchunks)
     tasks = map(pairs) do pair
         _spawn_pair(_inner_dfs_f, predicate, pair[1], pair[3])
     end
-    results = Vector{Tuple{Int, Int}}[fetch(t)::Vector{Tuple{Int, Int}} for t in tasks]
-    # `init` would cost `vcat`'s pre-sized specialisation, making this quadratic in the task count.
-    return isempty(results) ? Tuple{Int, Int}[] : reduce(vcat, results)
+    # Fetch and append in frontier order, preserving the serial DFS order.  The caller
+    # may retain `result` in task-local scratch across repeated block builds.
+    for task in tasks
+        append!(result, fetch(task)::Vector{Tuple{Int, Int}})
+    end
+    return result
+end
+
+function multithreaded_dual_query(
+    predicate::P, node1::N1, node2::N2;
+    chunks_per_thread::Int = 8,
+) where {P, N1, N2}
+    return multithreaded_dual_query!(
+        Tuple{Int, Int}[], predicate, node1, node2; chunks_per_thread)
 end
 
 # Back-compat: the two parallelize closures are no longer consulted.
 multithreaded_dual_query(predicate, parallelize1, parallelize2, node1, node2; kwargs...) =
     multithreaded_dual_query(predicate, node1, node2; kwargs...)
 
-export multithreaded_dual_query
+export multithreaded_dual_query, multithreaded_dual_query!
 end

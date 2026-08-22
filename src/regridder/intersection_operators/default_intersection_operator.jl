@@ -28,7 +28,8 @@ It uses all the defaults of the intersection-operator interface
 ([`OutOfPlaceSingleResult`](@ref) return style, `Float64` element type).
 
 On `Spherical`, [`task_local_operator`](@ref) hands each assembly task a copy carrying
-a private clipping-buffer cache; caches must not be shared across tasks.
+a private clipping-buffer cache, reused by repeated builds on that task. Caches must not
+be shared across tasks.
 """
 struct DefaultIntersectionOperator{M, C}
     manifold::M
@@ -47,20 +48,35 @@ end
 
 function (op::DefaultIntersectionOperator{M})(p1, p2) where {M <: GeometryOps.Spherical}
     alg = GeometryOps.ConvexConvexSutherlandHodgman(op.manifold)
-    intersection_polys = #=try; =#
-        _sutherland_hodgman_intersection(alg, p1, p2, op.cache)
+    result = #=try; =#
+        _sutherland_hodgman_intersection_area(alg, p1, p2, op.cache)
     # catch
     #     throw(DefaultIntersectionFailureError(p1, p2, e))
     # end
-    return GeometryOps.area(op.manifold, intersection_polys)
+    return result
 end
 
-_sutherland_hodgman_intersection(alg, p1, p2, ::Nothing) =
-    GeometryOps.intersection(alg, p1, p2; target = GeoInterface.PolygonTrait())
-_sutherland_hodgman_intersection(alg, p1, p2, cache) =
-    GeometryOps.intersection(alg, p1, p2; target = GeoInterface.PolygonTrait(), cache)
+_sutherland_hodgman_intersection_area(alg, p1, p2, ::Nothing) =
+    GeometryOps.intersection_area(alg, p1, p2)
+_sutherland_hodgman_intersection_area(alg, p1, p2, cache) =
+    GeometryOps.intersection_area(alg, p1, p2; cache)
+
+# `task_local_operator` may be reached through a wrapping custom operator, so the clip
+# cache is kept directly on the current task rather than in assembly-specific plumbing.
+# Scheduler migration is safe; distinct tasks never share a mutable cache.
+struct _SphericalClipCacheKey{M} end
+
+function _task_local_clip_cache(manifold::M) where {M}
+    tls = task_local_storage()
+    cache = get(tls, _SphericalClipCacheKey{M}, nothing)
+    if cache === nothing
+        cache = GeometryOps.SutherlandHodgmanCache(manifold)
+        tls[_SphericalClipCacheKey{M}] = cache
+    end
+    return cache
+end
 
 function task_local_operator(op::DefaultIntersectionOperator{<: GeometryOps.Spherical})
-    cache = GeometryOps.SutherlandHodgmanCache(op.manifold)
+    cache = _task_local_clip_cache(op.manifold)
     return DefaultIntersectionOperator(op.manifold, cache)
 end

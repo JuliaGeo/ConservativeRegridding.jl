@@ -76,6 +76,8 @@ work_items(op, candidate_pairs) = candidate_pairs
 Return the operator instance which the current assembly task should use. 
 
 This is mainly to enable intersection operators to materialize task-local caches.
+Repeated calls on one task may return operators backed by the same reusable cache;
+different tasks must never share mutable cache storage.
 
 Defaults to returning `op` unchanged.  For any threadsafe operator, this is a no-op.
 """
@@ -123,14 +125,15 @@ should_store_result(result) = error("""
     You must implement `should_store_result(op, result) -> Bool` for your operator.
     """)
 
-function get_all_candidate_pairs(threaded::True, predicate_f::F, src_tree::T1, dst_tree::T2) where {F, T1, T2}
+function get_all_candidate_pairs!(candidate_idxs::Vector{Tuple{Int, Int}}, threaded::True,
+        predicate_f::F, src_tree::T1, dst_tree::T2) where {F, T1, T2}
     # from utils/MultithreadedDualDepthFirstSearch.jl
-    candidate_idxs = multithreaded_dual_query(predicate_f, src_tree, dst_tree)
-    return candidate_idxs
+    return multithreaded_dual_query!(candidate_idxs, predicate_f, src_tree, dst_tree)
 end
 
-function get_all_candidate_pairs(threaded::False, predicate_f::F, src_tree::T1, dst_tree::T2) where {F, T1, T2}
-    candidate_idxs = Tuple{Int, Int}[]
+function get_all_candidate_pairs!(candidate_idxs::Vector{Tuple{Int, Int}}, threaded::False,
+        predicate_f::F, src_tree::T1, dst_tree::T2) where {F, T1, T2}
+    empty!(candidate_idxs)
     # from utils/CachedDualDepthFirstSearch.jl - the same pairs in the same order as
     # `STI.dual_depth_first_search`, with the child extents of expensive-extent trees
     # derived once rather than once per opposing child.
@@ -138,6 +141,54 @@ function get_all_candidate_pairs(threaded::False, predicate_f::F, src_tree::T1, 
         push!(candidate_idxs, (i1, i2))
     end
     return candidate_idxs
+end
+
+get_all_candidate_pairs(threaded, predicate_f, src_tree, dst_tree) =
+    get_all_candidate_pairs!(Tuple{Int, Int}[], threaded, predicate_f, src_tree, dst_tree)
+
+# Repeated serial builds in an outer worker keep these buffers on that task.  A task
+# may migrate between scheduler threads, so thread-indexed storage would be unsafe.
+mutable struct _AssemblyScratch{T}
+    candidate_pairs::Vector{Tuple{Int, Int}}
+    rows::Vector{Int}
+    cols::Vector{Int}
+    vals::Vector{T}
+    in_use::Bool
+end
+
+_AssemblyScratch(::Type{T}) where {T} =
+    _AssemblyScratch(Tuple{Int, Int}[], Int[], Int[], T[], false)
+
+# The key is a module-private type object, unique for every COO value type without
+# allocating a composite key on each lookup.
+struct _AssemblyScratchKey{T} end
+
+function _acquire_assembly_scratch(::Type{T}) where {T}
+    tls = task_local_storage()
+    scratch = get(tls, _AssemblyScratchKey{T}, nothing)
+    if scratch isa _AssemblyScratch{T} && scratch.in_use
+        # Reentrant use on one task gets an unregistered fallback; the outer build
+        # remains the buffer retained for the next top-level block.
+        scratch = _AssemblyScratch(T)
+    elseif !(scratch isa _AssemblyScratch{T})
+        scratch = _AssemblyScratch(T)
+        tls[_AssemblyScratchKey{T}] = scratch
+    end
+    scratch.in_use = true
+    empty!(scratch.candidate_pairs)
+    empty!(scratch.rows)
+    empty!(scratch.cols)
+    empty!(scratch.vals)
+    return scratch
+end
+
+function _release_assembly_scratch!(scratch::_AssemblyScratch)
+    empty!(scratch.candidate_pairs)
+    empty!(scratch.rows)
+    empty!(scratch.cols)
+    empty!(scratch.vals)
+    scratch.in_use = false
+    return nothing
 end
 
 # Shared parallel COO assembly. `style` (the resolved `IntersectionReturnStyle`)
@@ -174,6 +225,11 @@ function _assemble_chunk_kernel(style::S, op::O, items::I, src_tree::T1, dst_tre
     rows = Int[]
     cols = Int[]
     vals = ValType[]
+    return _assemble_chunk_kernel!(style, op, items, src_tree, dst_tree, rows, cols, vals)
+end
+
+function _assemble_chunk_kernel!(style::S, op::O, items::I, src_tree::T1, dst_tree::T2,
+        rows::Vector{Int}, cols::Vector{Int}, vals::Vector{ValType}) where {S, O, I, T1, T2, ValType}
     for item in items
         _run_and_store!(style, op, rows, cols, vals, item, src_tree, dst_tree)
     end
@@ -416,6 +472,25 @@ function _assemble_sparse(style::S, op::O, items::I, src_tree::T1, dst_tree::T2,
     return SparseArrays.sparse(rows, cols, vals, nrows, ncols)
 end
 
+function _assemble_sparse(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::False,
+        nrows::Int, ncols::Int, scratch::_AssemblyScratch{ValType}; kwargs...
+    ) where {S, O, I, T1, T2, ValType}
+    chunk_op = task_local_operator(op)
+    rows, cols, vals = _assemble_chunk_kernel!(
+        style, chunk_op, items, src_tree, dst_tree,
+        scratch.rows, scratch.cols, scratch.vals)
+    # `sparse` copies its COO inputs.  The caller clears these task-owned vectors only
+    # after this returns, leaving the matrix's CSC storage independent of the scratch.
+    return SparseArrays.sparse(rows, cols, vals, nrows, ncols)
+end
+
+function _assemble_sparse(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, threaded::True,
+        nrows::Int, ncols::Int, scratch::_AssemblyScratch; kwargs...
+    ) where {S, O, I, T1, T2}
+    return _assemble_sparse(
+        style, op, items, src_tree, dst_tree, threaded, nrows, ncols; kwargs...)
+end
+
 """
     intersection_areas(manifold, threaded, dst_tree, src_tree;
                        intersection_operator = DefaultIntersectionOperator(manifold),
@@ -460,21 +535,27 @@ function intersection_areas(
 
     # Resolve the return-style trait once, here, and thread `style` through everything.
     style = IntersectionReturnStyle(intersection_operator)
+    ValType = output_eltype(intersection_operator, src_tree, dst_tree)
+    scratch = _acquire_assembly_scratch(ValType)
 
-    # Every spatial tree participates through the public extent protocol.  In
-    # particular, spherical searches may pair cap and Cartesian XYZ extents.
-    predicate_f = Extents.intersects
+    try
+        # Every spatial tree participates through the public extent protocol.  In
+        # particular, spherical searches may pair cap and Cartesian XYZ extents.
+        predicate_f = Extents.intersects
 
-    # First, run the dual depth first search to get all candidate pairs of
-    # cells that may intersect.
-    candidate_pairs = get_all_candidate_pairs(threaded, predicate_f, src_tree, dst_tree)
+        # First, run the dual depth first search to get all candidate pairs of
+        # cells that may intersect.
+        candidate_pairs = get_all_candidate_pairs!(
+            scratch.candidate_pairs, threaded, predicate_f, src_tree, dst_tree)
 
-    # Map candidate pairs → work units (default: one pair per unit), assemble the
-    # COO triplets (in parallel or serially), and build the sparse matrix.
-    items = work_items(intersection_operator, candidate_pairs)
-    nrows, ncols = output_matrix_size(intersection_operator, src_tree, dst_tree)
-    return _assemble_sparse(
-        style, intersection_operator, items, src_tree, dst_tree, threaded, nrows, ncols;
-        npartitions, progress,
-    )
+        # Map candidate pairs → work units (default: one pair per unit), assemble the
+        # COO triplets (in parallel or serially), and build the sparse matrix.
+        items = work_items(intersection_operator, candidate_pairs)
+        nrows, ncols = output_matrix_size(intersection_operator, src_tree, dst_tree)
+        return _assemble_sparse(
+            style, intersection_operator, items, src_tree, dst_tree, threaded, nrows, ncols,
+            scratch; npartitions, progress)
+    finally
+        _release_assembly_scratch!(scratch)
+    end
 end
