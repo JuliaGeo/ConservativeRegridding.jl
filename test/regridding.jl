@@ -22,30 +22,15 @@ using SparseArrays
     @test ConservativeRegridding.task_local_operator(planar_op) === planar_op
 end
 
-@testset "Task-local assembly scratch" begin
-    first = ConservativeRegridding._acquire_assembly_scratch(Float64)
-    buffers = (first.candidate_pairs, first.rows, first.cols, first.vals)
-    append!(first.candidate_pairs, [(1, 2)])
-    push!(first.rows, 1); push!(first.cols, 2); push!(first.vals, 3.0)
+@testset "SparseMatrixAssemblyCache" begin
+    cache = ConservativeRegridding.SparseMatrixAssemblyCache()
+    buffers = (cache.candidate_pairs, cache.rows, cache.cols, cache.vals)
+    append!(cache.candidate_pairs, [(1, 2)])
+    push!(cache.rows, 1); push!(cache.cols, 2); push!(cache.vals, 3.0)
 
-    # A reentrant acquisition on one task gets private storage.
-    nested = ConservativeRegridding._acquire_assembly_scratch(Float64)
-    @test nested !== first
-    ConservativeRegridding._release_assembly_scratch!(nested)
-    ConservativeRegridding._release_assembly_scratch!(first)
-
-    reused = ConservativeRegridding._acquire_assembly_scratch(Float64)
-    @test buffers === (reused.candidate_pairs, reused.rows, reused.cols, reused.vals)
+    @test empty!(cache) === cache
     @test all(isempty, buffers)
-    ConservativeRegridding._release_assembly_scratch!(reused)
-
-    other_task = fetch(Threads.@spawn begin
-        scratch = ConservativeRegridding._acquire_assembly_scratch(Float64)
-        result = (scratch.candidate_pairs, scratch.rows, scratch.cols, scratch.vals)
-        ConservativeRegridding._release_assembly_scratch!(scratch)
-        result
-    end)
-    @test all(a !== b for (a, b) in zip(buffers, other_task))
+    @test buffers === (cache.candidate_pairs, cache.rows, cache.cols, cache.vals)
 end
 
 @testset "Custom intersection_operator" begin
@@ -56,6 +41,21 @@ end
 
     dst_tree = GO.SpatialTreeInterface.FlatNoTree(dst_polys)
     src_tree = GO.SpatialTreeInterface.FlatNoTree(src_polys)
+
+    @testset "explicit assembly cache" begin
+        cache = ConservativeRegridding.SparseMatrixAssemblyCache()
+        buffers = (cache.candidate_pairs, cache.rows, cache.cols, cache.vals)
+        r = ConservativeRegridding.Regridder(
+            GO.Planar(), dst_tree, src_tree; cache, normalize = false, threaded = false)
+        @test size(r) == (2, 3)
+        @test all(isempty, buffers)
+        @test buffers === (cache.candidate_pairs, cache.rows, cache.cols, cache.vals)
+
+        bad_cache = ConservativeRegridding.SparseMatrixAssemblyCache(Float32)
+        @test_throws ArgumentError ConservativeRegridding.Regridder(
+            GO.Planar(), dst_tree, src_tree; cache = bad_cache, normalize = false,
+            threaded = false)
+    end
 
     @testset "operator is called + writes positive areas" begin
         calls = Ref(0)

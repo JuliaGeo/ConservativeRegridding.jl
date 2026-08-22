@@ -146,49 +146,37 @@ end
 get_all_candidate_pairs(threaded, predicate_f, src_tree, dst_tree) =
     get_all_candidate_pairs!(Tuple{Int, Int}[], threaded, predicate_f, src_tree, dst_tree)
 
-# Repeated serial builds in an outer worker keep these buffers on that task.  A task
-# may migrate between scheduler threads, so thread-indexed storage would be unsafe.
-mutable struct _AssemblyScratch{T}
+"""
+    SparseMatrixAssemblyCache([T = Float64])
+
+Reusable buffers for sparse intersection-matrix assembly. Pass the cache to
+[`Regridder`](@ref) or [`intersection_areas`](@ref) with `cache=...`; do not use
+one cache concurrently from multiple calls.
+"""
+mutable struct SparseMatrixAssemblyCache{T}
     candidate_pairs::Vector{Tuple{Int, Int}}
     rows::Vector{Int}
     cols::Vector{Int}
     vals::Vector{T}
-    in_use::Bool
 end
 
-_AssemblyScratch(::Type{T}) where {T} =
-    _AssemblyScratch(Tuple{Int, Int}[], Int[], Int[], T[], false)
+SparseMatrixAssemblyCache(::Type{T}) where {T} =
+    SparseMatrixAssemblyCache(Tuple{Int, Int}[], Int[], Int[], T[])
+SparseMatrixAssemblyCache() = SparseMatrixAssemblyCache(Float64)
 
-# The key is a module-private type object, unique for every COO value type without
-# allocating a composite key on each lookup.
-struct _AssemblyScratchKey{T} end
-
-function _acquire_assembly_scratch(::Type{T}) where {T}
-    tls = task_local_storage()
-    scratch = get(tls, _AssemblyScratchKey{T}, nothing)
-    if scratch isa _AssemblyScratch{T} && scratch.in_use
-        # Reentrant use on one task gets an unregistered fallback; the outer build
-        # remains the buffer retained for the next top-level block.
-        scratch = _AssemblyScratch(T)
-    elseif !(scratch isa _AssemblyScratch{T})
-        scratch = _AssemblyScratch(T)
-        tls[_AssemblyScratchKey{T}] = scratch
-    end
-    scratch.in_use = true
-    empty!(scratch.candidate_pairs)
-    empty!(scratch.rows)
-    empty!(scratch.cols)
-    empty!(scratch.vals)
-    return scratch
+function Base.empty!(cache::SparseMatrixAssemblyCache)
+    empty!(cache.candidate_pairs)
+    empty!(cache.rows)
+    empty!(cache.cols)
+    empty!(cache.vals)
+    return cache
 end
 
-function _release_assembly_scratch!(scratch::_AssemblyScratch)
-    empty!(scratch.candidate_pairs)
-    empty!(scratch.rows)
-    empty!(scratch.cols)
-    empty!(scratch.vals)
-    scratch.in_use = false
-    return nothing
+_assembly_cache(::Type{T}, ::Nothing) where {T} = SparseMatrixAssemblyCache(T)
+_assembly_cache(::Type{T}, cache::SparseMatrixAssemblyCache{T}) where {T} = empty!(cache)
+function _assembly_cache(::Type{T}, cache::SparseMatrixAssemblyCache) where {T}
+    throw(ArgumentError(
+        "cache stores $(eltype(cache.vals)) values, but the intersection operator outputs $T"))
 end
 
 # Shared parallel COO assembly. `style` (the resolved `IntersectionReturnStyle`)
@@ -473,7 +461,7 @@ function _assemble_sparse(style::S, op::O, items::I, src_tree::T1, dst_tree::T2,
 end
 
 function _assemble_sparse(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::False,
-        nrows::Int, ncols::Int, scratch::_AssemblyScratch{ValType}; kwargs...
+        nrows::Int, ncols::Int, scratch::SparseMatrixAssemblyCache{ValType}; kwargs...
     ) where {S, O, I, T1, T2, ValType}
     chunk_op = task_local_operator(op)
     rows, cols, vals = _assemble_chunk_kernel!(
@@ -485,7 +473,7 @@ function _assemble_sparse(style::S, op::O, items::I, src_tree::T1, dst_tree::T2,
 end
 
 function _assemble_sparse(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, threaded::True,
-        nrows::Int, ncols::Int, scratch::_AssemblyScratch; kwargs...
+        nrows::Int, ncols::Int, scratch::SparseMatrixAssemblyCache; kwargs...
     ) where {S, O, I, T1, T2}
     return _assemble_sparse(
         style, op, items, src_tree, dst_tree, threaded, nrows, ncols; kwargs...)
@@ -494,7 +482,8 @@ end
 """
     intersection_areas(manifold, threaded, dst_tree, src_tree;
                        intersection_operator = DefaultIntersectionOperator(manifold),
-                       npartitions = Threads.nthreads() * 4, progress = false)
+                       npartitions = Threads.nthreads() * 4, progress = false,
+                       cache = nothing)
 
 Assemble the sparse intersection matrix between `src_tree` and `dst_tree` on
 `manifold`.  Returns a `SparseMatrixCSC` of the output of the intersection operator.
@@ -525,18 +514,22 @@ This calls out to five functions, which dispatch on `intersection_operator`:
 `threaded` is a `GeometryOpsCore.BoolsAsTypes` (`True()`/`False()`; convert via
 `booltype(::Bool)`). When threaded, work items are partitioned into `npartitions`
 chunks assembled on separate tasks via ChunkSplitters.jl.
+
+Pass a [`SparseMatrixAssemblyCache`](@ref) with `cache=...` to reuse candidate
+and serial COO buffers across calls.
 """
 function intersection_areas(
         manifold::M, threaded::BoolsAsTypes, dst_tree, src_tree;
         intersection_operator = DefaultIntersectionOperator(manifold),
         npartitions::Int = Threads.nthreads() * 4,
         progress = false,
+        cache = nothing,
     ) where {M <: Manifold}
 
     # Resolve the return-style trait once, here, and thread `style` through everything.
     style = IntersectionReturnStyle(intersection_operator)
     ValType = output_eltype(intersection_operator, src_tree, dst_tree)
-    scratch = _acquire_assembly_scratch(ValType)
+    scratch = _assembly_cache(ValType, cache)
 
     try
         # Every spatial tree participates through the public extent protocol.  In
@@ -556,6 +549,6 @@ function intersection_areas(
             style, intersection_operator, items, src_tree, dst_tree, threaded, nrows, ncols,
             scratch; npartitions, progress)
     finally
-        _release_assembly_scratch!(scratch)
+        empty!(scratch)
     end
 end
