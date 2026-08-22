@@ -146,39 +146,6 @@ end
 get_all_candidate_pairs(threaded, predicate_f, src_tree, dst_tree) =
     get_all_candidate_pairs!(Tuple{Int, Int}[], threaded, predicate_f, src_tree, dst_tree)
 
-"""
-    SparseMatrixAssemblyCache([T = Float64])
-
-Reusable buffers for sparse intersection-matrix assembly. Pass the cache to
-[`Regridder`](@ref) or [`intersection_areas`](@ref) with `cache=...`; do not use
-one cache concurrently from multiple calls.
-"""
-mutable struct SparseMatrixAssemblyCache{T}
-    candidate_pairs::Vector{Tuple{Int, Int}}
-    rows::Vector{Int}
-    cols::Vector{Int}
-    vals::Vector{T}
-end
-
-SparseMatrixAssemblyCache(::Type{T}) where {T} =
-    SparseMatrixAssemblyCache(Tuple{Int, Int}[], Int[], Int[], T[])
-SparseMatrixAssemblyCache() = SparseMatrixAssemblyCache(Float64)
-
-function Base.empty!(cache::SparseMatrixAssemblyCache)
-    empty!(cache.candidate_pairs)
-    empty!(cache.rows)
-    empty!(cache.cols)
-    empty!(cache.vals)
-    return cache
-end
-
-_assembly_cache(::Type{T}, ::Nothing) where {T} = SparseMatrixAssemblyCache(T)
-_assembly_cache(::Type{T}, cache::SparseMatrixAssemblyCache{T}) where {T} = empty!(cache)
-function _assembly_cache(::Type{T}, cache::SparseMatrixAssemblyCache) where {T}
-    throw(ArgumentError(
-        "cache stores $(eltype(cache.vals)) values, but the intersection operator outputs $T"))
-end
-
 # Shared parallel COO assembly. `style` (the resolved `IntersectionReturnStyle`)
 # is threaded through so the trait is never looked up in the hot loop.
 
@@ -221,12 +188,15 @@ function _assemble_chunk_kernel!(style::S, op::O, items::I, src_tree::T1, dst_tr
     for item in items
         _run_and_store!(style, op, rows, cols, vals, item, src_tree, dst_tree)
     end
-    return rows, cols, vals
+    return COOChunk(rows, cols, vals)
 end
 
-# `True` chunks/spawns, `False` runs one chunk. `$`-interpolation keeps the
-# spawned tasks type-stable (concrete `style`/`op`/trees, no boxing).
-function _assemble_chunks(style::S, op::O, items::I, src_tree::T1, dst_tree::T2; npartitions, progress) where {S, O, I, T1, T2}
+# Produce ordered COO chunks in parallel. `$`-interpolation keeps spawned tasks
+# type-stable (concrete `style`/`op`/trees, no boxing).
+function _collect_coo_chunks(
+        style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::True;
+        npartitions, progress,
+    ) where {S, O, I, T1, T2}
     # Partition the list of work items,
     partitions = ChunkSplitters.chunks(items; n = npartitions)
     if progress
@@ -244,239 +214,27 @@ function _assemble_chunks(style::S, op::O, items::I, src_tree::T1, dst_tree::T2;
         end
         for partition in partitions
     ]
-    return map(fetch, result_tasks)
+    return COOChunk{ValType}[fetch(task) for task in result_tasks]
 end
 
-# Concatenate the per-chunk COO vectors into single vectors, in partition order.
-# `init` would cost `vcat`'s pre-sized specialisation, making this quadratic in the partition count.
-_concat_chunks(chunks) = (reduce(vcat, getindex.(chunks, 1)),
-                          reduce(vcat, getindex.(chunks, 2)),
-                          reduce(vcat, getindex.(chunks, 3)))
-
-function assemble_sparse_matrix_coo(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::True; npartitions, progress) where {S, O, I, T1, T2}
-    chunks = _assemble_chunks(style, op, items, src_tree, dst_tree; npartitions, progress)
-    isempty(chunks) && return Int[], Int[], output_eltype(op, src_tree, dst_tree)[]
-    return _concat_chunks(chunks)
-end
-# Non-threaded version
-function assemble_sparse_matrix_coo(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::False; kwargs...) where {S, O, I, T1, T2}
-    _assemble_chunk(style, op, items, src_tree, dst_tree, output_eltype(op, src_tree, dst_tree))
-end
-
-# Coarse column blocks the window chooser histograms into; windows cut on block boundaries.
-const _COLUMN_BLOCKS = 4096
-
-# Below this many entries a window cannot pay for its own `O(nrows)` counting sort.
-const _MIN_WINDOW_ENTRIES = 1 << 16
-
-@inline _blockof(col::Int, blockwidth::Int) = (col - 1) ÷ blockwidth + 1
-
-function _column_blocks(ncols::Int)
-    ncols < 2 && return 1, max(ncols, 1)
-    blockwidth = cld(ncols, min(_COLUMN_BLOCKS, ncols))
-    return cld(ncols, blockwidth), blockwidth
-end
-
-# Bounds-checked on purpose: `_bucket_chunk!` indexes `windowof` with these block numbers
-# under `@inbounds`, so a column far outside `1:ncols` has to be caught here.
-function _count_blocks!(hist::Matrix{Int}, c::Int, cols::Vector{Int}, blockwidth::Int)
-    for col in cols
-        hist[_blockof(col, blockwidth), c] += 1
-    end
-    return nothing
-end
-
-# Cut the coarse blocks into `nwindows` runs of near-equal entry count. The clamp keeps
-# the bounds strictly increasing, so every window owns at least one block of columns.
-function _window_bounds(blockcount::Vector{Int}, nwindows::Int)
-    nblocks = length(blockcount)
-    cum = cumsum(blockcount)
-    bnd = Vector{Int}(undef, nwindows + 1)
-    bnd[1] = 1
-    bnd[nwindows + 1] = nblocks + 1
-    for w in 2:nwindows
-        k = searchsortedfirst(cum, (w - 1) * cum[end] / nwindows)
-        bnd[w] = clamp(k + 1, bnd[w - 1] + 1, nblocks - nwindows + w)
-    end
-    return bnd
-end
-
-# `sparse` rejects ragged triplets; the windowed route would read `rows`/`vals` unchecked.
-function _check_chunk_lengths(chunks)
-    for (rows, cols, vals) in chunks
-        length(rows) == length(cols) == length(vals) || throw(ArgumentError(
-            "the COO vectors of a chunk must have equal lengths, got $(length(rows)), $(length(cols)) and $(length(vals))"))
-    end
-    return nothing
-end
-
-# Scatter one chunk's triplets into the window they belong to, columns shifted to be
-# window-local. `cursor[w]` is this chunk's write position in window `w`.
-function _bucket_chunk!(wrows::Vector{Vector{Int}}, wcols::Vector{Vector{Int}}, wvals::Vector{Vector{Tv}},
-        chunk, cursor::Vector{Int}, windowof::Vector{Int}, colbase::Vector{Int}, blockwidth::Int) where {Tv}
-    rows, cols, vals = chunk
-    @inbounds for j in eachindex(cols)
-        w = windowof[_blockof(cols[j], blockwidth)]
-        p = cursor[w] + 1
-        cursor[w] = p
-        wrows[w][p] = rows[j]
-        wcols[w][p] = cols[j] - colbase[w]
-        wvals[w][p] = vals[j]
-    end
-    return nothing
-end
-
-# `sparse`'s own combine defaults, so a window folds duplicates exactly as `sparse` would.
-_coocombine(::AbstractVector{Bool}) = |
-_coocombine(::AbstractVector) = +
-
-# One window's COO to CSC. `sparse!` is allowed to take the CSC's storage from the COO
-# arrays once it is done reading them, and the window owns those arrays outright.
-function _window_csc(rows::Vector{Int}, cols::Vector{Int}, vals::Vector{Tv}, nrows::Int, ncols::Int) where {Tv}
-    n = length(rows)
-    return SparseArrays.sparse!(rows, cols, vals, nrows, ncols, _coocombine(vals),
-        Vector{Int}(undef, ncols), Vector{Int}(undef, nrows + 1),
-        Vector{Int}(undef, n), Vector{Tv}(undef, n), cols, rows, vals)
-end
-
-# Copy one window's CSC into the whole matrix's arrays; its columns are contiguous there.
-function _splice_window!(colptr::Vector{Int}, rowval::Vector{Int}, nzval::Vector{Tv},
-        mat::SparseArrays.SparseMatrixCSC, base::Int, colbase::Int) where {Tv}
-    cp = SparseArrays.getcolptr(mat)
-    @inbounds for c in 1:size(mat, 2)
-        colptr[colbase + c] = base + cp[c]
-    end
-    copyto!(rowval, base + 1, SparseArrays.rowvals(mat), 1, SparseArrays.nnz(mat))
-    copyto!(nzval, base + 1, SparseArrays.nonzeros(mat), 1, SparseArrays.nnz(mat))
-    return nothing
-end
-
-"""
-    _sparse_from_chunks(chunks, nrows, ncols) -> SparseMatrixCSC
-
-Build the CSC from the per-task COO triplets without concatenating them first.
-
-A coarse column histogram cuts the columns into entry-balanced windows, one pass buckets
-the triplets into their window, and each window is built by `SparseArrays.sparse!` on its
-own task. Every entry of a column reaches exactly one window, in the order it would have
-in the concatenation, and `sparse`'s output for a column is a function of that column's
-entries and their order alone — so the result is identical, bit for bit, to `sparse` over
-the concatenated triplets.
-"""
-function _sparse_from_chunks(chunks, nrows::Int, ncols::Int)
-    ntotal = sum(chunk -> length(chunk[1]), chunks)
-    # One window per thread, capped so the windows' `O(nrows)` scratch stays within the
-    # size of the entries they sort.
-    nwindows = min(Threads.nthreads(), ntotal ÷ max(nrows, _MIN_WINDOW_ENTRIES))
-    return _sparse_from_chunks(chunks, nrows, ncols, nwindows)
-end
-
-function _sparse_from_chunks(chunks, nrows::Int, ncols::Int, nwindows::Int)
-    _check_chunk_lengths(chunks)
-    nblocks, blockwidth = _column_blocks(ncols)
-    nwindows = min(nwindows, nblocks)
-    if nwindows < 2
-        rows, cols, vals = _concat_chunks(chunks)
-        return SparseArrays.sparse(rows, cols, vals, nrows, ncols)
-    end
-
-    nchunks = length(chunks)
-    hist = zeros(Int, nblocks, nchunks)
-    hist_tasks = map(1:nchunks) do c
-        cols = chunks[c][2]
-        StableTasks.@spawn _count_blocks!($hist, $c, $cols, $blockwidth)
-    end
-    foreach(fetch, hist_tasks)
-
-    bnd = _window_bounds(vec(sum(hist; dims = 2)), nwindows)
-    windowof = Vector{Int}(undef, nblocks)
-    for w in 1:nwindows, k in bnd[w]:(bnd[w + 1] - 1)
-        windowof[k] = w
-    end
-    colbase = [(bnd[w] - 1) * blockwidth for w in 1:nwindows]
-
-    # Where each (chunk, window) pair writes in its window's arrays: within a window the
-    # chunks keep their partition order, so a column's entries keep their global order.
-    starts = Matrix{Int}(undef, nchunks, nwindows)
-    windowlen = Vector{Int}(undef, nwindows)
-    for w in 1:nwindows
-        s = 0
-        for c in 1:nchunks
-            starts[c, w] = s
-            for k in bnd[w]:(bnd[w + 1] - 1)
-                s += hist[k, c]
-            end
-        end
-        windowlen[w] = s
-    end
-
-    Tv = eltype(chunks[1][3])
-    wrows = [Vector{Int}(undef, windowlen[w]) for w in 1:nwindows]
-    wcols = [Vector{Int}(undef, windowlen[w]) for w in 1:nwindows]
-    wvals = [Vector{Tv}(undef, windowlen[w]) for w in 1:nwindows]
-    bucket_tasks = map(1:nchunks) do c
-        chunk = chunks[c]
-        cursor = starts[c, :]
-        StableTasks.@spawn _bucket_chunk!($wrows, $wcols, $wvals, $chunk, $cursor, $windowof, $colbase, $blockwidth)
-    end
-    foreach(fetch, bucket_tasks)
-
-    window_tasks = map(1:nwindows) do w
-        width = min(ncols, (bnd[w + 1] - 1) * blockwidth) - colbase[w]
-        StableTasks.@spawn _window_csc($(wrows[w]), $(wcols[w]), $(wvals[w]), $nrows, $width)
-    end
-    mats = SparseArrays.SparseMatrixCSC{Tv, Int}[fetch(t) for t in window_tasks]
-
-    nzbase = Vector{Int}(undef, nwindows + 1)
-    nzbase[1] = 0
-    for w in 1:nwindows
-        nzbase[w + 1] = nzbase[w] + SparseArrays.nnz(mats[w])
-    end
-    colptr = Vector{Int}(undef, ncols + 1)
-    rowval = Vector{Int}(undef, nzbase[end])
-    nzval = Vector{Tv}(undef, nzbase[end])
-    splice_tasks = map(1:nwindows) do w
-        mat = mats[w]
-        base = nzbase[w]
-        c0 = colbase[w]
-        StableTasks.@spawn _splice_window!($colptr, $rowval, $nzval, $mat, $base, $c0)
-    end
-    foreach(fetch, splice_tasks)
-    colptr[ncols + 1] = nzbase[end] + 1
-    return SparseArrays.SparseMatrixCSC(nrows, ncols, colptr, rowval, nzval)
-end
-
-# Threaded: straight from the per-task triplets to the CSC. Serial: one chunk, one `sparse`.
-function _assemble_sparse(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, threaded::True,
-        nrows::Int, ncols::Int; npartitions, progress) where {S, O, I, T1, T2}
-    chunks = _assemble_chunks(style, op, items, src_tree, dst_tree; npartitions, progress)
-    isempty(chunks) && return SparseArrays.sparse(
-        Int[], Int[], output_eltype(op, src_tree, dst_tree)[], nrows, ncols)
-    return _sparse_from_chunks(chunks, nrows, ncols)
-end
-function _assemble_sparse(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, threaded::False,
-        nrows::Int, ncols::Int; kwargs...) where {S, O, I, T1, T2}
-    rows, cols, vals = assemble_sparse_matrix_coo(style, op, items, src_tree, dst_tree, threaded)
-    return SparseArrays.sparse(rows, cols, vals, nrows, ncols)
-end
-
-function _assemble_sparse(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::False,
-        nrows::Int, ncols::Int, scratch::SparseMatrixAssemblyCache{ValType}; kwargs...
-    ) where {S, O, I, T1, T2, ValType}
-    chunk_op = task_local_operator(op)
-    rows, cols, vals = _assemble_chunk_kernel!(
-        style, chunk_op, items, src_tree, dst_tree,
-        scratch.rows, scratch.cols, scratch.vals)
-    # `sparse` copies its COO inputs.  The caller clears these task-owned vectors only
-    # after this returns, leaving the matrix's CSC storage independent of the scratch.
-    return SparseArrays.sparse(rows, cols, vals, nrows, ncols)
-end
-
-function _assemble_sparse(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, threaded::True,
-        nrows::Int, ncols::Int, scratch::SparseMatrixAssemblyCache; kwargs...
+# The sequential producer has the same output shape as the threaded producer: one chunk.
+function _collect_coo_chunks(
+        style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::False;
+        kwargs...,
     ) where {S, O, I, T1, T2}
-    return _assemble_sparse(
-        style, op, items, src_tree, dst_tree, threaded, nrows, ncols; kwargs...)
+    ValType = output_eltype(op, src_tree, dst_tree)
+    chunk = _assemble_chunk(style, op, items, src_tree, dst_tree, ValType)
+    return COOChunk{ValType}[chunk]
+end
+
+function assemble_sparse_matrix_coo(
+        style::S, op::O, items::I, src_tree::T1, dst_tree::T2,
+        threaded::BoolsAsTypes; kwargs...,
+    ) where {S, O, I, T1, T2}
+    chunks = _collect_coo_chunks(
+        style, op, items, src_tree, dst_tree, threaded; kwargs...,
+    )
+    return _concat_chunks(chunks)
 end
 
 """

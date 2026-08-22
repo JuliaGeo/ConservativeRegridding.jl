@@ -4,6 +4,7 @@ using Test, SafeTestsets
 
     @safetestset "Unit tests: TriangleQuadrature" begin include("triangle_quadrature.jl") end
     @safetestset "Unit tests: Regridding" begin include("regridding.jl") end
+    @safetestset "Unit tests: Sparse assembly" begin include("sparse_assembly.jl") end
     @safetestset "Unit tests: Grids" begin include("trees/grids.jl") end
     @safetestset "Unit tests: QuadtreeCursors" begin include("trees/quadtree_cursors.jl") end
     @safetestset "Unit tests: CachedDualDepthFirstSearch" begin include("cached_dual_dfs.jl") end
