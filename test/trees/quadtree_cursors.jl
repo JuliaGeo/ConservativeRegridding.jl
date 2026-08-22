@@ -4,6 +4,7 @@ import ConservativeRegridding
 import GeoInterface as GI, GeometryOps as GO
 import GeometryOpsCore as GOCore
 import GeometryOps: SpatialTreeInterface as STI
+import Extents
 
 # Helper to build a matrix of lon/lat points covering the globe
 function make_lonlat_point_matrix(nx, ny)
@@ -92,9 +93,9 @@ end
             cursor2 = QuadtreeCursor(grid)
 
             # Collect all intersecting pairs found by dual tree search
-            # Note: Use GO.UnitSpherical._intersects for SphericalCap intersection
+            # Spherical caps participate in the public extent protocol.
             found_pairs = Set{Tuple{Int,Int}}()
-            STI.dual_depth_first_search(GO.UnitSpherical._intersects, cursor1, cursor2) do i1, i2
+            STI.dual_depth_first_search(Extents.intersects, cursor1, cursor2) do i1, i2
                 push!(found_pairs, (i1, i2))
             end
 
@@ -218,7 +219,7 @@ end
             # Collect all intersecting pairs found by dual tree search
             # Note: TopDownQuadtreeCursor returns (i, j) tuples, not CartesianIndex
             found_pairs = Set{Tuple{Int,Int}}()
-            STI.dual_depth_first_search(GO.UnitSpherical._intersects, cursor1, cursor2) do idx1, idx2
+            STI.dual_depth_first_search(Extents.intersects, cursor1, cursor2) do idx1, idx2
                 push!(found_pairs, (idx1, idx2))
             end
 

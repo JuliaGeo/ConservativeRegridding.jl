@@ -58,7 +58,7 @@ function spherical_cellbased_grid(nx, ny)
     return CellBasedGrid(GO.Spherical(), pts)
 end
 
-const _sph = GO.UnitSpherical._intersects
+const _sph = Extents.intersects
 
 # Counts `node_extent` calls, and inherits the caching decision of the tree it wraps, so
 # the two searches see the same tree and differ only in how often they ask for an extent.

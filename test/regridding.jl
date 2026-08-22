@@ -447,6 +447,31 @@ GO.SpatialTreeInterface.child_indices_extents(w::LyingWeightTree) =
     GO.SpatialTreeInterface.child_indices_extents(w.tree)
 ConservativeRegridding.Trees.split_weight(w::LyingWeightTree) = w.total
 
+# Model the Cartesian XYZ extents stored by a packed unit-spherical tree while keeping
+# exactly the same topology, leaf indices, and cell geometry as the cap cursor it wraps.
+# This makes extent representation the only variable in the mixed-pairing tests below.
+struct XYZExtentTree{T}
+    tree::T
+end
+GO.SpatialTreeInterface.isspatialtree(::Type{<:XYZExtentTree}) = true
+GO.SpatialTreeInterface.isleaf(w::XYZExtentTree) = GO.SpatialTreeInterface.isleaf(w.tree)
+GO.SpatialTreeInterface.nchild(w::XYZExtentTree) = GO.SpatialTreeInterface.nchild(w.tree)
+GO.SpatialTreeInterface.getchild(w::XYZExtentTree) =
+    (XYZExtentTree(c) for c in GO.SpatialTreeInterface.getchild(w.tree))
+GO.SpatialTreeInterface.getchild(w::XYZExtentTree, i::Int) =
+    XYZExtentTree(GO.SpatialTreeInterface.getchild(w.tree, i))
+GO.SpatialTreeInterface.node_extent(w::XYZExtentTree) =
+    GO.UnitSpherical.cap_xyz_extent(GO.SpatialTreeInterface.node_extent(w.tree))
+GO.SpatialTreeInterface.child_indices_extents(w::XYZExtentTree) =
+    ((i, GO.UnitSpherical.cap_xyz_extent(e))
+     for (i, e) in GO.SpatialTreeInterface.child_indices_extents(w.tree))
+ConservativeRegridding.Trees.getcell(w::XYZExtentTree, i) =
+    ConservativeRegridding.Trees.getcell(w.tree, i)
+ConservativeRegridding.Trees.cell_index_count(w::XYZExtentTree) =
+    ConservativeRegridding.Trees.cell_index_count(w.tree)
+ConservativeRegridding.Trees.split_weight(w::XYZExtentTree) =
+    ConservativeRegridding.Trees.split_weight(w.tree)
+
 # Two trees that share no intersecting cell pair must yield an all-zero matrix, not an
 # error. The threaded path used to hit `reduce` over an empty collection at two places:
 # the merge of the per-task results (MultithreadedDualDepthFirstSearch), and the COO
@@ -507,7 +532,7 @@ end
     cases = (
         (name = "spherical",
          manifold = GO.Spherical(),
-         predicate = GO.UnitSpherical._intersects,
+         predicate = Extents.intersects,
          src = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(60, 40)),
          dst = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(48, 32))),
         (name = "planar",
@@ -543,6 +568,64 @@ end
     end
 end
 
+# A spherical search is an extent-protocol operation, independent of whether either
+# tree stores caps or outward-rounded Cartesian XYZ boxes.  Boxes can conservatively
+# admit extra candidates, but cannot remove a cap-cap candidate; exact clipping must
+# then produce the same weights for all four representation pairings.
+@testset "Spherical extent-protocol tree pairings" begin
+    MDDFS = ConservativeRegridding.MultithreadedDualDepthFirstSearch
+
+    function serial_pairs(predicate, t1, t2)
+        pairs = Tuple{Int, Int}[]
+        GO.SpatialTreeInterface.dual_depth_first_search(predicate, t1, t2) do i1, i2
+            push!(pairs, (i1, i2))
+        end
+        return pairs
+    end
+
+    sphere_points(nx, ny; lon, lat) =
+        [GO.UnitSpherical.UnitSphereFromGeographic()((λ, φ))
+         for λ in range(lon..., length = nx + 1), φ in range(lat..., length = ny + 1)]
+
+    src_cap = ConservativeRegridding.Trees.treeify(
+        GO.Spherical(), sphere_points(24, 16; lon = (-80.0, 60.0), lat = (-50.0, 70.0)))
+    dst_cap = ConservativeRegridding.Trees.treeify(
+        GO.Spherical(), sphere_points(16, 12; lon = (-30.0, 110.0), lat = (-20.0, 80.0)))
+    src_box, dst_box = XYZExtentTree(src_cap), XYZExtentTree(dst_cap)
+
+    @test GO.SpatialTreeInterface.node_extent(src_cap) isa GO.UnitSpherical.SphericalCap
+    @test GO.SpatialTreeInterface.node_extent(src_box) isa Extents.Extent{(:X, :Y, :Z)}
+
+    cap_candidates = serial_pairs(Extents.intersects, src_cap, dst_cap)
+    # B1 deliberately retains the old private spelling as an alias.  This one
+    # comparison proves the public cap-cap protocol preserves the pre-B2 traversal.
+    @test cap_candidates == serial_pairs(GO.UnitSpherical._intersects, src_cap, dst_cap)
+    cap_weights = ConservativeRegridding.intersection_areas(
+        GO.Spherical(), GeometryOpsCore.False(), dst_cap, src_cap)
+
+    pairings = (
+        ("cap-cap", src_cap, dst_cap),
+        ("cap-box", src_cap, dst_box),
+        ("box-cap", src_box, dst_cap),
+        ("box-box", src_box, dst_box),
+    )
+    for (name, src, dst) in pairings
+        @testset "$name" begin
+            expected = serial_pairs(Extents.intersects, src, dst)
+            @test !isempty(expected)
+            @test issubset(Set(cap_candidates), Set(expected))
+            @test MDDFS.multithreaded_dual_query(
+                Extents.intersects, src, dst; chunks_per_thread = 8) == expected
+
+            serial = ConservativeRegridding.intersection_areas(
+                GO.Spherical(), GeometryOpsCore.False(), dst, src)
+            threaded = ConservativeRegridding.intersection_areas(
+                GO.Spherical(), GeometryOpsCore.True(), dst, src)
+            @test threaded == serial == cap_weights
+        end
+    end
+end
+
 # A `split_weight` that answers the whole grid at every node makes `pair_weight`
 # cancel to a constant: splits then inflated the frontier's estimated total until the
 # share test stalled, leaving single pairs holding up to half the traversal (measured
@@ -561,7 +644,7 @@ end
         dst = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(sizes[2]...))
         w1 = LyingWeightTree(src, prod(sizes[1]))
         w2 = LyingWeightTree(dst, prod(sizes[2]))
-        pred = GO.UnitSpherical._intersects
+        pred = Extents.intersects
 
         pairs = MDDFS.frontier(pred, w1, w2; nchunks = 64)
         chunks = [MDDFS._inner_dfs_f(pred, p[1], p[3]) for p in pairs]
@@ -571,6 +654,29 @@ end
 
         # No frontier pair keeps more than a tenth of the candidate pairs (the
         # broken estimator left 23-25% on both grid pairs; the fix leaves 5-6%).
+        counts = map(length, chunks)
+        @test maximum(counts) <= sum(counts) ÷ 10
+    end
+end
+
+# A Cartesian box on either side selects `pair_weight`'s generic subtree-product
+# fallback.  On the asymmetric global workload used by the production frontier gate,
+# that estimate must still leave no task with more than 10% of the actual candidates.
+@testset "Generic mixed-extent frontier stays balanced" begin
+    MDDFS = ConservativeRegridding.MultithreadedDualDepthFirstSearch
+
+    sphere_points(nx, ny) =
+        [GO.UnitSpherical.UnitSphereFromGeographic()((lon, lat))
+         for lon in range(-180, 180, length = nx + 1), lat in range(-80, 80, length = ny + 1)]
+
+    src_cap = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(120, 80))
+    dst_cap = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(12, 8))
+    for (src, dst) in ((src_cap, XYZExtentTree(dst_cap)),
+                       (XYZExtentTree(src_cap), dst_cap),
+                       (XYZExtentTree(src_cap), XYZExtentTree(dst_cap)))
+        pairs = MDDFS.frontier(Extents.intersects, src, dst; nchunks = 64)
+        chunks = [MDDFS._inner_dfs_f(Extents.intersects, p[1], p[3]) for p in pairs]
+        @test reduce(vcat, chunks) == MDDFS._inner_dfs_f(Extents.intersects, src, dst)
         counts = map(length, chunks)
         @test maximum(counts) <= sum(counts) ÷ 10
     end

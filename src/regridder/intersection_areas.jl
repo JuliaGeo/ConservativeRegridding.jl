@@ -461,11 +461,9 @@ function intersection_areas(
     # Resolve the return-style trait once, here, and thread `style` through everything.
     style = IntersectionReturnStyle(intersection_operator)
 
-    predicate_f = if M <: Spherical
-        GO.UnitSpherical._intersects
-    else
-        Extents.intersects
-    end
+    # Every spatial tree participates through the public extent protocol.  In
+    # particular, spherical searches may pair cap and Cartesian XYZ extents.
+    predicate_f = Extents.intersects
 
     # First, run the dual depth first search to get all candidate pairs of
     # cells that may intersect.

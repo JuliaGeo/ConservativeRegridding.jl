@@ -395,7 +395,7 @@ const _GLOBAL_SPH_PTS32 = _float32_point.(_GLOBAL_SPH_PTS)
     @test any(cap -> cap.radius <= Float32(pi) / 2, grandchild_extents)
     seen = Ref(0)
     result = ConservativeRegridding.cached_dual_depth_first_search(
-            GO.UnitSpherical._intersects, tree, tree) do i, j
+        Extents.intersects, tree, tree) do i, j
         seen[] += 1
         return nothing
     end
