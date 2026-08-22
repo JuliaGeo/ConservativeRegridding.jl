@@ -203,9 +203,7 @@ import GeometryOps as GO
 import ConstructionBase
 import LinearAlgebra
 
-# Regional spherical grids — chosen away from poles/antipodes so the bounding cap
-# is non-degenerate. (A pole-to-pole range has antipodal corners whose mean is the
-# origin, giving a NaN center; that pre-existing edge case is out of scope here.)
+# Regional spherical grids used for the ordinary finite-cap characterization.
 const _SPH_LONS = collect(range(0.0, 40.0, length = 5))   # 4 cells along i
 const _SPH_LATS = collect(range(0.0, 30.0, length = 4))   # 3 cells along j
 const _SPH_LONLAT = [(lon, lat) for lon in _SPH_LONS, lat in _SPH_LATS]
@@ -213,22 +211,251 @@ const _SPH_PTS = GO.UnitSphereFromGeographic().(_SPH_LONLAT)
 _regular_sph()   = RegularGrid(GOCore.Spherical(), _SPH_LONS, _SPH_LATS)
 _cellbased_sph() = CellBasedGrid(_SPH_PTS)   # UnitSphericalPoint eltype ⇒ Spherical
 
-@testset "cell_range_extent spherical: bounding cap (characterization)" begin
-    pts = _SPH_PTS
-    for (ir, jr) in ((1:4, 1:3), (1:1, 1:1), (2:3, 1:2), (1:4, 2:2), (1:2, 1:3))
-        imin, imax = first(ir), last(ir) + 1
-        jmin, jmax = first(jr), last(jr) + 1
-        expected_center = LinearAlgebra.normalize(
-            (pts[imin, jmin] + pts[imax, jmin] + pts[imax, jmax] + pts[imin, jmax]) / 4)
-        for g in (_regular_sph(), _cellbased_sph())
-            cap = cell_range_extent(g, ir, jr)
-            # the cap must bound every vertex of the requested cell range …
-            @test all(GO.spherical_distance(cap.point, pts[i, j]) <= cap.radius
-                      for i in imin:imax, j in jmin:jmax)
-            # … and be centered on the normalized mean of the 4 range corners
-            @test isapprox(cap.point, expected_center; atol = 1e-12)
+function _is_canonical_whole_sphere(cap)
+    T = typeof(cap.radius)
+    canonical_point = GO.UnitSpherical.UnitSphericalPoint(zero(T), zero(T), one(T))
+    return cap.point == canonical_point && cap.radius == nextfloat(T(pi))
+end
+
+function _test_cap_shape(cap)
+    T = typeof(cap.radius)
+    @test isfinite(cap.point)
+    @test isfinite(cap.radius)
+    @test cap.radius <= T(pi) / T(2) || _is_canonical_whole_sphere(cap)
+end
+
+# Check every declared shortest-geodesic cell edge, not just its vertices.
+function _test_dense_edge_coverage(cap, points, irange, jrange; subdivisions = 32)
+    _test_cap_shape(cap)
+    for j in jrange, i in irange
+        p1, p2 = points[i, j], points[i + 1, j]
+        p3, p4 = points[i + 1, j + 1], points[i, j + 1]
+        for (a, b) in ((p1, p2), (p2, p3), (p3, p4), (p4, p1)), k in 0:subdivisions
+            p = GO.UnitSpherical.slerp(a, b, k / subdivisions)
+            @test GO.spherical_distance(cap.point, p) <= cap.radius
         end
     end
+end
+
+@testset "cell_range_extent spherical: finite cap and outward radius" begin
+    ir, jr = 2:3, 1:2
+    imin, imax = first(ir), last(ir) + 1
+    jmin, jmax = first(jr), last(jr) + 1
+    expected_center = LinearAlgebra.normalize(
+        (_SPH_PTS[imin, jmin] + _SPH_PTS[imax, jmin] +
+         _SPH_PTS[imax, jmax] + _SPH_PTS[imin, jmax]) / 4)
+
+    PP = ConservativeRegridding.Trees.CurvilinearGridPerimeterPoints
+    raw_radius = maximum(p -> GO.spherical_distance(expected_center, p),
+        PP(_cellbased_sph(), imin, imax, jmin, jmax))
+    expected_radius = nextfloat(raw_radius * 1.0001)
+
+    for g in (_regular_sph(), _cellbased_sph())
+        cap = cell_range_extent(g, ir, jr)
+        @test isapprox(cap.point, expected_center; atol = 1e-12)
+        @test cap.radius == expected_radius
+        @test cap.radius > raw_radius * 1.0001
+        _test_dense_edge_coverage(cap, _SPH_PTS, ir, jr)
+    end
+end
+
+_float32_point(p) = GO.UnitSpherical.UnitSphericalPoint(
+    Float32(p[1]), Float32(p[2]), Float32(p[3]))
+
+const _SPH_PTS32 = _float32_point.(_SPH_PTS)
+
+@testset "cell_range_extent spherical: Float32 finite cap" begin
+    ir, jr = 2:3, 1:2
+    imin, imax = first(ir), last(ir) + 1
+    jmin, jmax = first(jr), last(jr) + 1
+
+    cellbased = CellBasedGrid(_SPH_PTS32)
+    regular = RegularGrid(GOCore.Spherical(), Float32.(_SPH_LONS), Float32.(_SPH_LATS))
+    regular_points = [
+        ConservativeRegridding.Trees.getvertex(regular, i, j)
+        for i in axes(_SPH_PTS32, 1), j in axes(_SPH_PTS32, 2)
+    ]
+    PP = ConservativeRegridding.Trees.CurvilinearGridPerimeterPoints
+
+    for (grid, points) in ((regular, regular_points), (cellbased, _SPH_PTS32))
+        expected_center = LinearAlgebra.normalize(
+            (points[imin, jmin] + points[imax, jmin] +
+             points[imax, jmax] + points[imin, jmax]) / 4)
+        raw_radius = maximum(p -> GO.spherical_distance(expected_center, p),
+            PP(grid, imin, imax, jmin, jmax))
+        expected_radius = nextfloat(Float32(raw_radius * Float32(1.0001)))
+        cap = cell_range_extent(grid, ir, jr)
+        @test cap isa GO.UnitSpherical.SphericalCap{Float32}
+        @test cap.radius == expected_radius
+        @test cap.radius > Float32(raw_radius * Float32(1.0001))
+        _test_dense_edge_coverage(cap, points, ir, jr)
+    end
+end
+
+# Longitude identifies `u` and latitude is strictly increasing in `v`, so this
+# smooth chart is injective. Its sinusoid vanishes at the four corners while
+# escaping their finite cap at intermediate boundary vertices.
+const _WARPED_SPH_PTS = [
+    GO.UnitSphereFromGeographic()((
+        -50.0 + 100.0 * u,
+        -20.0 + 40.0 * v + 30.0 * sinpi(4.0 * u),
+    ))
+    for u in range(0.0, 1.0; length = 9), v in range(0.0, 1.0; length = 5)
+]
+
+@testset "cell_range_extent spherical: exhaustive 8×4 injective warp" begin
+    grid = CellBasedGrid(_WARPED_SPH_PTS)
+    nrectangles = 0
+    for ilo in 1:8, ihi in ilo:8, jlo in 1:4, jhi in jlo:4
+        irange, jrange = ilo:ihi, jlo:jhi
+        cap = cell_range_extent(grid, irange, jrange)
+        @test cap.radius <= Float64(pi) / 2
+        _test_dense_edge_coverage(cap, _WARPED_SPH_PTS, irange, jrange)
+        nrectangles += 1
+    end
+    @test nrectangles == 360
+
+    corners = (_WARPED_SPH_PTS[1, 1], _WARPED_SPH_PTS[9, 1],
+        _WARPED_SPH_PTS[9, 5], _WARPED_SPH_PTS[1, 5])
+    corner_center = LinearAlgebra.normalize(sum(corners) / 4)
+    corner_radius = nextfloat(
+        maximum(p -> GO.spherical_distance(corner_center, p), corners) * 1.0001)
+    @test count(p -> GO.spherical_distance(corner_center, p) > corner_radius,
+        _WARPED_SPH_PTS) > 0
+    @test cell_range_extent(grid, 1:8, 1:4).radius > corner_radius
+end
+
+const _GLOBAL_SPH_LONS = collect(range(-180.0, 180.0; length = 9))
+const _GLOBAL_SPH_LATS = collect(range(-90.0, 90.0; length = 5))
+const _GLOBAL_SPH_PTS = [
+    GO.UnitSphereFromGeographic()((lon, lat))
+    for lon in _GLOBAL_SPH_LONS, lat in _GLOBAL_SPH_LATS
+]
+
+@testset "cell_range_extent spherical: global, stripe, and polar ranges" begin
+    regular = RegularGrid(GOCore.Spherical(), _GLOBAL_SPH_LONS, _GLOBAL_SPH_LATS)
+    cellbased = CellBasedGrid(_GLOBAL_SPH_PTS)
+
+    global_corners = (_GLOBAL_SPH_PTS[1, 1], _GLOBAL_SPH_PTS[9, 1],
+        _GLOBAL_SPH_PTS[9, 5], _GLOBAL_SPH_PTS[1, 5])
+    global_mean_norm = LinearAlgebra.norm(sum(global_corners) / 4)
+    @test global_mean_norm <= eps(Float64)
+
+    for grid in (regular, cellbased)
+        global_cap = cell_range_extent(grid, 1:8, 1:4)
+        @test _is_canonical_whole_sphere(global_cap)
+        _test_dense_edge_coverage(global_cap, _GLOBAL_SPH_PTS, 1:8, 1:4)
+
+        stripe_cap = cell_range_extent(grid, 1:8, 2:3)
+        @test _is_canonical_whole_sphere(stripe_cap)
+        _test_dense_edge_coverage(stripe_cap, _GLOBAL_SPH_PTS, 1:8, 2:3)
+
+        polar_cap = cell_range_extent(grid, 1:8, 4:4)
+        @test polar_cap.radius <= Float64(pi) / 2
+        @test !_is_canonical_whole_sphere(polar_cap)
+        _test_dense_edge_coverage(polar_cap, _GLOBAL_SPH_PTS, 1:8, 4:4)
+    end
+end
+
+const _GLOBAL_SPH_PTS32 = _float32_point.(_GLOBAL_SPH_PTS)
+
+@testset "cell_range_extent spherical: Float32 global and cached traversal" begin
+    regular = RegularGrid(GOCore.Spherical(),
+        Float32.(_GLOBAL_SPH_LONS), Float32.(_GLOBAL_SPH_LATS))
+    cellbased = CellBasedGrid(_GLOBAL_SPH_PTS32)
+    regular_points = [
+        ConservativeRegridding.Trees.getvertex(regular, i, j)
+        for i in axes(_GLOBAL_SPH_PTS32, 1), j in axes(_GLOBAL_SPH_PTS32, 2)
+    ]
+
+    for (grid, points) in ((regular, regular_points), (cellbased, _GLOBAL_SPH_PTS32))
+        global_cap = cell_range_extent(grid, 1:8, 1:4)
+        @test global_cap isa GO.UnitSpherical.SphericalCap{Float32}
+        @test _is_canonical_whole_sphere(global_cap)
+        _test_dense_edge_coverage(global_cap, points, 1:8, 1:4)
+
+        stripe_cap = cell_range_extent(grid, 1:8, 2:3)
+        @test stripe_cap isa GO.UnitSpherical.SphericalCap{Float32}
+        @test _is_canonical_whole_sphere(stripe_cap)
+        _test_dense_edge_coverage(stripe_cap, points, 1:8, 2:3)
+    end
+
+    # The root is a whole-sphere fallback while narrower children are finite. The
+    # cached serial descent stores child extents in a root-typed vector, so this
+    # catches any Float64 fallback mixed into an otherwise Float32 cursor.
+    tree = TopDownQuadtreeCursor(cellbased)
+    @test GO.SpatialTreeInterface.node_extent(tree) isa
+        GO.UnitSpherical.SphericalCap{Float32}
+    grandchild_extents = [
+        GO.SpatialTreeInterface.node_extent(grandchild)
+        for child in GO.SpatialTreeInterface.getchild(tree)
+        for grandchild in GO.SpatialTreeInterface.getchild(child)
+    ]
+    @test all(cap -> cap isa GO.UnitSpherical.SphericalCap{Float32}, grandchild_extents)
+    @test any(cap -> cap.radius <= Float32(pi) / 2, grandchild_extents)
+    seen = Ref(0)
+    result = ConservativeRegridding.cached_dual_depth_first_search(
+            GO.UnitSpherical._intersects, tree, tree) do i, j
+        seen[] += 1
+        return nothing
+    end
+    @test result === nothing
+    @test seen[] > 0
+end
+
+@testset "cell_range_extent spherical: near-zero corner mean falls back" begin
+    δ = eps(Float64) / 2
+    p1 = GO.UnitSpherical.UnitSphericalPoint(1.0, 0.0, 0.0)
+    p2 = GO.UnitSpherical.UnitSphericalPoint(-1.0, 0.0, 0.0)
+    p3 = GO.UnitSpherical.UnitSphericalPoint(0.0, 1.0, 0.0)
+    p4 = GO.UnitSpherical.UnitSphericalPoint(δ, -1.0, 0.0)
+    points = reshape(typeof(p1)[p1, p2, p4, p3], 2, 2)
+    mean_norm = LinearAlgebra.norm((p1 + p2 + p3 + p4) / 4)
+    @test 0 < mean_norm <= eps(Float64)
+    @test _is_canonical_whole_sphere(
+        cell_range_extent(CellBasedGrid(points), 1:1, 1:1))
+end
+
+@testset "cell_range_extent spherical: non-finite inputs fall back" begin
+    to_sphere = GO.UnitSphereFromGeographic()
+    invalid = GO.UnitSpherical.UnitSphericalPoint(NaN, NaN, NaN)
+
+    perimeter_invalid = [
+        to_sphere((-20.0 + 20.0 * (i - 1), -10.0 + 20.0 * (j - 1)))
+        for i in 1:3, j in 1:2
+    ]
+    perimeter_invalid[2, 1] = invalid
+    @test _is_canonical_whole_sphere(
+        cell_range_extent(CellBasedGrid(perimeter_invalid), 1:2, 1:1))
+
+    corner_invalid = copy(perimeter_invalid)
+    corner_invalid[2, 1] = to_sphere((0.0, -10.0))
+    corner_invalid[1, 1] = invalid
+    @test _is_canonical_whole_sphere(
+        cell_range_extent(CellBasedGrid(corner_invalid), 1:2, 1:1))
+end
+
+@testset "cell_range_extent spherical: wide finite cap can miss an edge" begin
+    to_sphere = GO.UnitSphereFromGeographic()
+    sw, se, ne, nw = to_sphere.((
+        (-110.0, -70.0), (30.0, -40.0), (140.0, 20.0), (-170.0, 80.0),
+    ))
+    points = reshape(typeof(sw)[sw, se, nw, ne], 2, 2)
+
+    # Reconstruct the former finite cap, including its explicit midpoint samples.
+    corners = (sw, se, ne, nw)
+    center = LinearAlgebra.normalize(sum(corners) / 4)
+    midpoints = ntuple(i -> GO.UnitSpherical.slerp(
+        corners[i], corners[mod1(i + 1, 4)], 0.5), 4)
+    old_radius = maximum(p -> GO.spherical_distance(center, p),
+        (corners..., midpoints...)) * 1.0001
+    escaped_edge_point = GO.UnitSpherical.slerp(nw, sw, 0.3275)
+    @test Float64(pi) / 2 < old_radius < Float64(pi)
+    @test old_radius < GO.spherical_distance(center, escaped_edge_point)
+
+    cap = cell_range_extent(CellBasedGrid(points), 1:1, 1:1)
+    @test _is_canonical_whole_sphere(cap)
+    _test_dense_edge_coverage(cap, points, 1:1, 1:1)
 end
 
 @testset "getvertex returns the vertex at point-index (i,j)" begin

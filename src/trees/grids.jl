@@ -181,17 +181,26 @@ using LinearAlgebra
 #=
 Spherical `cell_range_extent` machinery.
 
-The bounding cap must cover the four corners of the index rectangle and the points
-sampled along its perimeter — cell edges follow constant-lat / constant-lon, not
-great circles, so they bulge differently. Earlier versions materialized the perimeter
-into a fresh `Vector` per call, which drove most of the GC pressure in the dual-DFS
-hot path.
+The bounding cap must cover the actual perimeter vertices of the index rectangle.
+Earlier versions materialized that perimeter into a fresh `Vector` per call, which
+drove most of the GC pressure in the dual-DFS hot path. Each vertex is instead accessed
+on demand through the per-grid `getvertex` interface and the border is walked with the
+stack-resident `CurvilinearGridPerimeterPoints` iterator.
 
-Instead each vertex is accessed on demand through the per-grid `getvertex` interface
-method, and the border is walked with the stack-resident `CurvilinearGridPerimeterPoints`
-iterator. The cap builder folds `max`-distance over the corners and that iterator — no
-buffers, no shared state, threadsafe by construction.
+A cap no wider than a hemisphere is geodesically convex, so containing the perimeter
+vertices also contains the declared shortest-geodesic edges between them. A wider cap
+does not have that property and is replaced with the canonical whole-sphere cap.
 =#
+
+@inline function _whole_sphere_cap(::Type{T}) where {T <: AbstractFloat}
+    center = GO.UnitSpherical.UnitSphericalPoint(zero(T), zero(T), one(T))
+    return GO.UnitSpherical.SphericalCap(center, nextfloat(T(pi)))
+end
+
+const _WHOLE_SPHERE_CAP32 = _whole_sphere_cap(Float32)
+const _WHOLE_SPHERE_CAP64 = _whole_sphere_cap(Float64)
+@inline _whole_sphere_cap(::Type{Float32}) = _WHOLE_SPHERE_CAP32
+@inline _whole_sphere_cap(::Type{Float64}) = _WHOLE_SPHERE_CAP64
 
 # `getvertex` interface methods (interfaces.jl) for the structured spherical grids —
 # the one piece of per-grid variation the bounding-cap code below dispatches on.
@@ -248,37 +257,45 @@ arbitrary 4-corner polygons. Internally a thin wrapper over [`_spherical_cap`].
 """
 function circle_from_four_corners(corner_points, other_points)
     raw = GO.UnitSphereFromGeographic().(corner_points)
-    # Reorder (BL, TL, BR, TR) → CCW (SW, SE, NE, NW) for slerp midpoints.
+    # Reorder the public (BL, TL, BR, TR) contract to CCW (SW, SE, NE, NW).
     p1, p2, p3, p4 = raw[1], raw[3], raw[4], raw[2]
     return _spherical_cap(p1, p2, p3, p4,
         (GO.UnitSphereFromGeographic()(p) for p in other_points))
 end
 
-# Build a SphericalCap covering 4 CCW corners (SW, SE, NE, NW), the slerp
-# midpoints of their 4 edges (great-circle bulge), and every point yielded by
-# `perimeter` (constant-lat/lon bulge along cell sides).
+# Build a SphericalCap covering 4 CCW corners (SW, SE, NE, NW) and every point
+# yielded by `perimeter`. Caps wider than a hemisphere are not geodesically
+# convex, so only narrower caps can conservatively stand in for their edges.
 @inline function _spherical_cap(p1, p2, p3, p4, perimeter)
-    center = LinearAlgebra.normalize((p1 + p2 + p3 + p4) / 4)
-    p12 = GO.UnitSpherical.slerp(p1, p2, 0.5)
-    p23 = GO.UnitSpherical.slerp(p2, p3, 0.5)
-    p34 = GO.UnitSpherical.slerp(p3, p4, 0.5)
-    p41 = GO.UnitSpherical.slerp(p4, p1, 0.5)
-    d = max(
-        GO.spherical_distance(center, p1), GO.spherical_distance(center, p2),
-        GO.spherical_distance(center, p3), GO.spherical_distance(center, p4),
-        GO.spherical_distance(center, p12), GO.spherical_distance(center, p23),
-        GO.spherical_distance(center, p34), GO.spherical_distance(center, p41),
-    )
-    for p in perimeter
-        d = max(d, GO.spherical_distance(center, p))
+    meanpoint = (p1 + p2 + p3 + p4) / 4
+    T = eltype(meanpoint)
+    mean_norm = LinearAlgebra.norm(meanpoint)
+    (!isfinite(mean_norm) || mean_norm <= eps(T)) && return _whole_sphere_cap(T)
+
+    center = LinearAlgebra.normalize(meanpoint)
+    !isfinite(center) && return _whole_sphere_cap(T)
+
+    d = zero(T)
+    for p in (p1, p2, p3, p4)
+        distance = GO.spherical_distance(center, p)
+        !isfinite(distance) && return _whole_sphere_cap(T)
+        d = max(d, distance)
     end
-    # The 1.0001 slack guards against missed intersections from rounding error.
-    return GO.UnitSpherical.SphericalCap(center, d * 1.0001)
+    for p in perimeter
+        distance = GO.spherical_distance(center, p)
+        !isfinite(distance) && return _whole_sphere_cap(T)
+        d = max(d, distance)
+    end
+    # Preserve the existing slack, convert to the returned scalar type, then round
+    # one more representable value outward in that type.
+    radius = nextfloat(T(d * T(1.0001)))
+    (!isfinite(radius) || radius > T(pi) / T(2)) && return _whole_sphere_cap(T)
+    return GO.UnitSpherical.SphericalCap(center, radius)
 end
 
 # Bounding cap for a range of cells on any spherical curvilinear grid: the four
-# corners, their great-circle edge midpoints, and the perimeter vertices of the
-# index rectangle. One generic method — concrete grids supply only `getvertex`.
+# corners and the actual perimeter vertices of the index rectangle. One generic
+# method — concrete grids supply only `getvertex`.
 # (`ExplicitPolygonGrid{<: GO.Spherical}` keeps its own, more-specific method above.)
 function cell_range_extent(g::AbstractCurvilinearGrid{<: GO.Spherical}, irange::UnitRange{Int}, jrange::UnitRange{Int})
     imin, imax = extrema(irange); imax += 1
