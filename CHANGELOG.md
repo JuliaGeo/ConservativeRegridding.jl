@@ -5,28 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## v0.2.10
 
 ### Added
-- The multithreaded candidate search plans its tasks with a *budget frontier*: a serial pass splits the root node pair into at least `Threads.nthreads() * chunks_per_thread` pairs, heaviest first, and spawns one task each.  Results are concatenated in depth-first order, so the threaded search returns exactly the pairs the serial one does, in the same order.
-- `multithreaded_dual_query(predicate, node1, node2; chunks_per_thread = 8)` exposes the task budget.  A higher budget tolerates more skew at the cost of more spawns; it cannot change the result.
-- `Trees.split_weight(node) -> Int`, an O(1) estimate of the leaves under a node, used to order the frontier's split queue.  Defaults to `Trees.ncells`, so most tree types need no method; the HEALPix and OctaHEALPix root nodes define their own.
+- Added the deterministic `weighted_dual_depth_first_search`, `Trees.split_weight`, and
+  `cell_index_count` tree APIs. The latter reports the global dense cell-index domain,
+  which may differ from the number of cells below a restricted tree node.
+- Added `SparseMatrixAssemblyCache`, accepted by `intersection_areas` and `Regridder` via
+  `cache`, for reusing candidate-pair and serial COO buffers across calls. A cache must
+  not be used concurrently.
+
+### Changed
+- Candidate search now uses a deterministic weighted, one-sided traversal that opens
+  the heavier non-leaf side (the first side on ties) and carries a fixed leaf through
+  the opposite descent. Quadtree, reordered/offset quadtree, and native HEALPix leaves
+  eagerly materialize their bounded entries in inline storage, avoiding the former
+  retained extent cache and repeated leaf-extent construction (#140).
+- Threaded candidate search now plans tasks with a weight-balanced budget frontier and
+  concatenates results in the same order as the serial weighted traversal. The
+  `chunks_per_thread` keyword controls its task budget without changing the result
+  (#137, #140).
+- Large threaded COO results are bucketed into entry-balanced column windows, assembled
+  in parallel, and stitched into the final CSC while preserving column entry order and
+  duplicate-folding behavior (#138).
+- Spherical intersection assembly now calls `intersection_area` directly and reuses a
+  clipping cache local to each task across repeated builds (#140).
+- Semi-breaking: `Trees.should_parallelize` and `Trees.WithParallelizePolicy` remain
+  exported but are deprecated and no longer influence traversal. The legacy
+  `multithreaded_dual_query` signature remains available but ignores its policy closures
+  (#137).
+
+### Removed
+- Removed the cached dual depth-first search and recursive multithreaded walker, which
+  were superseded by the weighted traversal and budget frontier (#137, #140).
+
+### Fixed
+- Spherical range bounds now use the actual perimeter vertices and conservatively fall
+  back to a whole-sphere cap when a finite, at-most-hemisphere bound cannot be formed,
+  preventing unsafe pruning of candidate intersections (#140).
+- Sparse output dimensions now use each tree's global cell-index domain, so restricted
+  and wrapped trees cannot emit indices beyond the allocated matrix shape (#140).
+
+## v0.2.9
+
+### Added
 - `best_manifold(::AbstractCurvilinearGrid)` and `Trees.treeify(manifold, ::AbstractCurvilinearGrid)`, so a grid can be passed straight to `Regridder(dst, src)` and computed on the manifold it declares — e.g. `Regridder(CellBasedGrid(Spherical(; radius = R_authalic), points), src)`.  A `manifold` passed to `treeify` overrides the grid's own, rebuilding it with ConstructionBase.
 - The grid types are ConstructionBase-compatible, so `setproperties(grid, (; manifold))` rebuilds a grid onto another manifold, sharing its geometry rather than copying.
 
 ### Changed
-- Semi-breaking: the budget frontier replaces the traversal's spawn policy, so `Trees.should_parallelize` and `Trees.WithParallelizePolicy` are deprecated and now warn.  Both stay defined and exported so existing code keeps working; use `Trees.split_weight` to tune task balance instead.
-- Semi-breaking: `multithreaded_dual_query(predicate, node1, node2; chunks_per_thread)` is the canonical signature.  The old `multithreaded_dual_query(predicate, parallelize1, parallelize2, node1, node2)` shape still works, but its two closures are ignored.
 - Semi-breaking: `Regridder(dst, src)` no longer promotes a `Planar`/`Spherical` mismatch to `Spherical` — any mismatch now throws, and the manifold to compute on must be passed explicitly as `Regridder(manifold, dst, src)`.  This was always technically illegal and should never have been done.
 - `DefaultIntersectionOperator` now uses a task-local cache (SutherlandHodgmanCache from GeometryOps) to minimize overhead when computing spherical polygon intersections.  [#131](https://github.com/JuliaGeo/ConservativeRegridding.jl/pull/131)
 
-### Removed
-- The recursive `multithreaded_dual_depth_first_search` walker, superseded by the budget frontier.
-- The default `Trees.should_parallelize` methods.  Nothing calls it any more, so a tree type needs no method to be traversed in parallel.
-
 ### Fixed
-- The budget frontier conserves its work estimate across splits: surviving children whose `pair_weight`s sum past their parent's are scaled back to the parent's weight.  Estimates that saturate under splitting — loose bounding caps, or a `split_weight` fallback answering the whole grid at every node — used to inflate the frontier's total until the share test stalled, leaving one task with up to half the traversal (measured: a 512² raster → IGEO7 plan at 8 threads kept 50% of all candidate pairs in one task and ran 2.5x slower than the pre-frontier policy; the largest share is now ~1.6%).
-- Threaded regridding of planar grids no longer needs a `should_parallelize` method: planar trees thread through the frontier's generic pair weighting like any other ([#66](https://github.com/JuliaGeo/ConservativeRegridding.jl/issues/66)).
 - The threaded intersection path no longer passes `init` to `reduce(vcat, ...)`, which bypassed `vcat`'s pre-sized specialisation and made merging the per-task results quadratic in the number of tasks. Emptiness is guarded explicitly instead.
 
 ## v0.2.8
