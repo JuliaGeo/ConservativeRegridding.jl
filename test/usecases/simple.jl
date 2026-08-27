@@ -33,9 +33,9 @@ tree2 = GO.SpatialTreeInterface.FlatNoTree(polys2)
     A = R.intersections
     # Now, let's perform some interpolation!
     area1 = vec(sum(A, dims=2))
-    @test area1 == GO.area.(polys1)
+    @test area1 == GO.area.(GO.Planar(), polys1)
     area2 = vec(sum(A, dims=1))
-    @test area2 == GO.area.(polys2)
+    @test area2 == GO.area.(GO.Planar(), polys2)
 
     values_on_grid2 = [0, 0, 5, 0, 0]
 
@@ -81,7 +81,7 @@ end
     R = ConservativeRegridding.Regridder(GO.Planar(), str_tree1, str_tree2; normalize=false)
     A = R.intersections
     area1 = vec(sum(A, dims=2))
-    @test area1 == GO.area.(polys1)
+    @test area1 == GO.area.(GO.Planar(), polys1)
     area2 = vec(sum(A, dims=1))
-    @test area2 == GO.area.(polys2)
+    @test area2 == GO.area.(GO.Planar(), polys2)
 end
