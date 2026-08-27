@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.13'
       - uses: julia-actions/setup-julia@v3
@@ -47,7 +47,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y xorg-dev mesa-utils xvfb libgl1 freeglut3-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev
       - uses: actions/checkout@v7
       - name: Install Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.13' 
       - name: Download all workflow run artifacts
