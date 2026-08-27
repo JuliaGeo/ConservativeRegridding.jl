@@ -1,3 +1,9 @@
+# Historical prototype of the threaded dual-tree search: it spawns a task as soon as
+# both nodes' extents pass an area criterion.  ConservativeRegridding no longer works
+# this way.
+# Its `multithreaded_dual_query` now splits the root node pair into a budget
+# frontier of `nthreads * chunks_per_thread` pairs and spawns one task each.
+
 import GeometryOps as GO
 import GeoInterface as GI
 using GeometryOps: SpatialTreeInterface as STI

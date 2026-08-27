@@ -19,5 +19,6 @@ export AbstractCurvilinearGrid, ncells, getcell
 export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
 export QuadtreeCursor, TopDownQuadtreeCursor
 export should_parallelize, WithParallelizePolicy
+export split_weight
 
 end

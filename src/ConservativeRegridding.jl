@@ -16,19 +16,21 @@ using GeometryOpsCore: Manifold, Planar, Spherical
 
 using SciMLPublic: @public
 
-include("utils/MultithreadedDualDepthFirstSearch.jl")
-using .MultithreadedDualDepthFirstSearch
-
 include("utils/example_data.jl")
 export ExampleFieldFunction, LongitudeField, SinusoidField, HarmonicField, GulfStreamField, VortexField
 
 include("trees/Trees.jl")
 using .Trees
 
+# The traversal's task sizing dispatches on `Trees.split_weight`, so it is included after Trees.
+include("utils/MultithreadedDualDepthFirstSearch.jl")
+using .MultithreadedDualDepthFirstSearch
+
 export AbstractCurvilinearGrid, ncells, getcell
 export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
 export QuadtreeCursor, TopDownQuadtreeCursor
 export should_parallelize, WithParallelizePolicy
+export split_weight
 
 include("regridder/triangle_quadrature.jl")
 

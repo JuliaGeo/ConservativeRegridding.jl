@@ -24,9 +24,11 @@ Then, we descend simultaneously down into `dst` and `src` trees together, using 
 This is an algorithm in the class of _dual-tree_ algorithms, which you can think of as aggressive pruning.  
 Both trees are walked simultaneously.  The children of each node are checked for intersection, and pruned if they don't intersect.
 
-As an accelerator, we have an integrated multithreading step here.  Once we have descended low enough on the tree 
-for each node that it has enough children, we then spawn out a task for those nodes to continue the search on a different thread.  
-This allows us to multithread the search for intersecting cells, without having to manually partition the work.  
+As an accelerator, we have an integrated multithreading step here.  Before descending, a short serial pass 
+splits the root node pair into a *frontier* of independent node pairs: it repeatedly splits the pair with the 
+largest estimated work (overlap area times cell density, from `Trees.split_weight`) until there are 
+`nthreads * chunks_per_thread` of them.  Each frontier pair then becomes one task, and the tasks' results are 
+concatenated in depth-first order, so the threaded search returns exactly what the serial one does.  
 No caching need be done ahead of time, since it's all baked into the algorithm.
 
 At the end, we have a list of potentially intersecting cell pairs, represented as a vector of `(dst_cell_index, src_cell_index)` tuples. 

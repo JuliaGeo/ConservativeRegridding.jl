@@ -179,6 +179,7 @@ treeify(::Spherical, node::HEALPixRootNode) = node
 
 best_manifold(node::HEALPixRootNode) = node.manifold
 Trees.ncells(node::HEALPixRootNode) = 12 * node.nside^2
+Trees.split_weight(node::HEALPixRootNode) = 12 * node.nside^2
 
 STI.isspatialtree(::Type{<: HEALPixRootNode}) = true
 STI.isleaf(::HEALPixRootNode) = false

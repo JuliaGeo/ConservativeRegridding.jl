@@ -104,7 +104,7 @@ The manifold affects extent computation, intersection algorithms, and area calcu
 
 ### Multithreading
 
-`multithreaded_dual_query` (`src/utils/MultithreadedDualDepthFirstSearch.jl`): Parallel dual-tree traversal. Spawns tasks when both nodes are leaves or when nodes satisfy an area criterion (avoids spawning excessive tasks for small regions). Intersection area computation is separately parallelized via ChunkSplitters partitioning.
+`multithreaded_dual_query` (`src/utils/MultithreadedDualDepthFirstSearch.jl`): Parallel dual-tree traversal. Splits the root node pair into `nthreads * chunks_per_thread` pairs by estimated work (`Trees.split_weight`), runs one task per pair, and concatenates the results in DFS order, so the output matches the serial traversal. Intersection area computation is separately parallelized via ChunkSplitters partitioning.
 
 ### Package Extensions (`ext/`)
 
