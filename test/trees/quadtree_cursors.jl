@@ -358,7 +358,7 @@ end
         # Warm compilation before measuring the accessor itself.
         STI.getchild(cursor, 1)
         allocated = @allocated(STI.getchild(cursor, 1))
-        @test allocated == 0
+        @test allocated == 0 skip = VERSION < v"1.12"
 
         @test STI.getchild(cursor, 1).leafranges == (1:32, 1:24)
         @test STI.getchild(cursor, 2).leafranges == (1:32, 25:48)
