@@ -173,12 +173,15 @@ function _assemble_chunk_kernel(style::S, op::O, items::I, src_tree::T1, dst_tre
     for item in items
         _run_and_store!(style, op, rows, cols, vals, item, src_tree, dst_tree)
     end
-    return rows, cols, vals
+    return COOChunk(rows, cols, vals)
 end
 
-# `True` chunks/spawns, `False` runs one chunk. `$`-interpolation keeps the
-# spawned tasks type-stable (concrete `style`/`op`/trees, no boxing).
-function assemble_sparse_matrix_coo(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::True; npartitions, progress) where {S, O, I, T1, T2}
+# Produce ordered COO chunks in parallel. `$`-interpolation keeps spawned tasks
+# type-stable (concrete `style`/`op`/trees, no boxing).
+function _collect_coo_chunks(
+        style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::True;
+        npartitions, progress,
+    ) where {S, O, I, T1, T2}
     # Partition the list of work items,
     partitions = ChunkSplitters.chunks(items; n = npartitions)
     if progress
@@ -196,19 +199,27 @@ function assemble_sparse_matrix_coo(style::S, op::O, items::I, src_tree::T1, dst
         end
         for partition in partitions
     ]
-    # Fetch the results of `result_tasks`
-    all_results = map(fetch, result_tasks)
-    # Concatenate the per-chunk COO vectors into single vectors, in partition order.
-    # `init` would cost `vcat`'s pre-sized specialisation, making this quadratic in the partition count.
-    isempty(all_results) && return Int[], Int[], ValType[]
-    rows = reduce(vcat, getindex.(all_results, 1))
-    cols = reduce(vcat, getindex.(all_results, 2))
-    vals = reduce(vcat, getindex.(all_results, 3))
-    return rows, cols, vals
+    return COOChunk{ValType}[fetch(task) for task in result_tasks]
 end
-# Non-threaded version
-function assemble_sparse_matrix_coo(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::False; kwargs...) where {S, O, I, T1, T2}
-    _assemble_chunk(style, op, items, src_tree, dst_tree, output_eltype(op, src_tree, dst_tree))
+
+# The sequential producer has the same output shape as the threaded producer: one chunk.
+function _collect_coo_chunks(
+        style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::False;
+        kwargs...,
+    ) where {S, O, I, T1, T2}
+    ValType = output_eltype(op, src_tree, dst_tree)
+    chunk = _assemble_chunk(style, op, items, src_tree, dst_tree, ValType)
+    return COOChunk{ValType}[chunk]
+end
+
+function assemble_sparse_matrix_coo(
+        style::S, op::O, items::I, src_tree::T1, dst_tree::T2,
+        threaded::BoolsAsTypes; kwargs...,
+    ) where {S, O, I, T1, T2}
+    chunks = _collect_coo_chunks(
+        style, op, items, src_tree, dst_tree, threaded; kwargs...,
+    )
+    return _concat_chunks(chunks)
 end
 
 """
@@ -266,13 +277,14 @@ function intersection_areas(
     # cells that may intersect.
     candidate_pairs = get_all_candidate_pairs(threaded, predicate_f, src_tree, dst_tree)
 
-    # Map candidate pairs → work units (default: one pair per unit), assemble the
-    # COO triplets (in parallel or serially), and build the sparse matrix.
+    # Map candidate pairs → work units (default: one pair per unit), collect ordered
+    # COO chunks, then hand those chunks to the independent sparse-assembly pipeline.
     items = work_items(intersection_operator, candidate_pairs)
     nrows, ncols = output_matrix_size(intersection_operator, src_tree, dst_tree)
-    rows, cols, vals = assemble_sparse_matrix_coo(
+    chunks = _collect_coo_chunks(
         style, intersection_operator, items, src_tree, dst_tree, threaded;
         npartitions, progress,
     )
-    return SparseArrays.sparse(rows, cols, vals, nrows, ncols)
+    max_windows = istrue(threaded) ? Threads.nthreads() : 1
+    return _sparse_from_chunks(chunks, nrows, ncols; max_windows)
 end
