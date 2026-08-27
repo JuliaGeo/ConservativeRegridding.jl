@@ -691,8 +691,10 @@ end
         pairs = MDDFS.frontier(pred, w1, w2; nchunks = 64)
         chunks = [MDDFS._inner_dfs_f(pred, p[1], p[3]) for p in pairs]
 
-        # Weights only order the splits: concatenation still matches the serial search.
-        @test reduce(vcat, chunks) == MDDFS._inner_dfs_f(pred, src, dst)
+        # Weights only order the splits: the frontier covers the serial candidates, each
+        # once.  A multiset, not `==`: a saturated weight ties every node, so the split
+        # side alternates and the child-index key no longer sorts into serial DFS order.
+        @test sort(reduce(vcat, chunks)) == sort(MDDFS._inner_dfs_f(pred, src, dst))
 
         # No frontier pair keeps more than a tenth of the candidate pairs (the
         # broken estimator left 23-25% on both grid pairs; the fix leaves 5-6%).
