@@ -380,8 +380,7 @@ const _GLOBAL_SPH_PTS32 = _float32_point.(_GLOBAL_SPH_PTS)
         _test_dense_edge_coverage(stripe_cap, points, 1:8, 2:3)
     end
 
-    # The root is a whole-sphere fallback while narrower children are finite. The
-    # cached serial descent stores child extents in a root-typed vector, so this
+    # The root is a whole-sphere fallback while narrower children are finite. This
     # catches any Float64 fallback mixed into an otherwise Float32 cursor.
     tree = TopDownQuadtreeCursor(cellbased)
     @test GO.SpatialTreeInterface.node_extent(tree) isa
@@ -394,7 +393,7 @@ const _GLOBAL_SPH_PTS32 = _float32_point.(_GLOBAL_SPH_PTS)
     @test all(cap -> cap isa GO.UnitSpherical.SphericalCap{Float32}, grandchild_extents)
     @test any(cap -> cap.radius <= Float32(pi) / 2, grandchild_extents)
     seen = Ref(0)
-    result = ConservativeRegridding.cached_dual_depth_first_search(
+    result = ConservativeRegridding.weighted_dual_depth_first_search(
         Extents.intersects, tree, tree) do i, j
         seen[] += 1
         return nothing

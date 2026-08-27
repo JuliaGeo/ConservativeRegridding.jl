@@ -539,15 +539,22 @@ ConservativeRegridding.Trees.split_weight(w::XYZExtentTree) =
     end
 end
 
-# The threaded candidate search must be an exact stand-in for the serial one: same
-# pairs, same order, at any task budget. Two asymmetric grid pairs (a spherical one,
-# which weighs pairs by cap overlap, and a planar one, which falls back to the product
-# of subtree sizes) are checked against `dual_depth_first_search`, and the assembled
-# weight matrices are checked threaded against unthreaded.
+# The threaded candidate search must reproduce the deterministic weighted serial order
+# at any task budget. Two asymmetric grid pairs (a spherical one, which weighs pairs by
+# cap overlap, and a planar one, which falls back to the product of subtree sizes) also
+# check that the candidate set agrees with GeometryOps' generic traversal.
 @testset "Threaded dual query matches the serial traversal" begin
     MDDFS = ConservativeRegridding.MultithreadedDualDepthFirstSearch
 
     function serial_pairs(predicate, t1, t2)
+        pairs = Tuple{Int, Int}[]
+        ConservativeRegridding.weighted_dual_depth_first_search(predicate, t1, t2) do i1, i2
+            push!(pairs, (i1, i2))
+        end
+        return pairs
+    end
+
+    function generic_pairs(predicate, t1, t2)
         pairs = Tuple{Int, Int}[]
         GO.SpatialTreeInterface.dual_depth_first_search(predicate, t1, t2) do i1, i2
             push!(pairs, (i1, i2))
@@ -578,8 +585,13 @@ end
         @testset "$(case.name)" begin
             expected = serial_pairs(case.predicate, case.src, case.dst)
             @test length(expected) > 1000
+            @test sort(expected) == sort(generic_pairs(case.predicate, case.src, case.dst))
 
             @test MDDFS.multithreaded_dual_query(case.predicate, case.src, case.dst) == expected
+            result = [(-1, -1)]
+            @test MDDFS.multithreaded_dual_query!(
+                result, case.predicate, case.src, case.dst) === result
+            @test result == expected
             for chunks_per_thread in (1, 8, 64)
                 @test MDDFS.multithreaded_dual_query(
                     case.predicate, case.src, case.dst; chunks_per_thread) == expected
@@ -607,7 +619,7 @@ end
 
     function serial_pairs(predicate, t1, t2)
         pairs = Tuple{Int, Int}[]
-        GO.SpatialTreeInterface.dual_depth_first_search(predicate, t1, t2) do i1, i2
+        ConservativeRegridding.weighted_dual_depth_first_search(predicate, t1, t2) do i1, i2
             push!(pairs, (i1, i2))
         end
         return pairs

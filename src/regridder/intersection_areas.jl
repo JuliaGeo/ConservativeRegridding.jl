@@ -134,10 +134,8 @@ end
 function get_all_candidate_pairs!(candidate_idxs::Vector{Tuple{Int, Int}}, threaded::False,
         predicate_f::F, src_tree::T1, dst_tree::T2) where {F, T1, T2}
     empty!(candidate_idxs)
-    # from utils/CachedDualDepthFirstSearch.jl - the same pairs in the same order as
-    # `STI.dual_depth_first_search`, with the child extents of expensive-extent trees
-    # derived once rather than once per opposing child.
-    cached_dual_depth_first_search(predicate_f, src_tree, dst_tree) do i1, i2
+    # The serial and threaded paths share this deterministic weighted order.
+    weighted_dual_depth_first_search(predicate_f, src_tree, dst_tree) do i1, i2
         push!(candidate_idxs, (i1, i2))
     end
     return candidate_idxs

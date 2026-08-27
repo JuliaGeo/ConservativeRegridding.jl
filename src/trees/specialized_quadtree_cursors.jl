@@ -35,10 +35,15 @@ function STI.isleaf(q::IndexOffsetQuadtreeCursor)
     return all(length.(q.leafranges) .<= 2)
 end
 
+@inline function _leaf_entry(q::IndexOffsetQuadtreeCursor, ij::CartesianIndex{2})
+    i, j = Tuple(ij)
+    index = Trees.cartesian_to_linear_idx(q.grid, ij) + q.index_offset
+    return (index, Trees.cell_range_extent(q.grid, i:i, j:j))
+end
+
 function STI.child_indices_extents(q::IndexOffsetQuadtreeCursor)
-    idxs = (Trees.cartesian_to_linear_idx(q.grid, CartesianIndex(i, j)) + q.index_offset for i in q.leafranges[1], j in q.leafranges[2])
-    extents = (Trees.cell_range_extent(q.grid, i:i, j:j) for i in q.leafranges[1], j in q.leafranges[2])
-    return zip(idxs, extents)
+    @assert STI.isleaf(q) "Child indices and extents are only valid for leaf nodes."
+    return _materialize_leaf_entries(q, CartesianIndices(q.leafranges), Val(4))
 end
 
 function STI.nchild(q::IndexOffsetQuadtreeCursor)
@@ -155,9 +160,12 @@ import GeometryOps as GO
 The idea here is to divide the grid into four quadrants instead of assembling it from 2x2 squares.
 =#
 
-struct Reorderer2D
-    cart2lin::AbstractMatrix{Int}
-    lin2cart::AbstractVector{CartesianIndex{2}}
+struct Reorderer2D{
+        CartToLinear <: AbstractMatrix{Int},
+        LinearToCart <: AbstractVector{CartesianIndex{2}},
+    }
+    cart2lin::CartToLinear
+    lin2cart::LinearToCart
 end
 
 function Reorderer2D(lin2cart::AbstractVector{CartesianIndex{2}}, n, m)
@@ -168,10 +176,13 @@ function Reorderer2D(lin2cart::AbstractVector{CartesianIndex{2}}, n, m)
     return Reorderer2D(cart2lin, lin2cart)
 end
 
-struct ReorderedTopDownQuadtreeCursor{GridType <: Trees.AbstractCurvilinearGrid} <: Trees.AbstractQuadtreeCursor
+struct ReorderedTopDownQuadtreeCursor{
+        GridType <: Trees.AbstractCurvilinearGrid,
+        Ordering <: Reorderer2D,
+    } <: Trees.AbstractQuadtreeCursor
     grid::GridType
     leafranges::NTuple{2, UnitRange{Int}}
-    ordering::Reorderer2D
+    ordering::Ordering
 end
 function ReorderedTopDownQuadtreeCursor(grid::Trees.AbstractCurvilinearGrid, ordering::Reorderer2D)
     @assert size(ordering.cart2lin) == (Trees.ncells(grid, 1), Trees.ncells(grid, 2))
@@ -193,10 +204,15 @@ function STI.isleaf(q::ReorderedTopDownQuadtreeCursor)
     return all(length.(q.leafranges) .<= 2)
 end
 
+@inline function _leaf_entry(q::ReorderedTopDownQuadtreeCursor, ij::CartesianIndex{2})
+    i, j = Tuple(ij)
+    index = q.ordering.cart2lin[ij]
+    return (index, Trees.cell_range_extent(q.grid, i:i, j:j))
+end
+
 function STI.child_indices_extents(q::ReorderedTopDownQuadtreeCursor)
-    idxs = (q.ordering.cart2lin[CartesianIndex(i, j)] for i in q.leafranges[1], j in q.leafranges[2])
-    extents = (Trees.cell_range_extent(q.grid, i:i, j:j) for i in q.leafranges[1], j in q.leafranges[2])
-    return zip(idxs, extents)
+    @assert STI.isleaf(q) "Child indices and extents are only valid for leaf nodes."
+    return _materialize_leaf_entries(q, CartesianIndices(q.leafranges), Val(4))
 end
 
 function STI.nchild(q::ReorderedTopDownQuadtreeCursor)

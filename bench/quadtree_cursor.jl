@@ -21,7 +21,7 @@ end
 
 function traverse(tree1, tree2)
     counter = Counter(0)
-    CR.cached_dual_depth_first_search(counter, Extents.intersects, tree1, tree2)
+    CR.weighted_dual_depth_first_search(counter, Extents.intersects, tree1, tree2)
     return counter.n
 end
 

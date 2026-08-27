@@ -3,10 +3,6 @@ abstract type AbstractQuadtreeCursor end
 
 GOCore.best_manifold(c::AbstractQuadtreeCursor) = GOCore.manifold(getgrid(c))
 
-# Cell counts are O(1) for every cursor, so the frontier's task sizing gets an
-# exact answer without the generic `applicable(ncells, ...)` check.
-split_weight(node::AbstractQuadtreeCursor) = Int(prod(ncells(node)))
-
 """
     QuadtreeCursor(grid::AbstractCurvilinearGrid)
 
@@ -46,6 +42,10 @@ function leaf_idxs(q::QuadtreeCursor)
 
      return imin:imax, jmin:jmax
 end
+
+# `QuadtreeCursor` has no public zero-argument `ncells`; its covered ranges are still
+# O(1) to derive, so use them directly for traversal weighting.
+split_weight(q::QuadtreeCursor) = Int(prod(length, leaf_idxs(q)))
 
 function getcell(q::QuadtreeCursor)
     is, js = leaf_idxs(q)
@@ -101,13 +101,30 @@ function STI.isleaf(q::QuadtreeCursor)
     return q.level <= 2 || STI.nchild(q) == 0
 end
 
+@inline function _leaf_entry(q::QuadtreeCursor, ij::CartesianIndex{2})
+    i, j = Tuple(ij)
+    return (cartesian_to_linear_idx(q.grid, ij), cell_range_extent(q.grid, i:i, j:j))
+end
+
+function _materialize_leaf_entries(q, indices, ::Val{Capacity}) where {Capacity}
+    len = length(indices)
+    0 < len <= Capacity || throw(ArgumentError(
+        "a leaf must contain between 1 and $Capacity cells; got $len"))
+
+    # SmallVector's payload is a FixedVector, so every cap is computed exactly once
+    # while the unused tail is padded with the first entry and hidden by `len`.
+    first_entry = _leaf_entry(q, first(indices))
+    data = ntuple(Val(Capacity)) do k
+        k == 1 && return first_entry
+        k <= len && return _leaf_entry(q, indices[k])
+        return first_entry
+    end
+    return SmallCollections.SmallVector(SmallCollections.FixedVector(data), len)
+end
+
 function STI.child_indices_extents(q::QuadtreeCursor)
     @assert STI.isleaf(q) "Child indices and extents are only valid for leaf nodes."
-    irange, jrange = leaf_idxs(q)
-    idxs = CartesianIndices((irange, jrange))
-    # Create an extent for each cell in the leaf range
-    extents = [cell_range_extent(q.grid, i:i, j:j) for i in irange, j in jrange]
-    return zip((cartesian_to_linear_idx(q.grid, idx) for idx in idxs), extents)
+    return _materialize_leaf_entries(q, CartesianIndices(leaf_idxs(q)), Val(4))
 end
 
 function STI.getchild(q::QuadtreeCursor, child_idx::Int)
@@ -183,8 +200,8 @@ function STI.node_extent(q::QuadtreeCursor)
     return cell_range_extent(q.grid, leaf_idxs(q)...)
 end
 
-# A cursor holds no extent: every call walks its leaf range.  `CachedDualDepthFirstSearch`
-# reads this and derives a node's child extents once instead of once per opposing child.
+# A cursor holds no extent: every call walks its leaf range.  GeometryOps' generic
+# traversal reads this trait when deciding whether to materialize child extents.
 STI.node_extent_is_expensive(::Type{<: QuadtreeCursor{G}}) where {G} = extent_is_expensive(G)
 
 function istoplevel(q::QuadtreeCursor)
@@ -198,19 +215,23 @@ end
 The idea here is to divide the grid into four quadrants instead of assembling it from 2x2 squares.
 =#
 
-struct TopDownQuadtreeCursor{GridType <: AbstractCurvilinearGrid} <: AbstractQuadtreeCursor
+struct TopDownQuadtreeCursor{
+        GridType <: AbstractCurvilinearGrid,
+        LeafSize,
+    } <: AbstractQuadtreeCursor
     grid::GridType
     leafranges::NTuple{2, UnitRange{Int}}
     leafsize::NTuple{2, Int}
-    function TopDownQuadtreeCursor(
-            grid::GridType,
-            leafranges::NTuple{2, UnitRange{Int}},
-            leafsize::NTuple{2, Int},
-        ) where {GridType <: AbstractCurvilinearGrid}
-        (leafsize[1] > 0 && leafsize[2] > 0) ||
-            throw(ArgumentError("leafsize must contain positive integers; got $leafsize"))
-        return new{GridType}(grid, leafranges, leafsize)
-    end
+end
+
+function TopDownQuadtreeCursor(
+        grid::GridType,
+        leafranges::NTuple{2, UnitRange{Int}},
+        leafsize::NTuple{2, Int},
+    ) where {GridType <: AbstractCurvilinearGrid}
+    (leafsize[1] > 0 && leafsize[2] > 0) ||
+        throw(ArgumentError("leafsize must contain positive integers; got $leafsize"))
+    return TopDownQuadtreeCursor{GridType,leafsize}(grid, leafranges, leafsize)
 end
 function TopDownQuadtreeCursor(
         grid::AbstractCurvilinearGrid,
@@ -236,10 +257,17 @@ function STI.isleaf(q::TopDownQuadtreeCursor)
            length(q.leafranges[2]) <= q.leafsize[2]
 end
 
-function STI.child_indices_extents(q::TopDownQuadtreeCursor)
-    idxs = (cartesian_to_linear_idx(q.grid, CartesianIndex((i, j))) for i in q.leafranges[1], j in q.leafranges[2])
-    extents = (cell_range_extent(q.grid, i:i, j:j) for i in q.leafranges[1], j in q.leafranges[2])
-    return zip(idxs, extents)
+@inline function _leaf_entry(q::TopDownQuadtreeCursor, ij::CartesianIndex{2})
+    i, j = Tuple(ij)
+    return (cartesian_to_linear_idx(q.grid, ij), cell_range_extent(q.grid, i:i, j:j))
+end
+
+function STI.child_indices_extents(
+        q::TopDownQuadtreeCursor{GridType,LeafSize},
+    ) where {GridType,LeafSize}
+    indices = CartesianIndices(q.leafranges)
+    capacity = LeafSize[1] * LeafSize[2]
+    return _materialize_leaf_entries(q, indices, Val(capacity))
 end
 
 function STI.nchild(q::TopDownQuadtreeCursor)
@@ -268,12 +296,12 @@ function STI.getchild(q::TopDownQuadtreeCursor, i::Int)
         j_split_point = length(q.leafranges[2]) ÷ 2
         jrange = i == 1 ? q.leafranges[2][1:j_split_point] :
                           q.leafranges[2][j_split_point+1:end]
-        return TopDownQuadtreeCursor(q.grid, (q.leafranges[1], jrange), q.leafsize)
+        return typeof(q)(q.grid, (q.leafranges[1], jrange), q.leafsize)
     elseif j_is_leaf
         i_split_point = length(q.leafranges[1]) ÷ 2
         irange = i == 1 ? q.leafranges[1][1:i_split_point] :
                           q.leafranges[1][i_split_point+1:end]
-        return TopDownQuadtreeCursor(q.grid, (irange, q.leafranges[2]), q.leafsize)
+        return typeof(q)(q.grid, (irange, q.leafranges[2]), q.leafsize)
     else
         i_split_point = length(q.leafranges[1]) ÷ 2
         j_split_point = length(q.leafranges[2]) ÷ 2
@@ -281,7 +309,7 @@ function STI.getchild(q::TopDownQuadtreeCursor, i::Int)
                           q.leafranges[1][i_split_point+1:end]
         jrange = isodd(i) ? q.leafranges[2][1:j_split_point] :
                             q.leafranges[2][j_split_point+1:end]
-        return TopDownQuadtreeCursor(q.grid, (irange, jrange), q.leafsize)
+        return typeof(q)(q.grid, (irange, jrange), q.leafsize)
     end
 end
 
@@ -311,6 +339,8 @@ end
 function ncells(q::TopDownQuadtreeCursor)
     return length.(q.leafranges)
 end
+
+split_weight(q::TopDownQuadtreeCursor) = Int(prod(ncells(q)))
 
 cell_index_count(q::TopDownQuadtreeCursor) = cell_index_count(q.grid)
 

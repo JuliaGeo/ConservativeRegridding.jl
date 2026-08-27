@@ -5,13 +5,15 @@ import GeometryOps as GO
 import StableTasks
 
 import ..Trees: split_weight
-import ..CachedDualDepthFirstSearch: cached_dual_depth_first_search
+import ..WeightedDualDepthFirstSearch:
+    weighted_dual_depth_first_search, _split_first, _may_intersect
 
 #=
 The dual-tree search is parallelized by a *budget frontier*: a serial pass splits the
 root pair into at least `nchunks` independent node pairs, always splitting the heaviest
-by estimated work, then runs the serial dual DFS on each in its own task.  The results
-are concatenated in DFS pre-order, so the output matches the serial search exactly.
+by estimated work, then runs the serial weighted DFS on each in its own task.  The
+frontier and serial walk use the same side-selection rule, so concatenating task results
+reproduces the deterministic serial order.
 =#
 
 # Whole-sphere caps, including the all-NaN cap GeometryOps returns for a pole-spanning
@@ -101,10 +103,10 @@ splitting the heaviest one, and return them in DFS pre-order.
 Splitting continues past `nchunks` while the heaviest pair still claims more than a
 `1/nchunks` share of the estimated work, and stops at `nchunks + MAX_EXTRA_PAIRS`.
 
-A pair is splittable unless BOTH sides are leaves, so a leaf facing a large subtree
-descends the large side only.  Children failing `predicate` are pruned exactly as the
-serial dual DFS prunes them, so the serial search over the returned pairs visits every
-candidate pair exactly once.
+A pair is splittable unless both sides are leaves.  Each split opens the same single
+side [`weighted_dual_depth_first_search`](@ref) would open: the non-leaf side when only
+one can descend, otherwise the side with greater `Trees.split_weight` (first side on a
+tie).  Children failing `predicate` are pruned exactly as in the serial traversal.
 
 A split never raises the estimate: children whose weights sum past their parent's are
 scaled back to it, so `pair_weight` models that saturate under splitting (loose bounding
@@ -135,31 +137,21 @@ function frontier(predicate::P, root1, root2; nchunks::Int) where {P}
         w0 = ws[1]
         (n1, a1, n2, a2, key) = _heap_pop!(ws, xs)
         empty!(cw); empty!(cx)
-        if STI.isleaf(n1)                        # descend side 2 only
-            k = 0
-            for c2 in STI.getchild(n2)
-                k += 1
-                f2 = STI.node_extent(c2)
-                predicate(a1, f2) || continue
-                _gather!(cw, cx, n1, a1, c2, f2, vcat(key, k))
-            end
-        elseif STI.isleaf(n2)                    # descend side 1 only
+        if _split_first(n1, n2)
             k = 0
             for c1 in STI.getchild(n1)
                 k += 1
                 f1 = STI.node_extent(c1)
-                predicate(f1, a2) || continue
+                _may_intersect(predicate, f1, a2) || continue
                 _gather!(cw, cx, c1, f1, n2, a2, vcat(key, k))
             end
-        else                                     # child cross product, side 1 major
-            ch1 = collect(STI.getchild(n1)); ch2 = collect(STI.getchild(n2))
-            ce1 = map(STI.node_extent, ch1)      # child extents derived once each,
-            ce2 = map(STI.node_extent, ch2)      # not once per pair in the product
+        else
             k = 0
-            for i in eachindex(ch1), j in eachindex(ch2)
+            for c2 in STI.getchild(n2)
                 k += 1
-                predicate(ce1[i], ce2[j]) || continue
-                _gather!(cw, cx, ch1[i], ce1[i], ch2[j], ce2[j], vcat(key, k))
+                f2 = STI.node_extent(c2)
+                _may_intersect(predicate, a1, f2) || continue
+                _gather!(cw, cx, n1, a1, c2, f2, vcat(key, k))
             end
         end
         # Conserve the estimate: a split may only redistribute its parent's weight.
@@ -193,9 +185,7 @@ end
 
 function _inner_dfs_f(predicate::P, node1::N1, node2::N2) where {P, N1, N2}
     ret = Tuple{Int, Int}[]
-    # Each frontier pair is descended by its own task, so each gets its own scratch
-    # stack; nothing is shared across tasks.
-    cached_dual_depth_first_search(predicate, node1, node2) do i1, i2
+    weighted_dual_depth_first_search(predicate, node1, node2) do i1, i2
         push!(ret, (i1, i2))
     end
     return ret
@@ -211,7 +201,8 @@ end
 
 Find every leaf-index pair `(i1, i2)` whose extents satisfy `predicate`, in
 parallel, writing them to an emptied `result` in the same order as a serial
-`STI.dual_depth_first_search` over the same trees.
+[`weighted_dual_depth_first_search`](@ref) over the same trees.  This order is
+deterministic but may differ from `STI.dual_depth_first_search`.
 
 `chunks_per_thread` sets the task budget: the traversal is split into at least
 `Threads.nthreads() * chunks_per_thread` node pairs (see [`frontier`](@ref)), one task
@@ -229,10 +220,16 @@ function multithreaded_dual_query!(
     tasks = map(pairs) do pair
         _spawn_pair(_inner_dfs_f, predicate, pair[1], pair[3])
     end
-    # Fetch and append in frontier order, preserving the serial DFS order.  The caller
-    # may retain `result` in task-local scratch across repeated block builds.
-    for task in tasks
-        append!(result, fetch(task))
+    # Size the flat result exactly before copying.  Repeated `append!` makes a fresh
+    # result geometrically reallocate and copy a large candidate set several times.
+    # Parts and copies remain in frontier order, preserving the weighted serial order.
+    parts = fetch.(tasks)
+    resize!(result, sum(length, parts; init = 0))
+    offset = 1
+    for part in parts
+        n = length(part)
+        copyto!(result, offset, part, 1, n)
+        offset += n
     end
     return result
 end

@@ -7,6 +7,7 @@ import GeometryOps as GO, GeometryOpsCore as GOCore
 import GeoInterface as GI
 import GeometryOps: SpatialTreeInterface as STI, UnitSpherical
 using StaticArrays: SA
+using SmallCollections: FixedVector, capacity
 using LinearAlgebra: normalize
 
 import Healpix
@@ -86,7 +87,9 @@ const HealpixExt = Base.get_extension(ConservativeRegridding, :ConservativeRegri
         leaf = STI.getchild(tree, 1)
         @test STI.isleaf(leaf) == true
 
-        idx_ext = STI.child_indices_extents(leaf)
+        idx_ext = @inferred STI.child_indices_extents(leaf)
+        @test idx_ext isa FixedVector{1}
+        @test capacity(idx_ext) == 1
         @test length(idx_ext) == 1
         idx, ext = idx_ext[1]
         @test idx == 1  # 1-based index

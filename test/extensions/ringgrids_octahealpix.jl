@@ -3,6 +3,7 @@ using ConservativeRegridding.Trees
 using Test
 
 using RingGrids
+using SmallCollections: SmallVector, capacity
 import GeometryOps as GO, GeometryOpsCore as GOCore
 import GeoInterface as GI
 import GeometryOps: SpatialTreeInterface as STI
@@ -61,7 +62,10 @@ end
     @test leaf isa Trees.TopDownQuadtreeCursor && leaf.grid.q == 1
     @test length.(leaf.leafranges) == (2, 2)
     @test STI.isleaf(leaf) == true
-    @test length(collect(STI.child_indices_extents(leaf))) == 4
+    entries = @inferred STI.child_indices_extents(leaf)
+    @test entries isa SmallVector{4}
+    @test capacity(entries) == 4
+    @test length(entries) == 4
 
     # Leaves partition each face; every pixel is emitted exactly once: 4·nside² total.
     allcells = reduce(vcat, [collect(STI.child_indices_extents(l)) for l in leaves(tree)])

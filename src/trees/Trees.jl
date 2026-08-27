@@ -5,6 +5,7 @@ import LinearAlgebra
 import GeoInterface as GI
 import GeometryOps as GO
 import GeometryOps: UnitSpherical as US, SpatialTreeInterface as STI
+import SmallCollections
 
 include("interfaces.jl")
 include("wrappers.jl")

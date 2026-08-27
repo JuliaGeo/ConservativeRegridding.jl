@@ -5,6 +5,7 @@ import GeoInterface as GI, GeometryOps as GO
 import GeometryOpsCore as GOCore
 import GeometryOps: SpatialTreeInterface as STI
 import Extents
+using SmallCollections: SmallVector, capacity
 
 # Helper to build a matrix of lon/lat points covering the globe
 function make_lonlat_point_matrix(nx, ny)
@@ -205,6 +206,17 @@ end
         @test first(jrange) == 1
         @test last(jrange) == 8
     end
+
+    @testset "leaf entries are eager and fixed-capacity" begin
+        grid = RegularGrid(GO.Planar(), 0.0:1.0:2.0, 0.0:1.0:2.0)
+        leaf = QuadtreeCursor(grid)
+        entries = @inferred STI.child_indices_extents(leaf)
+
+        @test entries isa SmallVector{4}
+        @test capacity(entries) == 4
+        @test length(entries) == 4
+        @test first.(entries) == collect(1:4)
+    end
 end
 
 @testset "STI dual_depth_first_search - TopDownQuadtreeCursor self intersection" begin
@@ -260,6 +272,44 @@ end
         @test all(child -> child.leafranges[1] == 3:5, STI.getchild(strip))
 
         @test_throws ArgumentError TopDownQuadtreeCursor(grid; leafsize = (0, 4))
+    end
+
+    @testset "leaf entries are eager and fixed-capacity" begin
+        grid = RegularGrid(GO.Planar(), 0.0:1.0:4.0, 0.0:1.0:3.0)
+        leaf = TopDownQuadtreeCursor(grid; leafsize = (4, 4))
+        entries = @inferred STI.child_indices_extents(leaf)
+
+        @test entries isa SmallVector{16}
+        @test capacity(entries) == 16
+        @test length(entries) == 12
+        @test collect(entries) == collect(entries)
+
+        # The leaf-size value is part of the cursor type and remains so throughout
+        # descent, giving every leaf a statically known SmallVector capacity.
+        root = TopDownQuadtreeCursor(
+            RegularGrid(GO.Planar(), 0.0:1.0:16.0, 0.0:1.0:12.0);
+            leafsize = (4, 4))
+        @test typeof(STI.getchild(root, 1)) === typeof(root)
+    end
+
+    @testset "specialized cursor leaves are eager and inferred" begin
+        grid = RegularGrid(GO.Planar(), 0.0:1.0:2.0, 0.0:1.0:2.0)
+
+        offset = Trees.IndexOffsetQuadtreeCursor(grid, 10)
+        offset_entries = @inferred STI.child_indices_extents(offset)
+        @test offset_entries isa SmallVector{4}
+        @test capacity(offset_entries) == 4
+        @test first.(offset_entries) == collect(11:14)
+
+        cart2lin = reshape(collect(21:24), 2, 2)
+        lin2cart = vec(collect(CartesianIndices((2, 2))))
+        reordered = Trees.ReorderedTopDownQuadtreeCursor(
+            grid, Trees.Reorderer2D(cart2lin, lin2cart))
+        reordered_entries = @inferred STI.child_indices_extents(reordered)
+        @test isconcretetype(typeof(reordered.ordering))
+        @test reordered_entries isa SmallVector{4}
+        @test capacity(reordered_entries) == 4
+        @test first.(reordered_entries) == collect(21:24)
     end
 
     @testset "Restricted cursors keep global indices" begin
