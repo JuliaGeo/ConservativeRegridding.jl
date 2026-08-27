@@ -50,7 +50,10 @@ const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeReg
 
         # Weighted integral via sum(field) should match manual dot(weights, values)
         weights = ClimaCoreExt.se_node_weights(cubedsphere_space)
-        @test isapprox(sum(weights .* v), sum(field), rtol=1e-10)
+        weighted_values = weights .* v
+        # Scale the absolute tolerance to the magnitude of the values being cancelled.
+        cancellation_atol = eps(sum(abs, weighted_values))
+        @test isapprox(sum(weighted_values), sum(field); rtol=1e-10, atol=cancellation_atol)
     end
 
     @testset "inverse_element_map round-trip on GLL nodes (all faces)" begin

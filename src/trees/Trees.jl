@@ -5,6 +5,7 @@ import LinearAlgebra
 import GeoInterface as GI
 import GeometryOps as GO
 import GeometryOps: UnitSpherical as US, SpatialTreeInterface as STI
+import SmallCollections
 
 include("interfaces.jl")
 include("wrappers.jl")
@@ -15,7 +16,7 @@ include("specialized_quadtree_cursors.jl")
 
 # private IndexOffsetQuadtreeCursor, CubedSphereToplevelTree
 
-export AbstractCurvilinearGrid, ncells, getcell
+export AbstractCurvilinearGrid, ncells, cell_index_count, getcell
 export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
 export QuadtreeCursor, TopDownQuadtreeCursor
 export should_parallelize, WithParallelizePolicy

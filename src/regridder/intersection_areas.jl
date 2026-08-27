@@ -76,6 +76,8 @@ work_items(op, candidate_pairs) = candidate_pairs
 Return the operator instance which the current assembly task should use. 
 
 This is mainly to enable intersection operators to materialize task-local caches.
+Repeated calls on one task may return operators backed by the same reusable cache;
+different tasks must never share mutable cache storage.
 
 Defaults to returning `op` unchanged.  For any threadsafe operator, this is a no-op.
 """
@@ -86,12 +88,13 @@ task_local_operator(op) = op
 
 Shape of the sparse matrix [`intersection_areas`](@ref) assembles for `op`.
 
-Defaults to `(prod(ncells(dst_tree)), prod(ncells(src_tree)))` — dst cells as
-rows, src cells as columns. Operators whose counts differ from cell counts
-(e.g. spectral-element node counts) may override this.
+Defaults to `(cell_index_count(dst_tree), cell_index_count(src_tree))` — the
+dense global cell-index domains for dst rows and src columns. Operators whose
+counts differ from cell index counts (e.g. spectral-element node counts) may
+override this.
 """
 output_matrix_size(op, src_tree, dst_tree) =
-    (prod(Trees.ncells(dst_tree)), prod(Trees.ncells(src_tree)))
+    (Trees.cell_index_count(dst_tree), Trees.cell_index_count(src_tree))
 
 """
     output_eltype(op, [src_tree, dst_tree]) -> eltype
@@ -122,19 +125,24 @@ should_store_result(result) = error("""
     You must implement `should_store_result(op, result) -> Bool` for your operator.
     """)
 
-function get_all_candidate_pairs(threaded::True, predicate_f::F, src_tree::T1, dst_tree::T2) where {F, T1, T2}
+function get_all_candidate_pairs!(candidate_idxs::Vector{Tuple{Int, Int}}, threaded::True,
+        predicate_f::F, src_tree::T1, dst_tree::T2) where {F, T1, T2}
     # from utils/MultithreadedDualDepthFirstSearch.jl
-    candidate_idxs = multithreaded_dual_query(predicate_f, src_tree, dst_tree)
-    return candidate_idxs
+    return multithreaded_dual_query!(candidate_idxs, predicate_f, src_tree, dst_tree)
 end
 
-function get_all_candidate_pairs(threaded::False, predicate_f::F, src_tree::T1, dst_tree::T2) where {F, T1, T2}
-    candidate_idxs = Tuple{Int, Int}[]
-    STI.dual_depth_first_search(predicate_f, src_tree, dst_tree) do i1, i2
+function get_all_candidate_pairs!(candidate_idxs::Vector{Tuple{Int, Int}}, threaded::False,
+        predicate_f::F, src_tree::T1, dst_tree::T2) where {F, T1, T2}
+    empty!(candidate_idxs)
+    # The serial and threaded paths share this deterministic weighted order.
+    weighted_dual_depth_first_search(predicate_f, src_tree, dst_tree) do i1, i2
         push!(candidate_idxs, (i1, i2))
     end
     return candidate_idxs
 end
+
+get_all_candidate_pairs(threaded, predicate_f, src_tree, dst_tree) =
+    get_all_candidate_pairs!(Tuple{Int, Int}[], threaded, predicate_f, src_tree, dst_tree)
 
 # Shared parallel COO assembly. `style` (the resolved `IntersectionReturnStyle`)
 # is threaded through so the trait is never looked up in the hot loop.
@@ -170,6 +178,11 @@ function _assemble_chunk_kernel(style::S, op::O, items::I, src_tree::T1, dst_tre
     rows = Int[]
     cols = Int[]
     vals = ValType[]
+    return _assemble_chunk_kernel!(style, op, items, src_tree, dst_tree, rows, cols, vals)
+end
+
+function _assemble_chunk_kernel!(style::S, op::O, items::I, src_tree::T1, dst_tree::T2,
+        rows::Vector{Int}, cols::Vector{Int}, vals::Vector{ValType}) where {S, O, I, T1, T2, ValType}
     for item in items
         _run_and_store!(style, op, rows, cols, vals, item, src_tree, dst_tree)
     end
@@ -225,7 +238,8 @@ end
 """
     intersection_areas(manifold, threaded, dst_tree, src_tree;
                        intersection_operator = DefaultIntersectionOperator(manifold),
-                       npartitions = Threads.nthreads() * 4, progress = false)
+                       npartitions = Threads.nthreads() * 4, progress = false,
+                       cache = nothing)
 
 Assemble the sparse intersection matrix between `src_tree` and `dst_tree` on
 `manifold`.  Returns a `SparseMatrixCSC` of the output of the intersection operator.
@@ -245,8 +259,8 @@ This calls out to five functions, which dispatch on `intersection_operator`:
   regridder.
 - [`output_matrix_size(intersection_operator, src_tree, dst_tree)`](@ref output_matrix_size):
   return the `(nrows, ncols)` shape of the sparse matrix.  For the regular operator, this is
-  `(ncells(dst_tree), ncells(src_tree))`.  For the spectral element regridder, this is more
-  complex.
+  `(cell_index_count(dst_tree), cell_index_count(src_tree))`.  For the spectral element
+  regridder, this is more complex.
 - [`output_eltype(intersection_operator, src_tree, dst_tree)`](@ref output_eltype): return the
   element type of the sparse matrix.  This is usually `Float64`, but may be different, especially
   if you wish to build up e.g. a matrix of intersection _polygons_, rather than just areas.
@@ -256,35 +270,41 @@ This calls out to five functions, which dispatch on `intersection_operator`:
 `threaded` is a `GeometryOpsCore.BoolsAsTypes` (`True()`/`False()`; convert via
 `booltype(::Bool)`). When threaded, work items are partitioned into `npartitions`
 chunks assembled on separate tasks via ChunkSplitters.jl.
+
+Pass a [`SparseMatrixAssemblyCache`](@ref) with `cache=...` to reuse candidate
+and serial COO buffers across calls.
 """
 function intersection_areas(
         manifold::M, threaded::BoolsAsTypes, dst_tree, src_tree;
         intersection_operator = DefaultIntersectionOperator(manifold),
         npartitions::Int = Threads.nthreads() * 4,
         progress = false,
+        cache = nothing,
     ) where {M <: Manifold}
 
     # Resolve the return-style trait once, here, and thread `style` through everything.
     style = IntersectionReturnStyle(intersection_operator)
+    ValType = output_eltype(intersection_operator, src_tree, dst_tree)
+    scratch = _assembly_cache(ValType, cache)
 
-    predicate_f = if M <: Spherical
-        GO.UnitSpherical._intersects
-    else
-        Extents.intersects
+    try
+        # Every spatial tree participates through the public extent protocol.  In
+        # particular, spherical searches may pair cap and Cartesian XYZ extents.
+        predicate_f = Extents.intersects
+
+        # First, run the dual depth first search to get all candidate pairs of
+        # cells that may intersect.
+        candidate_pairs = get_all_candidate_pairs!(
+            scratch.candidate_pairs, threaded, predicate_f, src_tree, dst_tree)
+
+        # Map candidate pairs → work units (default: one pair per unit), assemble the
+        # COO triplets (in parallel or serially), and build the sparse matrix.
+        items = work_items(intersection_operator, candidate_pairs)
+        nrows, ncols = output_matrix_size(intersection_operator, src_tree, dst_tree)
+        return _assemble_sparse(
+            style, intersection_operator, items, src_tree, dst_tree, threaded, nrows, ncols,
+            scratch; npartitions, progress)
+    finally
+        empty!(scratch)
     end
-
-    # First, run the dual depth first search to get all candidate pairs of
-    # cells that may intersect.
-    candidate_pairs = get_all_candidate_pairs(threaded, predicate_f, src_tree, dst_tree)
-
-    # Map candidate pairs → work units (default: one pair per unit), collect ordered
-    # COO chunks, then hand those chunks to the independent sparse-assembly pipeline.
-    items = work_items(intersection_operator, candidate_pairs)
-    nrows, ncols = output_matrix_size(intersection_operator, src_tree, dst_tree)
-    chunks = _collect_coo_chunks(
-        style, intersection_operator, items, src_tree, dst_tree, threaded;
-        npartitions, progress,
-    )
-    max_windows = istrue(threaded) ? Threads.nthreads() : 1
-    return _sparse_from_chunks(chunks, nrows, ncols; max_windows)
 end

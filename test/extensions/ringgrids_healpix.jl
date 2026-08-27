@@ -3,6 +3,7 @@ using ConservativeRegridding.Trees
 using Test
 
 using RingGrids
+using SmallCollections: SmallVector, capacity
 import Healpix
 import GeometryOps as GO, GeometryOpsCore as GOCore
 import GeoInterface as GI
@@ -51,6 +52,7 @@ end
     @test face.grid isa RingGridsExt.HEALPixFaceGrid
     @test face.grid.face == 0
     @test face.leafranges == (1:4, 1:4)
+    @test Trees.cell_index_count(face) == 12 * 4^2
     @test STI.getchild(tree, 12).grid.face == 11
     @test STI.isleaf(face) == false
     @test STI.nchild(face) == 4                # 4×4 block → quartered
@@ -60,7 +62,10 @@ end
     @test leaf isa Trees.TopDownQuadtreeCursor && leaf.grid.face == 0
     @test length.(leaf.leafranges) == (2, 2)
     @test STI.isleaf(leaf) == true
-    @test length(collect(STI.child_indices_extents(leaf))) == 4
+    entries = @inferred STI.child_indices_extents(leaf)
+    @test entries isa SmallVector{4}
+    @test capacity(entries) == 4
+    @test length(entries) == 4
 
     # Leaves partition each face; every pixel is emitted exactly once: 12·nside² total.
     allcells = reduce(vcat, [collect(STI.child_indices_extents(l)) for l in leaves(tree)])

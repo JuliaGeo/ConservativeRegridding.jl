@@ -130,6 +130,7 @@ end
 
 manifold(g::OctaHEALPixFaceGrid) = g.manifold
 Trees.ncells(g::OctaHEALPixFaceGrid, ::Int) = g.nside
+Trees.cell_index_count(g::OctaHEALPixFaceGrid) = 4 * g.nside^2
 
 # Cell (1-based r, c) → its diamond polygon; corners CCW (E, N, W, S) for the
 # convex-clip kernel (a clockwise ring clips to empty).

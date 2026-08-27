@@ -22,6 +22,39 @@ COOChunk(rows::Vector{Int}, cols::Vector{Int}, vals::Vector{Tv}) where {Tv} =
 Base.length(chunk::COOChunk) = length(chunk.rows)
 Base.isempty(chunk::COOChunk) = isempty(chunk.rows)
 
+"""
+    SparseMatrixAssemblyCache([T = Float64])
+
+Reusable buffers for sparse intersection-matrix assembly. Pass the cache to
+[`Regridder`](@ref) or [`intersection_areas`](@ref) with `cache=...`; do not use
+one cache concurrently from multiple calls.
+"""
+mutable struct SparseMatrixAssemblyCache{T}
+    candidate_pairs::Vector{Tuple{Int, Int}}
+    rows::Vector{Int}
+    cols::Vector{Int}
+    vals::Vector{T}
+end
+
+SparseMatrixAssemblyCache(::Type{T}) where {T} =
+    SparseMatrixAssemblyCache(Tuple{Int, Int}[], Int[], Int[], T[])
+SparseMatrixAssemblyCache() = SparseMatrixAssemblyCache(Float64)
+
+function Base.empty!(cache::SparseMatrixAssemblyCache)
+    empty!(cache.candidate_pairs)
+    empty!(cache.rows)
+    empty!(cache.cols)
+    empty!(cache.vals)
+    return cache
+end
+
+_assembly_cache(::Type{T}, ::Nothing) where {T} = SparseMatrixAssemblyCache(T)
+_assembly_cache(::Type{T}, cache::SparseMatrixAssemblyCache{T}) where {T} = empty!(cache)
+function _assembly_cache(::Type{T}, cache::SparseMatrixAssemblyCache) where {T}
+    throw(ArgumentError(
+        "cache stores $(eltype(cache.vals)) values, but the intersection operator outputs $T"))
+end
+
 # Concatenate in chunk order, which is also the input order used to fold duplicates.
 function _concat_chunks(chunks::AbstractVector{<:COOChunk{Tv}}) where {Tv}
     isempty(chunks) && return Int[], Int[], Tv[]
@@ -280,4 +313,29 @@ function _sparse_from_chunks(
     windows = _scatter_to_windows(chunks, plan)
     matrices = _build_window_cscs(windows, plan, nrows)
     return _stitch_windows(matrices, plan, nrows, ncols)
+end
+
+# The serial path fills the cache-owned COO vectors, while the threaded path preserves
+# the independent ordered-chunk/window pipeline extracted here by #139.
+function _assemble_sparse(
+        style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::False,
+        nrows::Int, ncols::Int, scratch::SparseMatrixAssemblyCache{ValType}; kwargs...,
+    ) where {S, O, I, T1, T2, ValType}
+    chunk_op = task_local_operator(op)
+    chunk = _assemble_chunk_kernel!(
+        style, chunk_op, items, src_tree, dst_tree,
+        scratch.rows, scratch.cols, scratch.vals,
+    )
+    # The sparse constructor copies the cache-owned COO inputs before the caller clears them.
+    return _sparse_from_chunks(COOChunk{ValType}[chunk], nrows, ncols; max_windows = 1)
+end
+
+function _assemble_sparse(
+        style::S, op::O, items::I, src_tree::T1, dst_tree::T2, threaded::True,
+        nrows::Int, ncols::Int, ::SparseMatrixAssemblyCache; kwargs...,
+    ) where {S, O, I, T1, T2}
+    chunks = _collect_coo_chunks(
+        style, op, items, src_tree, dst_tree, threaded; kwargs...,
+    )
+    return _sparse_from_chunks(chunks, nrows, ncols; max_windows = Threads.nthreads())
 end

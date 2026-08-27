@@ -22,11 +22,14 @@ export ExampleFieldFunction, LongitudeField, SinusoidField, HarmonicField, GulfS
 include("trees/Trees.jl")
 using .Trees
 
-# The traversal's task sizing dispatches on `Trees.split_weight`, so it is included after Trees.
+# The serial traversal and its task frontier both dispatch on `Trees.split_weight`.
+include("utils/WeightedDualDepthFirstSearch.jl")
+using .WeightedDualDepthFirstSearch
+
 include("utils/MultithreadedDualDepthFirstSearch.jl")
 using .MultithreadedDualDepthFirstSearch
 
-export AbstractCurvilinearGrid, ncells, getcell
+export AbstractCurvilinearGrid, ncells, cell_index_count, getcell
 export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
 export QuadtreeCursor, TopDownQuadtreeCursor
 export should_parallelize, WithParallelizePolicy
@@ -47,8 +50,10 @@ include("regridder/intersection_operators/intersection_grid_operator.jl")
 @public areas
 @public AbstractDimensionalSlicer, NDSliceLoop, slice_views, extract_source_arraylike, extract_dest_arraylike
 # Intersection-operator assembly interface (operators can plug into `intersection_areas`)
-@public intersection_areas, DefaultIntersectionOperator, IntersectionGridOperator
+@public intersection_areas, SparseMatrixAssemblyCache, DefaultIntersectionOperator, IntersectionGridOperator
 @public IntersectionReturnStyle, OutOfPlaceSingleResult, InPlace
+# Deterministic weight-guided traversal.
+@public weighted_dual_depth_first_search
 @public work_items, output_matrix_size, output_eltype, should_store_result, task_local_operator
 
 """

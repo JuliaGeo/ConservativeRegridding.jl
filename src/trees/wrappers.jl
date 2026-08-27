@@ -21,8 +21,16 @@ STI.isleaf(wrapper::AbstractTreeWrapper) = STI.isleaf(parent(wrapper))
 STI.child_indices_extents(wrapper::AbstractTreeWrapper) = STI.child_indices_extents(parent(wrapper))
 STI.node_extent(wrapper::AbstractTreeWrapper) = STI.node_extent(parent(wrapper))
 
+#=
+`STI.node_extent_is_expensive` is answered from the *type*, so it cannot be forwarded
+through `parent` the way the methods above are - each wrapper has to name the type
+parameter its wrapped tree lives in.  A wrapper that overrides `node_extent` with an O(1)
+answer (`KnownFullSphereExtentWrapper`) wants the `false` default and so says nothing.
+=#
+
 getcell(wrapper::AbstractTreeWrapper, args...) = getcell(parent(wrapper), args...)
 ncells(wrapper::AbstractTreeWrapper, args...) = ncells(parent(wrapper), args...)
+cell_index_count(wrapper::AbstractTreeWrapper) = cell_index_count(parent(wrapper))
 cell_range_extent(wrapper::AbstractTreeWrapper, args...) = cell_range_extent(parent(wrapper), args...)
 split_weight(wrapper::AbstractTreeWrapper) = split_weight(parent(wrapper))
 
@@ -97,6 +105,8 @@ struct WithParallelizePolicy{T, F} <: AbstractTreeWrapper
     end
 end
 Base.parent(w::WithParallelizePolicy) = w.tree
+STI.node_extent_is_expensive(::Type{<: WithParallelizePolicy{T}}) where {T} =
+    STI.node_extent_is_expensive(T)
 
 
 """
@@ -123,9 +133,12 @@ STI.getchild(wrapper::GeometryMaintainingTreeWrapper, i::Int) = GeometryMaintain
 STI.isleaf(wrapper::GeometryMaintainingTreeWrapper) = STI.isleaf(parent(wrapper))
 STI.child_indices_extents(wrapper::GeometryMaintainingTreeWrapper) = STI.child_indices_extents(parent(wrapper))
 STI.node_extent(wrapper::GeometryMaintainingTreeWrapper) = STI.node_extent(parent(wrapper))
+STI.node_extent_is_expensive(::Type{<: GeometryMaintainingTreeWrapper{G, T}}) where {G, T} =
+    STI.node_extent_is_expensive(T)
 
 getcell(wrapper::GeometryMaintainingTreeWrapper, args...) = getindex(wrapper.geoms, args...)
 ncells(wrapper::GeometryMaintainingTreeWrapper, args...) = ncells(wrapper.tree, args...)
+cell_index_count(wrapper::GeometryMaintainingTreeWrapper) = cell_index_count(wrapper.tree)
 cell_range_extent(wrapper::GeometryMaintainingTreeWrapper, args...) = cell_range_extent(wrapper.geoms, args...)
 
 getcell(wrapper::GeometryMaintainingTreeWrapper{G, T}) where {G <: AbstractVector, T} = wrapper.geoms
@@ -168,6 +181,8 @@ struct IndexLocalizerRewrapperTree{T} <: AbstractTreeWrapper
 end
 
 Base.parent(wrapper::IndexLocalizerRewrapperTree) = wrapper.tree
+STI.node_extent_is_expensive(::Type{<: IndexLocalizerRewrapperTree{T}}) where {T} =
+    STI.node_extent_is_expensive(T)
 Trees.getcell(wrapper::IndexLocalizerRewrapperTree, i::Int) = Trees.getcell(parent(wrapper), i - wrapper.index_offset)
 Trees.getcell(wrapper::IndexLocalizerRewrapperTree) = Trees.getcell(parent(wrapper))
 

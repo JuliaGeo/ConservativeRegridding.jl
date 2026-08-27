@@ -55,6 +55,22 @@ function split_weight(node::N) where N
     return n isa Tuple ? Int(prod(n)) : Int(n)
 end
 
+"""
+    cell_index_count(tree) -> Int
+
+The size of the dense, one-based cell-index domain emitted by `tree`.
+
+This differs from [`Trees.ncells`](@ref) for a tree restricted to part of a
+larger grid: `ncells` describes the cells below that node, while
+`cell_index_count` describes the global index domain required to store its leaf
+indices.  Trees whose leaf indices are local may use the fallback, which derives
+the count from `ncells(tree)`.
+"""
+function cell_index_count(tree)
+    n = ncells(tree)
+    return n isa Tuple ? Int(prod(n)) : Int(n)
+end
+
 # Generic method to treeify "anything"
 function treeify(manifold, grid)
     if STI.isspatialtree(grid)
@@ -174,6 +190,9 @@ function ncells(grid::AbstractCurvilinearGrid, dim::Int)
     error("ncells not implemented for $(typeof(grid))")
 end
 
+cell_index_count(grid::AbstractCurvilinearGrid) =
+    Int(ncells(grid, 1)) * Int(ncells(grid, 2))
+
 """
     cell_range_extent(grid::AbstractCurvilinearGrid, irange::UnitRange{Int}, jrange::UnitRange{Int}) -> GO.UnitSpherical.SphericalCap{Float64}
 
@@ -254,6 +273,14 @@ STI.getchild(cursor::AbstractQuadtreeCursor, i::Int) = error("GO.STI.getchild no
 STI.isleaf(cursor::AbstractQuadtreeCursor) = error("GO.STI.isleaf not implemented for $(typeof(cursor))")
 STI.child_indices_extents(cursor::AbstractQuadtreeCursor) = error("GO.STI.child_indices_extents not implemented for $(typeof(cursor))")
 STI.node_extent(cursor::AbstractQuadtreeCursor) = error("GO.STI.node_extent not implemented for $(typeof(cursor))")
+
+"""
+    extent_is_expensive(grid) -> Bool
+
+Whether computing a grid's cell-range extent is expensive enough to cache.
+"""
+extent_is_expensive(grid) = extent_is_expensive(typeof(grid))
+extent_is_expensive(::Type{<: AbstractCurvilinearGrid}) = true
 
 
 # ## Implementations for external types

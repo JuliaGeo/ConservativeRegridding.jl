@@ -8,6 +8,7 @@ import GeometryOps as GO, GeometryOpsCore as GOCore
 import GeoInterface as GI
 import GeometryOps: SpatialTreeInterface as STI, UnitSpherical
 using StaticArrays: SA
+using SmallCollections: FixedVector
 using LinearAlgebra: normalize
 
 # Import Healpix as a regular Julia package
@@ -144,7 +145,7 @@ function STI.child_indices_extents(node::HealpixTreeNode{O}) where O
     # Convert to output ordering
     idx = O == Healpix.NestedOrder ? nested_pix + 1 : Healpix.nest2ring(res, nested_pix + 1)
     extent = STI.node_extent(node)
-    return ((idx, extent),)  # Single-element tuple
+    return FixedVector(((idx, extent),))
 end
 
 #=
@@ -167,6 +168,7 @@ function Trees.getcell(node::HealpixRootNode{O}, i::Int) where O
 end
 
 Trees.ncells(node::HealpixRootNode) = 12 * node.nside_max^2
+Trees.cell_index_count(node::HealpixTreeNode) = 12 * node.nside_max^2
 
 # Frontier task sizing: exact O(1) cell counts.
 Trees.split_weight(node::HealpixRootNode) = 12 * node.nside_max^2

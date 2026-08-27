@@ -35,13 +35,20 @@ The regridder needs to access cell geometry for intersection computation:
 ```julia
 using ConservativeRegridding.Trees
 
-Trees.ncells(tree) = <total number of grid cells>
+Trees.ncells(tree) = <number of cells below this tree node>
+Trees.cell_index_count(tree) = <size of the dense 1-based leaf-index domain>
 Trees.getcell(tree, i::Int) = <polygon for cell i (1-based)>
 Trees.getcell(tree) = <iterator over all cell polygons>
 Trees.treeify(::GO.Spherical, tree) = tree  # passthrough if already a tree
 
 GOCore.best_manifold(tree) = GO.Spherical()  # or GO.Planar()
 ```
+
+For an unrestricted tree with local indices, `cell_index_count` falls back to
+`ncells`. Override it when a restricted tree still emits indices from a larger
+global grid, or when a cursor applies an index offset. `ncells` remains the
+local subtree size used for traversal work estimates; `cell_index_count`
+determines the default sparse output dimensions.
 
 Cell polygons should use `UnitSphericalPoint` vertices for spherical grids:
 ```julia
