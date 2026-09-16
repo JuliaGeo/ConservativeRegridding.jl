@@ -12,7 +12,7 @@ using LinearAlgebra: normalize
 using StaticArrays: SVector, StaticArrays
 
 using ClimaCore:
-    CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies, DataLayouts, ClimaComms
+    CommonSpaces, Fields, Spaces, Meshes, Quadratures, Topologies, DataLayouts, ClimaComms
 import ClimaCore
 import ClimaCore.Utilities: linear_ind
 
@@ -99,14 +99,14 @@ Trees.treeify(manifold::GOCore.Spherical, field::ClimaCore.Fields.Field) = Trees
 
 ## Node extraction helpers for spectral element fields
 """
-    flat_nodal_data(data::DataLayouts.AbstractData) → Vector
+    flat_nodal_data(data::DataLayouts.DataLayout) → Vector
 
 Flatten nodal storage to a `Vector`. Parent arrays are always 5-D
 `(v, i, j, f, h)` with logical DataLayout indexing `(v, i, j, h)`. For multi-level data
-the first vertical level is taken. Unlike `Fields.field2array`, accepts raw `AbstractData`
+the first vertical level is taken. Unlike `Fields.field2array`, accepts a raw `DataLayout`
 (e.g. `Fields.field_values(coords.lat)`, `Spaces.weighted_jacobian(space)`).
 """
-function flat_nodal_data(data::DataLayouts.AbstractData)
+function flat_nodal_data(data::DataLayouts.DataLayout)
     Nv = DataLayouts.nlevels(data)
     if Nv == 1
         return vec(parent(data))
@@ -196,7 +196,7 @@ values on `space`:
     Jᵉ(ξ, η) ≈ Σ_{p,q} Jᵉₚᵩ ϕₚ(ξ) ϕᵩ(η)
 
 where `Jᵉₚᵩ = WJ[1, p, q, elem_idx] / (wₚ wᵩ)` is the unweighted Jacobian recovered from
-`Spaces.weighted_jacobian` storage (ClimaCore 0.15 DataLayout indexing `(v, i, j, h)`).
+`Spaces.weighted_jacobian` storage (DataLayout indexing `(v, i, j, h)`).
 Used to evaluate the `Jᵉ` factor of the FV → SE local mass matrix at off-node quadrature
 points; the `B` weights themselves do not need it (see `accumulate_principled_b`). See the
 "FV → SE" section of `docs/src/extensions/climacore.md`.
