@@ -6,7 +6,7 @@ using Test
 import GeometryOps as GO, GeoInterface as GI, LibGEOS
 
 using ClimaCore:
-    CommonSpaces, Fields, Spaces, RecursiveApply, Meshes, Quadratures, Topologies, Domains, ClimaComms
+    CommonSpaces, Fields, Spaces, Meshes, Quadratures, Topologies, Domains, ClimaComms
 using Oceananigans
 
 const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingClimaCoreExt)
