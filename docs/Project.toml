@@ -46,3 +46,6 @@ YAXArrayBase = "90b8fcef-0c2d-428d-9c56-5f86629e9d14"
 ConservativeRegridding = {path = ".."}
 GeometryBasics = {rev = "master", url = "https://github.com/JuliaGeometry/GeometryBasics.jl"}
 SphericalSpatialTrees = {rev = "main", url = "https://github.com/meggart/SphericalSpatialTrees.jl"}
+
+[compat]
+NaturalEarth = "0.1.1"
