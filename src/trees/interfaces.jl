@@ -15,7 +15,7 @@ thing that is returned implements the `SpatialTreeInterface` methods.
 import GeometryOpsCore as GOCore
 import GeometryOps as GO
 import GeometryOps: SpatialTreeInterface as STI
-import GeometryOps: FlexibleRTrees as FRT
+using GeometryOps: FlexibleRTrees
 import ConstructionBase
 import Extents
 import SortTileRecursiveTree # in order to implement the `getcell/ncell` interface
@@ -74,7 +74,7 @@ end
 
 # Generic method to treeify "anything".
 # The keyword arguments only apply to vectors of polygons - see `polygon_rtree`.
-function treeify(manifold, grid; algorithm::FRT.BulkLoadAlgorithm = FRT.STR(), nodecapacity::Int = 16)
+function treeify(manifold, grid; algorithm::FlexibleRTrees.BulkLoadAlgorithm = FlexibleRTrees.STR(), nodecapacity::Int = 16)
     if STI.isspatialtree(grid)
         if applicable(getcell, grid, 1)
             return grid
@@ -120,8 +120,8 @@ returns `polygons[i]`.
 polygons and/or multipolygons.
 """
 function polygon_rtree(manifold::GOCore.Manifold, polygons::AbstractVector;
-        algorithm::FRT.BulkLoadAlgorithm = FRT.STR(), nodecapacity::Int = 16)
-    tree = FRT.RTree(manifold, algorithm, polygons; nodecapacity)
+        algorithm::FlexibleRTrees.BulkLoadAlgorithm = FlexibleRTrees.STR(), nodecapacity::Int = 16)
+    tree = FlexibleRTrees.RTree(manifold, algorithm, polygons; nodecapacity)
     return GeometryMaintainingTreeWrapper(polygons, tree)
 end
 
@@ -319,8 +319,8 @@ end
 
 # Each level packs consecutive runs of `nodecapacity` nodes from the level below, so the
 # leaves under a node are one contiguous run of the leaf level.
-ncells(tree::FRT.RTree) = length(tree.indices)
-function ncells(node::FRT.RTreeNode)
+ncells(tree::FlexibleRTrees.RTree) = length(tree.indices)
+function ncells(node::FlexibleRTrees.RTreeNode)
     tree = node.tree
     span = tree.nodecapacity ^ (length(tree.levels) - node.level)
     return min(node.index * span, length(tree.indices)) - (node.index - 1) * span
