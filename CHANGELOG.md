@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.2.15
+
+### Changed
+- `Trees.treeify` on a vector of polygons and/or multipolygons now builds a
+  `GeometryOps.FlexibleRTrees.RTree` on the requested manifold, wrapped in a
+  `GeometryMaintainingTreeWrapper`, instead of a `FlatNoTree`. The bulk-load ordering and
+  node capacity are selectable via the `algorithm` (`STR()`, `HPR()`, `Unsorted()`) and
+  `nodecapacity` keywords. Other iterables of polygons still become a `FlatNoTree`.
+
+### Added
+- `Trees.ncells` for `FlexibleRTrees.RTree` and its nodes, and `cell_index_count` for a
+  `GeometryMaintainingTreeWrapper` over a vector of geometries.
+
 ## v0.2.14
 
 Updated ClimaCore compat to v1.

@@ -15,6 +15,7 @@ thing that is returned implements the `SpatialTreeInterface` methods.
 import GeometryOpsCore as GOCore
 import GeometryOps as GO
 import GeometryOps: SpatialTreeInterface as STI
+using GeometryOps: FlexibleRTrees
 import ConstructionBase
 import Extents
 import SortTileRecursiveTree # in order to implement the `getcell/ncell` interface
@@ -71,8 +72,9 @@ function cell_index_count(tree)
     return n isa Tuple ? Int(prod(n)) : Int(n)
 end
 
-# Generic method to treeify "anything"
-function treeify(manifold, grid)
+# Generic method to treeify "anything".
+# The keyword arguments only apply to vectors of polygons - see `polygon_rtree`.
+function treeify(manifold, grid; algorithm::FlexibleRTrees.BulkLoadAlgorithm = FlexibleRTrees.STR(), nodecapacity::Int = 16)
     if STI.isspatialtree(grid)
         if applicable(getcell, grid, 1)
             return grid
@@ -87,6 +89,8 @@ function treeify(manifold, grid)
         else
             error("grid is a matrix, but no element is a polygon or point - please implement `ConservativeRegridding.Trees.treeify` for this type!")
         end
+    elseif grid isa AbstractVector && !isempty(grid) && all(_is_polygonal, grid)
+        return polygon_rtree(manifold, grid; algorithm, nodecapacity)
     elseif Base.isiterable(typeof(grid))
         if all(g -> GI.trait(g) isa Union{GI.AbstractPolygonTrait, GI.AbstractMultiPolygonTrait}, grid)
             return STI.FlatNoTree(grid)
@@ -100,7 +104,26 @@ function treeify(manifold, grid)
     end
 end
 
-treeify(grid) = treeify(GOCore.best_manifold(grid), grid)
+treeify(grid; kwargs...) = treeify(GOCore.best_manifold(grid), grid; kwargs...)
+
+_is_polygonal(geom) = GI.trait(geom) isa Union{GI.PolygonTrait, GI.MultiPolygonTrait}
+
+"""
+    polygon_rtree(manifold, polygons::AbstractVector; algorithm = FlexibleRTrees.STR(), nodecapacity = 16)
+
+Build a `GeometryOps.FlexibleRTrees.RTree` over the extents of `polygons` on `manifold`,
+and wrap it in a [`Trees.GeometryMaintainingTreeWrapper`](@ref) so that `getcell(tree, i)`
+returns `polygons[i]`.
+
+`algorithm` chooses the bulk-load ordering: `STR()`, `HPR()` or `Unsorted()` from
+`GeometryOps.FlexibleRTrees`.  This is what [`Trees.treeify`](@ref) does with a vector of
+polygons and/or multipolygons.
+"""
+function polygon_rtree(manifold::GOCore.Manifold, polygons::AbstractVector;
+        algorithm::FlexibleRTrees.BulkLoadAlgorithm = FlexibleRTrees.STR(), nodecapacity::Int = 16)
+    tree = FlexibleRTrees.RTree(manifold, algorithm, polygons; nodecapacity)
+    return GeometryMaintainingTreeWrapper(polygons, tree)
+end
 
 # Some example implementations
 GOCore.best_manifold(grid::AbstractMatrix{<: GO.UnitSpherical.UnitSphericalPoint}) = GO.Spherical()
@@ -292,6 +315,15 @@ function getcell(tree::STI.FlatNoTree, idx::Integer)
 end
 function getcell(tree::STI.FlatNoTree)
     return tree.geometries
+end
+
+# Each level packs consecutive runs of `nodecapacity` nodes from the level below, so the
+# leaves under a node are one contiguous run of the leaf level.
+ncells(tree::FlexibleRTrees.RTree) = length(tree.indices)
+function ncells(node::FlexibleRTrees.RTreeNode)
+    tree = node.tree
+    span = tree.nodecapacity ^ (length(tree.levels) - node.level)
+    return min(node.index * span, length(tree.indices)) - (node.index - 1) * span
 end
 
 function ncells(tree::SortTileRecursiveTree.STRtree)
