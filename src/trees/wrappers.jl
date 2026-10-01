@@ -143,6 +143,8 @@ cell_range_extent(wrapper::GeometryMaintainingTreeWrapper, args...) = cell_range
 
 getcell(wrapper::GeometryMaintainingTreeWrapper{G, T}) where {G <: AbstractVector, T} = wrapper.geoms
 getcell(wrapper::GeometryMaintainingTreeWrapper{G, T}, i::Integer) where {G <: AbstractVector, T} = wrapper.geoms[i]
+# Leaf indices point into `geoms`, at every node of the tree.
+cell_index_count(wrapper::GeometryMaintainingTreeWrapper{G, T}) where {G <: AbstractVector, T} = length(wrapper.geoms)
 
 
 #=
