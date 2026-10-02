@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `Trees.ncells` for `FlexibleRTrees.RTree` and its nodes, and `cell_index_count` for a
   `GeometryMaintainingTreeWrapper` over a vector of geometries.
+- `Trees.treeify` for the RingGrids reduced grids that have no native tree
+  (`OctahedralGaussianGrid`, `OctahedralClenshawGrid`, `OctaminimalGaussianGrid`): the cell
+  polygons are built from RingGrids' own vertices and R-treed. Previously these errored.
 
 ## v0.2.14
 
