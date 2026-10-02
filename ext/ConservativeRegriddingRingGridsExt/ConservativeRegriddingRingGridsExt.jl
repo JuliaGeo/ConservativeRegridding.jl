@@ -27,7 +27,7 @@ function treeify(manifold::Spherical, grid::RingGrids.AbstractGrid; kwargs...)
     polygons = map(axes(E, 2)) do ij
         e, n, w, s = f((E[1, ij], E[2, ij])), f((N[1, ij], N[2, ij])), f((W[1, ij], W[2, ij])), f((S[1, ij], S[2, ij]))
         # RingGrids' vertices are clockwise; the convex-clip kernel needs CCW (E, N, W, S).
-        GI.Polygon(SA[GI.LinearRing(SA[e, n, w, s, e])])
+        GI.Polygon([GI.LinearRing([e, n, w, s, e])])
     end
     return treeify(manifold, polygons; kwargs...)
 end
