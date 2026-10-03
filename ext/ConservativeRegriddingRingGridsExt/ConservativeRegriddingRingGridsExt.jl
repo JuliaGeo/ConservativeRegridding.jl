@@ -18,8 +18,18 @@ best_manifold(field::RingGrids.AbstractField) = best_manifold(field.grid)
 
 treeify(manifold::Spherical, field::RingGrids.AbstractField) = treeify(manifold, field.grid)
 
-function treeify(manifold::Spherical, grid::RingGrids.AbstractGrid)
-    error("Not implemented for $(typeof(grid))")
+# Fallback for every grid without a native tree below (e.g. the reduced octahedral
+# Gaussian/Clenshaw/minimal grids): eagerly build each cell from RingGrids' own
+# E/S/W/N vertices, in ring (data) order, and let `treeify` R-tree the vector.
+function treeify(manifold::Spherical, grid::RingGrids.AbstractGrid; kwargs...)
+    E, S, W, N = RingGrids.get_vertices(typeof(grid), grid.nlat_half)
+    f = GO.UnitSphereFromGeographic()
+    polygons = map(axes(E, 2)) do ij
+        e, n, w, s = f((E[1, ij], E[2, ij])), f((N[1, ij], N[2, ij])), f((W[1, ij], W[2, ij])), f((S[1, ij], S[2, ij]))
+        # RingGrids' vertices are clockwise; the convex-clip kernel needs CCW (E, N, W, S).
+        GI.Polygon([GI.LinearRing([e, n, w, s, e])])
+    end
+    return treeify(manifold, polygons; kwargs...)
 end
 
 function treeify(manifold::Spherical, grid::RingGrids.AbstractFullGrid)
