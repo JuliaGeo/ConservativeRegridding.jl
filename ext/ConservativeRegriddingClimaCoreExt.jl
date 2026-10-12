@@ -504,9 +504,8 @@ Dense `Nq² × Nq²` FV → SE local mass matrix for SE element `elem_idx`,
 row/col flattening per `ClimaCore.Utilities.linear_ind()`. The integrand has bidegree
 `(2(Nq-1), 2(Nq-1))` (basis-function product) plus `(Nq-1, Nq-1)` (Lagrange-interpolated
 `Jᵉ`), total `(3(Nq-1), 3(Nq-1))`. A GLL rule with `n` points/direction is exact to degree
-`2n - 1`, so exactness needs `n ≥ (3Nq - 2)/2`; we use one point above that minimum,
-`n = ceil((3Nq - 2)/2) + 1`. See the "FV → SE" section of
-`docs/src/extensions/climacore.md`.
+`2n - 3`, so exactness needs `n ≥ 3Nq/2`; we use the minimum, `n = cld(3Nq, 2)`. See the
+"FV → SE" section of `docs/src/extensions/climacore.md`.
 """
 function compute_local_mass_matrix(
     space::ClimaCore.Spaces.AbstractSpectralElementSpace, elem_idx::Int,
@@ -515,9 +514,9 @@ function compute_local_mass_matrix(
     ξs_se, _ = Quadratures.quadrature_points(Float64, qs)
     Nq = length(ξs_se)
 
-    # Exact integration requires n ≥ (3Nq - 2)/2 GLL points;
-    # take one above the minimum for a safety margin.
-    n = ceil(Int, (3Nq - 2) / 2) + 1
+    # An n-point GLL rule is exact to degree 2n - 3, so the degree-3(Nq - 1)
+    # integrand needs n ≥ 3Nq/2 points.
+    n = cld(3Nq, 2)
     qs_q = Quadratures.GLL{n}()
     ξs_q, ws_q = Quadratures.quadrature_points(Float64, qs_q)
     Nq_q = length(ξs_q)
