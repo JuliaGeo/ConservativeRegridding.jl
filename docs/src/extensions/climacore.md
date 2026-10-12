@@ -71,18 +71,23 @@ B(k, (e,i,j)) = \int_{k \cap e} \phi_i\big(\xi(x)\big) \, \phi_j\big(\eta(x)\big
 ```
 
 The extension evaluates this physical-space form directly (`accumulate_principled_b`) by
-(1) fan-triangulating the intersection polygon ``k \cap e`` (already computed by 
-ConservativeRegridding.jl via GeometryOps.jl) from its centroid (2) using a barycentric 
+(1) fan-triangulating the intersection polygon ``k \cap e`` (already computed by
+ConservativeRegridding.jl via GeometryOps.jl) from its centroid, (2) applying a barycentric
 Gauss rule on each triangle, and (3) evaluating the basis functions at each quadrature point
-after inverting the element map to recover ``(\xi, \eta)``. The physical triangle areas
-carry the Jacobian, so ``J^e`` does not appear explicitly. This integration is exact to
-the quadrature order and is therefore high-order accurate in the element size.
+after inverting the element map to recover ``(\xi, \eta)``. On the sphere, the quadrature
+points are mapped onto each spherical triangle by the flat triangle followed by the radial
+projection ``p \mapsto p/|p|``, whose area density is proportional to ``1/|p|^3``; each point
+is weighted by this density, and the weights are normalized to the triangle's area on the
+manifold's sphere, so constants are integrated exactly. The physical triangle areas carry the
+Jacobian, so ``J^e`` does not appear explicitly. The integrand is smooth on each triangle, so
+the integration converges with the order of the rule and is high-order accurate in the
+element size.
 
-Two identities follow from the definition and are used below. Since the cells ``k`` tile
-the domain,
+Two identities follow from the definition and are used below. Where the cells ``k`` cover
+element ``e``,
 
 ```math
-\sum_k B(k, (e,i,j)) = W^e_{ij} ,
+\sum_k B(k, (e,i,j)) = \int_e \phi_i \, \phi_j \, \mathrm{d}A \approx W^e_{ij} ,
 ```
 
 and since the elements ``e`` tile the domain (and ``\sum_{i,j} \phi_i \phi_j = 1``),
@@ -145,20 +150,25 @@ f^{\mathrm{dst},e}_{ij} = \sum_{a,b} \big[(M^e)^{-1}\big]_{(ij),(ab)} \,
 ```
 
 Using the full mass-matrix inverse — rather than dividing by the lumped diagonal
-``W^e_{ij}`` — preserves constants exactly and is the optimal ``L^2`` fit of the source on
-the SE basis over each element.
+``W^e_{ij}`` — preserves constants exactly on elements the source covers and is the optimal
+``L^2`` fit of the source on the SE basis over each element.
 
 Two corrections appear in the implementation:
 
 - **Quadrature-consistency rescaling.** The mass matrix is integrated by tensor-product GLL
-  on the reference square, while ``B`` is integrated by triangulation of the physical
-  polygon; the two cover slightly different domains. Before solving, each row of ``M^e`` is
-  rescaled so its row sum matches the corresponding column sum of ``B``, which restores
-  exact constant preservation.
-- **Empty-overlap fallback.** A destination node may lie outside the source coverage (for
-  example a tripolar ocean grid that stops well short of the South Pole regridded onto a
-  full-sphere SE space), giving ``b^e_{ij} = 0``. Only the covered nodes enter the local
-  solve; uncovered nodes are left untouched rather than forced to zero.
+  on the reference square with the interpolated Jacobian, while ``B`` is integrated by
+  triangulation of the physical polygons, so ``M^e \mathbf{1}`` and the column sums of ``B``
+  differ slightly. On elements the source covers, each row of ``M^e`` is rescaled before
+  solving so that its row sum matches the corresponding column sum of ``B``, which makes
+  constants exact.
+- **Partial coverage.** Where the source covers an element only partly (for example a
+  tripolar ocean grid that stops short of the South Pole, regridded onto a full-sphere SE
+  space), the uncovered part counts as zero, as in the FV ``\to`` FV and SE ``\to`` FV
+  transfers: ``b^e`` integrates only the covered part, and the unscaled mass matrix gives the
+  ``L^2`` projection of the source extended by zero. This is conservative and well
+  conditioned; near the edge of the source grid the result falls off toward zero, with the
+  small over- and undershoots of any ``L^2`` projection of a discontinuous field. Elements the
+  source does not reach are set to zero.
 
 ## SE → SE
 

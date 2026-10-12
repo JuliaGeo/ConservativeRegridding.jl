@@ -232,9 +232,11 @@ end
 Polygon-intersection `B(k, (e, i, j))` weights for one SE element `e = elem_idx` and one
 physical-space intersection polygon `intersection_polygon`. Returns an `Nq × Nq` block with
 
-    B[i, j] ≈ Σ_t 2 Aₜ Σ_y wʸ ϕᵢ(ξ^{t,y}) ϕⱼ(η^{t,y}),
+    B[i, j] ≈ Σ_t Aₜ Σ_y ωᵗʸ ϕᵢ(ξ^{t,y}) ϕⱼ(η^{t,y}),    ωᵗʸ = wʸ ρᵗʸ / Σ_y' wʸ' ρᵗʸ',
 
-which approximates the physical-space form of the `B` definition,
+where `Aₜ` is the area of fan triangle `t` on the manifold's sphere and `ρᵗʸ` is the area
+density of the map from the reference triangle onto it (`triangle_area_density`). This
+approximates the physical-space form of the `B` definition,
 
     B[i, j] = ∫_{intersection_polygon} ϕᵢ(ξ(x)) ϕⱼ(η(x)) dA_phys.
 
@@ -274,6 +276,14 @@ function accumulate_principled_b(
         Aₜ = spherical_triangle_area(manifold, centroid, v₁, v₂)
         Aₜ ≤ 0 && continue
 
+        # Weight each quadrature point by the area density of the map onto the physical
+        # triangle, which is not constant on the sphere, and normalize the weights to sum to
+        # the triangle's exact area Aₜ so that constants are integrated exactly.
+        ρ_sum = zero(Aₜ)
+        for (λ, wᵧ) in zip(bary, w)
+            ρ_sum += wᵧ * triangle_area_density(manifold, λ, centroid, v₁, v₂)
+        end
+
         for (λ, wᵧ) in zip(bary, w)
             xᵧ = bary_to_physical(manifold, λ, centroid, v₁, v₂)
 
@@ -281,9 +291,7 @@ function accumulate_principled_b(
             Mξ = Quadratures.interpolation_matrix(SVector(ξ), ξs)
             Mη = Quadratures.interpolation_matrix(SVector(η), ξs)
 
-            # Reference rule's weights sum to 1/2 (ref triangle area); to map
-            # onto a physical triangle of area Aₜ, scale by Aₜ/(1/2) = 2 Aₜ.
-            wAᵧ = wᵧ * 2 * Aₜ
+            wAᵧ = Aₜ * wᵧ * triangle_area_density(manifold, λ, centroid, v₁, v₂) / ρ_sum
 
             @inbounds for j in 1:Nq, i in 1:Nq
                 B[i, j] += wAᵧ * Mξ[1, i] * Mη[1, j]
@@ -331,17 +339,31 @@ function bary_to_physical(::GOCore.Planar, λ, c, v₁, v₂)
             λ[1] * cy + λ[2] * y₁ + λ[3] * y₂)
 end
 
-# Spherical triangle area via GeometryOps (Girard's theorem internally). Build
-# the ring out of `UnitSphericalPoint`s so GeometryOps treats them as 3D
+# Area density, up to a constant factor, of the map from barycentric coordinates onto the
+# physical triangle (c, v₁, v₂) at λ. On the sphere, `bary_to_physical` is the flat triangle
+# followed by the radial projection p ↦ p/|p|, whose area density is d/|p|³, where d is the
+# distance from the origin to the flat triangle's plane; d cancels when the quadrature
+# weights are normalized. On the plane the map is affine, so the density is constant.
+function triangle_area_density(::GOCore.Spherical, λ, c, v₁, v₂)
+    px = λ[1] * c[1] + λ[2] * GI.x(v₁) + λ[3] * GI.x(v₂)
+    py = λ[1] * c[2] + λ[2] * GI.y(v₁) + λ[3] * GI.y(v₂)
+    pz = λ[1] * c[3] + λ[2] * GI.z(v₁) + λ[3] * GI.z(v₂)
+    return 1 / sqrt(px^2 + py^2 + pz^2)^3
+end
+
+triangle_area_density(::GOCore.Planar, λ, c, v₁, v₂) = 1.0
+
+# Spherical triangle area on the manifold's sphere (spherical excess times radius²) via
+# GeometryOps. Build the ring out of `UnitSphericalPoint`s so GeometryOps treats them as 3D
 # unit-sphere coordinates rather than (lon, lat, _) geographic tuples.
-function spherical_triangle_area(::GOCore.Spherical, p₁, p₂, p₃)
+function spherical_triangle_area(manifold::GOCore.Spherical, p₁, p₂, p₃)
     q₁ = UnitSphericalPoint(p₁[1], p₁[2], p₁[3])
     q₂ = UnitSphericalPoint(p₂[1], p₂[2], p₂[3])
     q₃ = UnitSphericalPoint(p₃[1], p₃[2], p₃[3])
     poly = GI.Polygon(StaticArrays.SA[GI.LinearRing(StaticArrays.SA[q₁, q₂, q₃, q₁])])
     # `::Float64` barrier: GO.area on a spherical polygon infers `Any`, which
     # otherwise boxes every quadrature weight downstream in accumulate_principled_b.
-    return GO.area(GO.Spherical(), poly)::Float64
+    return GO.area(manifold, poly)::Float64
 end
 
 function spherical_triangle_area(::GOCore.Planar, p₁, p₂, p₃)
@@ -549,6 +571,12 @@ function compute_local_mass_matrix(
     return M
 end
 
+# An element counts as covered by the source when its intersections with the source cells
+# account for its whole area up to this relative tolerance, which absorbs the small
+# differences between the quadratures of `B` and `Mᵉ` (and between the sphere radii of the
+# two grids).
+const FULL_COVERAGE_RTOL = 1e-4
+
 # FV → SE operator (`InPlace`, per-element L2 projection). The per-element mass-matrix solve
 # needs all of an element's cells at once, so `work_items` makes the element (not the
 # candidate pair) the unit of work. Assembled matrix is N_nodes × N_fv. See the "FV → SE"
@@ -617,15 +645,6 @@ function (op::FVToSEIntersectionOperator)(rows, cols, vals, (elem, cells), src_t
     isempty(d) && return nothing
 
     # Phase 2: solve Mᵉ f_dst = b for each cell column, push the COO block.
-    #
-    # Quadrature-consistency rescaling (see "FV → SE" in
-    # docs/src/extensions/climacore.md):
-    # Mᵉ comes from tensor-product GLL on the reference square but B from fan
-    # triangulation on the great-circle physical polygon, so the two
-    # quadratures integrate over slightly different domains. We rescale each
-    # row of Mᵉ so that its row sum equals the column-sum of B for that
-    # element — what Mᵉ·1 must equal by partition of unity if both sides used
-    # identical quadrature. This forces exact constant preservation.
     Mᵉ = compute_local_mass_matrix(op.dst_space, elem)
 
     b_full = zeros(Nq^2)
@@ -633,31 +652,35 @@ function (op::FVToSEIntersectionOperator)(rows, cols, vals, (elem, cells), src_t
         b_full .+= b_vec
     end
 
-    # Empty-overlap fallback (see "FV → SE" in docs/src/extensions/climacore.md):
-    # if b_full == 0 we are hitting regions with no overlap (for example
-    # regridding a tripolar grid that ends at 80ᵒ S onto a SE grid that
-    # covers the sphere). Only invert/solve on the covered nodes, leaving
-    # the uncovered destination nodes untouched.
-    covered = findall(!=(0), b_full)
-    isempty(covered) && return nothing
-    Mᶜ = Mᵉ[covered, covered]
-
-    row_sums = vec(sum(Mᶜ; dims=2))
-    for (rc, r) in enumerate(covered)
-        row_sums[rc] == 0 && continue
-        scale = b_full[r] / row_sums[rc]
-        @inbounds for c in axes(Mᶜ, 2)
-            Mᶜ[rc, c] *= scale
+    # Quadrature-consistency rescaling, on elements the source covers (see "FV → SE" in
+    # docs/src/extensions/climacore.md): Mᵉ comes from tensor-product GLL on the reference
+    # square with the interpolated Jacobian, but B from fan triangulation of the physical
+    # polygons, so Mᵉ·1 and the column sums of B differ slightly. Rescaling each row of Mᵉ so
+    # that its row sum equals the column sum of B makes constants exact.
+    #
+    # On a partially covered element (for example under the edge of a tripolar grid that
+    # stops short of the South Pole), the uncovered part counts as zero, as in the FV → FV and
+    # SE → FV transfers: b integrates only the covered part, and the unscaled Mᵉ gives the L2
+    # projection of the source extended by zero, which is conservative and well conditioned.
+    # Rescaling there would instead extrapolate the source over the whole element, and where
+    # the column sums of B approach zero it would make the local system nearly singular.
+    row_sums = vec(sum(Mᵉ; dims = 2))
+    if sum(b_full) > (1 - FULL_COVERAGE_RTOL) * sum(row_sums)
+        for r in axes(Mᵉ, 1)
+            scale = b_full[r] / row_sums[r]
+            @inbounds for c in axes(Mᵉ, 2)
+                Mᵉ[r, c] *= scale
+            end
         end
     end
 
-    Mᶜ_inv = inv(Mᶜ)
+    Mᵉ_inv = inv(Mᵉ)
 
     offset = (elem - 1) * Nq^2
     for (cell, b_vec) in d
-        new_col = Mᶜ_inv * b_vec[covered]
-        for (rc, r) in enumerate(covered)
-            val = new_col[rc]
+        new_col = Mᵉ_inv * b_vec
+        for r in eachindex(new_col)
+            val = new_col[r]
             val == 0 && continue
             push!(rows, offset + r)
             push!(cols, cell)
@@ -672,9 +695,11 @@ end
 
 Per-element L2 projection FV → SE. Same `B` accumulation as the SE → FV path, but
 per-element rows are multiplied by the *full* mass-matrix inverse `(M^{e})^{-1}` rather than
-divided by the lumped diagonal `Wᵉᵢⱼ`. This preserves constants exactly and is higher-order
-accurate: `f_dst = (M^{e})^{-1} (Bᵀ f_src)|_e` is the optimal L2 fit on the SE basis over
-element `e`. See the "FV → SE" section of `docs/src/extensions/climacore.md`.
+divided by the lumped diagonal `Wᵉᵢⱼ`. This preserves constants exactly on elements the source
+covers and is higher-order accurate: `f_dst = (M^{e})^{-1} (Bᵀ f_src)|_e` is the optimal L2 fit
+on the SE basis over element `e`. Where the source covers an element only partly, its
+uncovered part counts as zero; elements it does not reach are set to zero. See the "FV → SE"
+section of `docs/src/extensions/climacore.md`.
 """
 function fv_to_se_l2_projection(manifold, dst, src;
                                 threaded, triangle_quad_degree, kwargs...)
