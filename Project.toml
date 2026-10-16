@@ -15,6 +15,7 @@ Extents = "411431e0-e8b7-467b-b5e0-f676ba4f2910"
 GeoInterface = "cf35fbd7-0cd7-5166-be24-54bfbe79505f"
 GeometryOps = "3251bfac-6a57-4b6d-aa61-ac1fef2975ab"
 GeometryOpsCore = "05efe853-fabf-41c8-927e-7063c8b9f013"
+GridInterface = "7bba8399-ed35-4924-b5cf-83e2b32b3972"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 SciMLPublic = "431bcebd-1456-4ced-9d72-93c2757fff0b"
@@ -41,6 +42,19 @@ ConservativeRegriddingNCDatasetsExt = "NCDatasets"
 ConservativeRegriddingOceananigansExt = ["KernelAbstractions", "Oceananigans"]
 ConservativeRegriddingRingGridsExt = "RingGrids"
 
+# GridInterface and the split GeometryOps sub-packages it is built on are
+# unregistered: path sources, as DiscreteGlobalGrids declares them.
+[sources]
+GridInterface = {path = "../GridInterface.jl"}
+GeometryOps = {path = "/home/anshul/.julia/dev/geo/GeometryOps-split"}
+GeometryOpsCore = {path = "/home/anshul/.julia/dev/geo/GeometryOps-split/GeometryOpsCore"}
+SpatialTreeInterface = {path = "/home/anshul/.julia/dev/geo/GeometryOps-split/SpatialTreeInterface"}
+UnitSphericalGeometryCore = {path = "/home/anshul/.julia/dev/geo/GeometryOps-split/UnitSphericalGeometryCore"}
+
+[extras]
+SpatialTreeInterface = "bf42099b-6274-40f2-a94d-272408263a4f"
+UnitSphericalGeometryCore = "374d2b58-edf9-4f97-868a-42ae1c074d0a"
+
 [compat]
 ChunkSplitters = "3"
 ClimaCore = "0.15, 0.16, 1"
@@ -50,6 +64,7 @@ Extents = "0.1"
 GeoInterface = "1"
 GeometryOps = "0.1.45"
 GeometryOpsCore = "0.1.12"
+GridInterface = "0.0.1"
 KernelAbstractions = "0.9"
 LinearAlgebra = "1"
 Oceananigans = "0.113, 0.114, 0.115, 0.116"

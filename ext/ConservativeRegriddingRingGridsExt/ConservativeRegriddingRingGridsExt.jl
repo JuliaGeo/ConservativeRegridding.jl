@@ -10,7 +10,13 @@ import GeometryOpsCore: best_manifold, manifold, Manifold, Spherical
 import GeometryOps as GO
 import GeometryOps: SpatialTreeInterface as STI
 import GeoInterface as GI
-import StaticArrays: SA
+import StaticArrays: SA, SVector
+
+import GridInterface as GrI
+using GridInterface: UnitSphericalPoint
+using GridInterface.Structured
+import GridInterface.Structured: nfaces, facesize, facevertex, faceposition, facecell, facecross, facefan,
+    facecolumnmajor, hasfaceaxes, faceaxes, facecoords, faceperiod, FaceSeams, seamcross
 
 
 best_manifold(grid::RingGrids.AbstractGrid) = Spherical()
@@ -67,5 +73,8 @@ include("octahealpix.jl")
 
 # Standard 12-face HEALPix grids use a per-face range-subdivision quadtree (see healpix.jl).
 include("healpix.jl")
+
+# GridInterface providers over the same closed forms (see providers.jl).
+include("providers.jl")
 
 end

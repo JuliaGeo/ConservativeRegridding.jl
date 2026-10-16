@@ -14,6 +14,12 @@ using LinearAlgebra: normalize
 # Import Healpix as a regular Julia package
 import Healpix
 
+import GridInterface as GrI
+using GridInterface: UnitSphericalPoint
+using GridInterface.Structured
+import GridInterface.Structured: nfaces, facesize, facevertex, faceposition, facecell, facecross, facecolumnmajor,
+    FaceSeams, seamcross
+
 GOCore.best_manifold(::Healpix.HealpixMap{T, O}) where {T, O <: Healpix.Order} = GO.Spherical()
 
 Trees.treeify(::GO.Spherical, map::Healpix.HealpixMap{T, O}) where {T, O <: Healpix.Order} = HealpixRootNode{O}(map.resolution.nside)
@@ -205,6 +211,67 @@ Base.@constprop :aggressive function ConservativeRegridding.finalize_regridding!
     dst::Healpix.HealpixMap, regridder, dst_arraylike::AbstractVector; kwargs...
 )
     return ConservativeRegridding.finalize_regridding!(parent(dst), regridder, dst_arraylike; kwargs...)
+end
+
+
+#####
+##### GridInterface provider: a `Healpix.HealpixMap` as the 12 base faces of
+##### nside × nside pixels. Lattice vertex (a, b) of face f is Healpix.jl's
+##### `xyf2loc`/`loc2vec` at the face coordinates ((n+1-a)/n, (n+1-b)/n): the
+##### face lattice is turned by 180° so that the lattice ring of a cell is
+##### exactly the corner order `boundariesRing` (hence `get_pixel_corners_nested`)
+##### emits, (x+1, y+1), (x, y+1), (x, y), (x+1, y); for a power-of-two nside the
+##### values are bit-identical to `boundariesRing`'s `(xc ± dc, yc ± dc)`.
+##### Positions are the map's own pixel numbers (nested or ring, 1-based); the
+##### tree is the derived face quadtree (`HealpixRootNode` stays the native tree).
+#####
+
+"""
+    HealpixMapGrid(map::Healpix.HealpixMap)
+    HealpixMapGrid{O}(nside)
+
+The pixels of a HEALPix map of order `O` (`Healpix.NestedOrder` or
+`Healpix.RingOrder`) as a 12-face structured grid on `Spherical()`; cell `k`
+is pixel `k` of the map's order. Pixel corners are `boundariesRing`'s
+(curved edges, `CurvedEdges`), positions through `xyf2pixNest`/`xyf2pixRing`.
+"""
+struct HealpixMapGrid{O<:Healpix.Order} <: AbstractStructuredGrid
+    res::Healpix.Resolution
+    seams::FaceSeams
+end
+function HealpixMapGrid{O}(res::Healpix.Resolution) where {O<:Healpix.Order}
+    g = HealpixMapGrid{O}(res, FaceSeams(Matrix{Tuple{Int,Int}}(undef, 0, 0)))
+    return HealpixMapGrid{O}(res, FaceSeams(g))
+end
+HealpixMapGrid{O}(nside::Integer) where {O<:Healpix.Order} = HealpixMapGrid{O}(Healpix.Resolution(nside))
+HealpixMapGrid(map::Healpix.HealpixMap{T,O}) where {T,O} = HealpixMapGrid{O}(map.resolution)
+GOCore.best_manifold(::HealpixMapGrid) = GO.Spherical()
+@inline function _hploc(x, y, face)
+    z, phi, st, has = Healpix.xyf2loc(x, y, face)
+    v = Healpix.loc2vec(z, phi, st, has, Float64)
+    return UnitSphericalPoint(v[1], v[2], v[3])
+end
+nfaces(::HealpixMapGrid) = 12
+facesize(g::HealpixMapGrid, f) = (g.res.nside, g.res.nside)
+@inline facevertex(g::HealpixMapGrid, f, a, b) = (n = g.res.nside; _hploc((n + 1 - a) / n, (n + 1 - b) / n, f - 1))
+@inline faceposition(g::HealpixMapGrid{Healpix.NestedOrder}, f, i, j) = (n = g.res.nside; Healpix.xyf2pixNest(g.res, n - i, n - j, f - 1))
+@inline faceposition(g::HealpixMapGrid{Healpix.RingOrder}, f, i, j) = (n = g.res.nside; Healpix.xyf2pixRing(g.res, n - i, n - j, f - 1))
+@inline facecell(g::HealpixMapGrid{Healpix.NestedOrder}, k) = ((x, y, f) = Healpix.pix2xyfNest(g.res, k); n = g.res.nside; (f + 1, n - x, n - y))
+@inline facecell(g::HealpixMapGrid{Healpix.RingOrder}, k) = ((x, y, f) = Healpix.pix2xyfRing(g.res, k); n = g.res.nside; (f + 1, n - x, n - y))
+@inline facecross(g::HealpixMapGrid, f, i, j, s) = seamcross(g.seams, g, f, i, j, s)
+facecolumnmajor(::HealpixMapGrid, f) = false
+GrI.isglobal(::HealpixMapGrid) = true
+GrI.edgekind(::HealpixMapGrid) = GrI.CurvedEdges()
+GrI.cellshape(::HealpixMapGrid) = GrI.SimpleCells()
+GrI.location_is_analytic(::HealpixMapGrid) = true
+# Healpix.jl's own point location, checked against the geodesic ring (the
+# pixel's curved edges and the ring differ near the edges), else the tree.
+function GrI.cellat(g::HealpixMapGrid{O}, p) where {O}
+    p = GrI.check_point(GO.Spherical(), p)
+    θ = acos(clamp(p[3], -1.0, 1.0)); ϕ = mod(atan(p[2], p[1]), 2π)
+    k = O === Healpix.NestedOrder ? Healpix.ang2pixNest(g.res, θ, ϕ) : Healpix.ang2pixRing(g.res, θ, ϕ)
+    GrI.cell_contains(g, k, p) && return k
+    return GrI.fallback_cellat(GO.Spherical(), g, p)
 end
 
 end

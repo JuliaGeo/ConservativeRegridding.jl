@@ -30,4 +30,12 @@ function TestHelpers.test_integration_weights(field::ClimaCore.Fields.Field, reg
     cr_climacore_ext().se_node_weights(getfield(field, :space))
 end
 
+
+# looked up per call: the extensions load in no fixed order
+CCExt() = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingClimaCoreExt)
+
+TestHelpers.grid_of(topology::ClimaCore.Topologies.Topology2D) = CCExt().ClimaCoreCubedSphereGrid(topology)
+TestHelpers.grid_of(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = CCExt().ClimaCoreCubedSphereGrid(space)
+TestHelpers.grid_of(field::ClimaCore.Fields.Field) = TestHelpers.grid_of(axes(field))
+
 end

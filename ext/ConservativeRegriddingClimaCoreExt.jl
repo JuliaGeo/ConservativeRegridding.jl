@@ -16,6 +16,11 @@ using ClimaCore:
 import ClimaCore
 import ClimaCore.Utilities: linear_ind
 
+import GridInterface as GrI
+using GridInterface.Structured
+import GridInterface.Structured: nfaces, facesize, facevertex, faceposition, facecell, facecross, facecolumnmajor,
+    FaceSeams, seamcross
+
 """
     coords_for_face(mesh::CubedSphereMesh, face_idx)::Matrix{UnitSphericalPoint}
 
@@ -733,5 +738,60 @@ function ConservativeRegridding.finalize_regridding!(
     Spaces.weighted_dss!(dst)
     return dst
 end
+
+
+#####
+##### GridInterface provider: the elements of a cubed-sphere topology as six
+##### lattice faces of (ne+1)² vertices. A vertex is `coords_for_face`'s
+##### expression evaluated at one lattice point (`Meshes._coordinates` of the
+##### mesh at (ϕ[a], ϕ[b]) on face f, normalised), so nothing is precomputed;
+##### positions are the topology's element numbers (`orderindex`), whatever the
+##### element order (regular or a space-filling curve). The spectral-element
+##### node interface (SE ↔ FV operators above) stays CR's.
+#####
+
+"""
+    ClimaCoreCubedSphereGrid(topology::Topologies.Topology2D)
+    ClimaCoreCubedSphereGrid(space::Spaces.AbstractSpectralElementSpace)
+
+The elements of a cubed-sphere mesh as a six-face structured grid on
+`Spherical(; radius = mesh.domain.radius)`: face `f` is the mesh's panel `f`,
+cell `(i, j)` its element `(i, j, f)`, whose vertices are the mesh coordinates
+at `LinRange(-1, 1, ne + 1)` (the matrix `coords_for_face` builds, one point
+at a time). Positions are `topology.orderindex[i, j, f]`, so a Gilbert-ordered
+topology keeps its element numbers (`facecolumnmajor` is `false` then). The
+twelve panel seams come from the faces' corner vertices at construction.
+"""
+struct ClimaCoreCubedSphereGrid{Msh,O,E,M} <: AbstractStructuredGrid
+    mesh::Msh
+    ne::Int
+    orderindex::O               # (i, j, f) -> element number
+    elemorder::E                # element number -> CartesianIndex(i, j, f)
+    manifold::M
+    ϕ::LinRange{Float64,Int}
+    columnmajor::Bool
+    seams::FaceSeams
+end
+function ClimaCoreCubedSphereGrid(topology::Topologies.Topology2D{<:ClimaComms.AbstractCommsContext,<:Meshes.AbstractCubedSphere})
+    mesh = topology.mesh
+    ne = mesh.ne
+    g = ClimaCoreCubedSphereGrid(mesh, ne, topology.orderindex, topology.elemorder, GOCore.best_manifold(mesh),
+        LinRange(-1, 1, ne + 1), topology.elemorder isa CartesianIndices, FaceSeams(Matrix{Tuple{Int,Int}}(undef, 0, 0)))
+    return ClimaCoreCubedSphereGrid(mesh, ne, g.orderindex, g.elemorder, g.manifold, g.ϕ, g.columnmajor, FaceSeams(g))
+end
+ClimaCoreCubedSphereGrid(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = ClimaCoreCubedSphereGrid(Spaces.topology(space))
+GOCore.best_manifold(g::ClimaCoreCubedSphereGrid) = g.manifold
+nfaces(::ClimaCoreCubedSphereGrid) = 6
+facesize(g::ClimaCoreCubedSphereGrid, f) = (g.ne, g.ne)
+@inline function facevertex(g::ClimaCoreCubedSphereGrid, f, a, b)
+    coord = Meshes._coordinates(g.mesh, g.ϕ[a], g.ϕ[b], f)
+    return normalize(UnitSphericalPoint(coord.x1, coord.x2, coord.x3))
+end
+@inline faceposition(g::ClimaCoreCubedSphereGrid, f, i, j) = @inbounds Int(g.orderindex[i, j, f])
+@inline facecell(g::ClimaCoreCubedSphereGrid, k) = (e = @inbounds(g.elemorder[k]); (Int(e[3]), Int(e[1]), Int(e[2])))
+@inline facecross(g::ClimaCoreCubedSphereGrid, f, i, j, s) = seamcross(g.seams, g, f, i, j, s)
+facecolumnmajor(g::ClimaCoreCubedSphereGrid, f) = g.columnmajor
+GrI.isglobal(::ClimaCoreCubedSphereGrid) = true
+GrI.chunks(g::ClimaCoreCubedSphereGrid) = Structured.TileChunks(g, (16, 16))
 
 end

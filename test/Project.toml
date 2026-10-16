@@ -7,6 +7,8 @@ Extents = "411431e0-e8b7-467b-b5e0-f676ba4f2910"
 GeoInterface = "cf35fbd7-0cd7-5166-be24-54bfbe79505f"
 GeometryOps = "3251bfac-6a57-4b6d-aa61-ac1fef2975ab"
 GeometryOpsCore = "05efe853-fabf-41c8-927e-7063c8b9f013"
+GridInterface = "7bba8399-ed35-4924-b5cf-83e2b32b3972"
+GridInterfaceConformance = "aa8aab9d-9df5-42a8-9a40-2377a5cb432e"
 Healpix = "9f4e344d-96bc-545a-84a3-ae6b9e1b672b"
 IterTools = "c8e1da08-722c-5040-9ed9-7db0dc04731e"
 LibGEOS = "a90b1aa1-3769-5649-ba7e-abc5a9d163eb"
@@ -31,3 +33,13 @@ XESMF = "0.2"
 [sources]
 ConservativeRegridding = {path = ".."}
 ConservativeRegriddingTestHelpers = {path = "../lib/ConservativeRegriddingTestHelpers"}
+GridInterface = {path = "../../GridInterface.jl"}
+GridInterfaceConformance = {path = "../../GridInterface.jl/lib/GridInterfaceConformance"}
+GeometryOps = {path = "/home/anshul/.julia/dev/geo/GeometryOps-split"}
+GeometryOpsCore = {path = "/home/anshul/.julia/dev/geo/GeometryOps-split/GeometryOpsCore"}
+SpatialTreeInterface = {path = "/home/anshul/.julia/dev/geo/GeometryOps-split/SpatialTreeInterface"}
+UnitSphericalGeometryCore = {path = "/home/anshul/.julia/dev/geo/GeometryOps-split/UnitSphericalGeometryCore"}
+
+[extras]
+SpatialTreeInterface = "bf42099b-6274-40f2-a94d-272408263a4f"
+UnitSphericalGeometryCore = "374d2b58-edf9-4f97-868a-42ae1c074d0a"

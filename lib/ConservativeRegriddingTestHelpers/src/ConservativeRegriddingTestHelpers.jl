@@ -15,10 +15,15 @@ using LinearAlgebra: cross, dot, norm
 import ConservativeRegridding
 using ConservativeRegridding: Trees, TriangleQuadrature
 
+import GridInterface as GrI
+using GridInterface: GridAndTree
+import GeometryOpsCore as GOC
+import SpatialTreeInterface as STI
 
 export has_tripolar, has_rotated, has_spectral_element, has_full_ring_grid, has_cell_crossing_dateline
 export test_intersection_areas_agree, test_integration_weights, test_order_symmetry
 export SphericalPolygonIntegrator, set_field_values!, zero_field!
+export CRTree, cr_tree, grid_of, test_weights_agree
 
 """
     has_spectral_element(field)
@@ -183,5 +188,114 @@ Weights for the conservation check: cell areas (FV grids) or per-node quadrature
 weights (SE fields), so `sum(vals .* weights)` is the sphere integral either way.
 """
 test_integration_weights(field, regridder) = regridder.dst_areas
+
+
+# ===========================================================================
+# GridInterface: the bridge into CR's engine, the provider of a native grid,
+# and the weight comparison between the native and the provider path.
+# (The bridge lives here for now; it moves into CR with Phase 7.)
+# ===========================================================================
+
+"""
+    CRTree(gt::GridAndTree)
+    CRTree(grid, node)
+
+STI tree that forwards traversal to `node` (the pair's tree, or a node of it,
+whose leaves emit positions of the grid) and answers CR's cell-access hooks
+from the grid: `getcell(t, i) = cell_geometry(grid, i)`, `cell_index_count(t) =
+ncells(grid)`, `best_manifold(t) = best_manifold(grid)`, `split_weight(t) =
+split_weight(node)`, `subtree_indices(t) = subtree_indices(node)`.
+"""
+struct CRTree{G,T}
+    grid::G
+    node::T
+end
+CRTree(gt::GridAndTree) = CRTree(gt, gt.tree)
+cr_tree(gt::GridAndTree) = CRTree(gt)
+
+"""
+    cr_tree(grid) -> CRTree
+
+`CRTree(GridAndTree(grid; leaf_capacity = ForSweeps()))`: any GridInterface
+grid as a tree CR's `Regridder` consumes, `Regridder(cr_tree(dst), cr_tree(src))`.
+"""
+cr_tree(g) = CRTree(GridAndTree(g; leaf_capacity=GrI.ForSweeps()))
+
+STI.isspatialtree(::Type{<:CRTree}) = true
+STI.node_extent_is_expensive(::Type{CRTree{G,T}}) where {G,T} = STI.node_extent_is_expensive(T)
+STI.isleaf(t::CRTree) = STI.isleaf(t.node)
+STI.nchild(t::CRTree) = STI.nchild(t.node)
+STI.getchild(t::CRTree) = (CRTree(t.grid, c) for c in STI.getchild(t.node))
+STI.getchild(t::CRTree, i::Int) = CRTree(t.grid, STI.getchild(t.node, i))
+STI.node_extent(t::CRTree) = STI.node_extent(t.node)
+STI.child_indices_extents(t::CRTree) = STI.child_indices_extents(t.node)
+
+Trees.getcell(t::CRTree, i::Int) = GrI.cell_geometry(t.grid, i)
+Trees.getcell(t::CRTree) = (GrI.cell_geometry(t.grid, i) for i in 1:GrI.ncells(t.grid))
+# GridInterface trees answer GrI.split_weight, CR trees Trees.split_weight (each
+# defaults to 1 on the other's tree).
+_sw(n) = max(GrI.split_weight(n), Trees.split_weight(n))
+Trees.split_weight(t::CRTree) = _sw(t.node)
+Trees.ncells(t::CRTree) = GrI.ncells(t.grid)   # the cell count (CR's SE operators size the FV side by it); not the split weight
+GrI.split_weight(t::CRTree) = _sw(t.node)
+GrI.subtree_indices(t::CRTree) = GrI.subtree_indices(t.node)
+Trees.cell_index_count(t::CRTree) = GrI.ncells(t.grid)
+GOC.best_manifold(t::CRTree) = GOC.best_manifold(t.grid)
+Base.show(io::IO, t::CRTree) = print(io, "CRTree(", typeof(t.grid).name.name, ", ", t.node, ")")
+
+# GridInterface grids (and the wrappers) go straight into Regridder(dst, src).
+Trees.treeify(::GOC.Manifold, g::Union{GrI.AbstractGrid,GrI.AbstractWrappedGrid}; kw...) = cr_tree(g)
+
+"""
+    grid_of(x) -> GridInterface grid
+
+The GridInterface provider of a native grid or field (an Oceananigans grid,
+a ClimaCore cubed-sphere space or topology, a RingGrids grid, a
+`Healpix.HealpixMap`), with the cells CR's native path regrids: a masked
+(`ImmersedBoundaryGrid`) or U-pivot-folded Oceananigans grid answers the
+`Subset` of its wet, non-duplicated cells. Defined by the test-helper
+extensions for each package; a GridInterface grid is its own.
+"""
+grid_of(g::Union{GrI.AbstractGrid,GrI.AbstractWrappedGrid}) = g
+
+# the old (native) matrix restricted to the subset's parent positions
+function _restrict(R, rows, cols)
+    A = R.intersections; da = R.dst_areas; sa = R.src_areas
+    rows === nothing || (A = A[rows, :]; da = da[rows])
+    cols === nothing || (A = A[:, cols]; sa = sa[cols])
+    return A, da, sa
+end
+_outside_is_zero(A, rows, ::Val{1}) = rows === nothing || SparseArrays.nnz(A[setdiff(1:size(A, 1), rows), :]) == 0
+_outside_is_zero(A, cols, ::Val{2}) = cols === nothing || SparseArrays.nnz(A[:, setdiff(1:size(A, 2), cols)]) == 0
+_positions(g) = g isa GrI.Subset ? collect(GrI.parentpositions(g)) : nothing
+
+"""
+    test_weights_agree(old::Regridder, new::Regridder; rtol = 0, dst = nothing, src = nothing)
+
+`@test` that the regridder built on the provider path (`new`) has the same
+sparse pattern, weights and areas as the native one (`old`): bit-identical
+by default, within `rtol` when given. When the provider grid is a `Subset`
+(wet or unique cells), pass it as `dst`/`src`: the native matrix is compared
+on the subset's parent positions and the rows/columns outside must be zero.
+"""
+function test_weights_agree(old, new; rtol::Real=0, dst=nothing, src=nothing)
+    rows = _positions(dst); cols = _positions(src)
+    A, da, sa = _restrict(old, rows, cols)
+    B = new.intersections
+    @test size(A) == size(B)
+    @test _outside_is_zero(old.intersections, rows, Val(1))
+    @test _outside_is_zero(old.intersections, cols, Val(2))
+    size(A) == size(B) || return nothing
+    if rtol == 0
+        @test A == B
+        @test new.dst_areas == da
+        @test new.src_areas == sa
+    else
+        @test SparseArrays.findnz(A)[1:2] == SparseArrays.findnz(B)[1:2]
+        @test isapprox(SparseArrays.nonzeros(A), SparseArrays.nonzeros(B); rtol)
+        @test isapprox(new.dst_areas, da; rtol) && isapprox(new.src_areas, sa; rtol)
+    end
+    return nothing
+end
 
 end # module ConservativeRegriddingTestHelpers

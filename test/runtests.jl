@@ -17,6 +17,7 @@ using Test, SafeTestsets
     @safetestset "Extensions: HEALPix (RingGrids)" begin include("extensions/ringgrids_healpix.jl") end
     @safetestset "Extensions: reduced grids (RingGrids)" begin include("extensions/ringgrids_reduced.jl") end
     @safetestset "Extensions: NCDatasets" begin include("extensions/ncdatasets.jl") end
+    @safetestset "Extensions: GridInterface providers" begin include("providers.jl") end
   
     @safetestset "Comparison: XESMF" begin include("usecases/xesmf_comparison.jl") end
 

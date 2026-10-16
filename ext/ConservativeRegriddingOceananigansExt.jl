@@ -18,6 +18,13 @@ import GeometryOpsCore as GOCore
 import GeometryOps: SpatialTreeInterface as STI
 import Oceananigans.Architectures: on_architecture
 
+import Extents
+import GridInterface as GrI
+using GridInterface: UnitSphericalPoint, SmallVector
+using GridInterface.Structured
+import GridInterface.Structured: nfaces, facesize, facevertex, faceposition, facecell, facecross, facefan,
+    hasfaceaxes, faceaxes, facecoords, faceperiod, FaceSeams, seamcross
+
 instantiate(L) = L()
 
 function compute_cell_matrix(field::AbstractField)
@@ -304,5 +311,265 @@ on_architecture(arch, r::Regridder) =
 
 # Allow to set example data on the field
 Oceananigans.set!(field::Oceananigans.Field, f::ExampleFieldFunction) = Oceananigans.set!(field, (lon, lat, z) -> f(lon, lat))
+
+
+#####
+##### GridInterface providers: Oceananigans grids as `GridInterface.Structured`
+##### faces. Vertices are the values CR's `compute_cell_matrix` reads through
+##### `ξnode`/`ηnode` at (Face, Face): the grid's own λᶠᵃᵃ/φᵃᶠᵃ (lat/lon),
+##### xᶠᵃᵃ/yᵃᶠᵃ (rectilinear) and λᶠᶠᵃ/φᶠᶠᵃ (curvilinear, tripolar, cubed-sphere
+##### panels), read in place: no vertex matrix is built. Positions are the
+##### field layout `i + (j - 1) Nx` (panel-major on the cubed sphere).
+##### The native `Trees.treeify` methods above are untouched.
+#####
+
+const _USFG = GO.UnitSphereFromGeographic()
+@inline _vx(::GOCore.Spherical, x, y) = _USFG((x, y))
+@inline _vx(::GOCore.Planar, x, y) = (Float64(x), Float64(y))
+# λᶠᵃᵃ-style vectors and λᶠᶠᵃ-style matrices read the same way
+@inline _at(x::AbstractVector, a, b, ::Val{1}) = @inbounds x[a]
+@inline _at(x::AbstractVector, a, b, ::Val{2}) = @inbounds x[b]
+@inline _at(x::AbstractMatrix, a, b, ::Val) = @inbounds x[a, b]
+_isperiodic(TX) = TX === Oceananigans.Grids.Periodic
+
+"""
+    OceananigansLatLonGrid(grid::LatitudeLongitudeGrid)
+    OceananigansLatLonGrid(grid::RectilinearGrid)
+
+One lattice face with separable axes: the grid's own `λᶠᵃᵃ`/`φᵃᶠᵃ` (on
+`Spherical(; radius)`) or `xᶠᵃᵃ`/`yᵃᶠᵃ` (a `RectilinearGrid`, planar). Point
+location is the axis floor. Longitude is a seam when the grid's x topology is
+`Periodic` and it spans 360°; a latitude row at ±90° is collapsed (a pole
+fan). A planar rectilinear grid declares no seams: a periodic topology does
+not make its first and last vertex columns the same points. `isglobal` when
+spherical, periodic and reaching both poles.
+"""
+struct OceananigansLatLonGrid{X,Y,M} <: AbstractStructuredGrid
+    xs::X
+    ys::Y
+    manifold::M
+    Nx::Int
+    Ny::Int
+    periodic::NTuple{2,Bool}
+    collapsed::NTuple{2,Bool}
+end
+function OceananigansLatLonGrid(grid::Oceananigans.LatitudeLongitudeGrid)
+    Nx, Ny, _ = size(grid)
+    TX, _, _ = Oceananigans.Grids.topology(grid)
+    xs, ys = grid.λᶠᵃᵃ, grid.φᵃᶠᵃ
+    periodic = (_isperiodic(TX) && abs((xs[Nx+1] - xs[1]) - 360) <= 1e-9 * 360, false)
+    collapsed = (ys[1] <= -90, ys[Ny+1] >= 90)
+    return OceananigansLatLonGrid(xs, ys, GO.Spherical(; radius=grid.radius), Nx, Ny, periodic, collapsed)
+end
+function OceananigansLatLonGrid(grid::Oceananigans.RectilinearGrid)
+    Nx, Ny, _ = size(grid)
+    return OceananigansLatLonGrid(grid.xᶠᵃᵃ, grid.yᵃᶠᵃ, GO.Planar(), Nx, Ny, (false, false), (false, false))
+end
+GOCore.best_manifold(g::OceananigansLatLonGrid) = g.manifold
+nfaces(::OceananigansLatLonGrid) = 1
+facesize(g::OceananigansLatLonGrid, f) = (g.Nx, g.Ny)
+@inline facevertex(g::OceananigansLatLonGrid, f, a, b) = _vx(g.manifold, _at(g.xs, a, b, Val(1)), _at(g.ys, a, b, Val(2)))
+@inline faceposition(g::OceananigansLatLonGrid, f, i, j) = i + (j - 1) * g.Nx
+@inline facecell(g::OceananigansLatLonGrid, k) = (1, (k - 1) % g.Nx + 1, (k - 1) ÷ g.Nx + 1)
+@inline facecross(g::OceananigansLatLonGrid, f, i, j, s) = Structured._seamcross(g.periodic, g.collapsed, g.Nx, g.Ny, i, j, s)
+facefan(g::OceananigansLatLonGrid, f, a, b) = Structured._facefan(g, g.periodic, g.collapsed, f, a, b)
+GrI.maxneighbors(g::OceananigansLatLonGrid, ::GrI.Vertex) = Structured._vertexmaxneighbors(g.collapsed)
+hasfaceaxes(::OceananigansLatLonGrid, f) = true
+faceaxes(g::OceananigansLatLonGrid, f) = (view(g.xs, 1:g.Nx+1), view(g.ys, 1:g.Ny+1))
+facecoords(g::OceananigansLatLonGrid, f, p) = g.manifold isa GOCore.Spherical ? GO.GeographicFromUnitSphere()(p) :
+    (Float64(GI.x(p)), Float64(GI.y(p)))
+faceperiod(g::OceananigansLatLonGrid, f) = g.manifold isa GOCore.Spherical ? (360.0, nothing) : (nothing, nothing)
+GrI.extent_is_expensive(g::OceananigansLatLonGrid) = g.manifold isa GOCore.Spherical
+GrI.isglobal(g::OceananigansLatLonGrid) = g.manifold isa GOCore.Spherical && g.periodic[1] && g.collapsed[1] && g.collapsed[2]
+function Structured._blockextent(::GOCore.Planar, g::OceananigansLatLonGrid, f, ir::UnitRange{Int}, jr::UnitRange{Int})
+    return Extents.Extent(X=(Float64(g.xs[first(ir)]), Float64(g.xs[last(ir)+1])), Y=(Float64(g.ys[first(jr)]), Float64(g.ys[last(jr)+1])))
+end
+Structured._cellextent(m::GOCore.Planar, g::OceananigansLatLonGrid, f, i, j) = Structured._blockextent(m, g, f, i:i, j:j)
+
+"""
+    OceananigansCurvilinearGrid(grid::OrthogonalSphericalShellGrid)
+
+One lattice face over the grid's own `λᶠᶠᵃ`/`φᶠᶠᵃ` on `Spherical(; radius)`:
+a `RotatedLatitudeLongitudeGrid` (periodic x, collapsed poles where the
+vertex rows coincide) or a `TripolarGrid`. The tripolar fold is read off the
+y topology:
+
+- `RightFaceFolded` (F-pivot): vertex `(a, Ny+1)` is vertex `(Nx+2-a, Ny+1)`
+  again, so the north side of fold-row cell `(i, Ny)` is a seam onto cell
+  `(Nx+1-i, Ny)` (`facecross`); the two pivots are closed two-cell fans.
+- `RightCenterFolded` (U-pivot): vertex `(a, Ny+1)` is vertex `(Nx+2-a, Ny)`,
+  so fold-row cell `(i, Ny)` is the same quadrilateral as `(Nx+1-i, Ny)`: the
+  field layout holds the row twice. GridInterface has no verb for duplicated
+  cells, so this full layout declares `tessellation = Overlapping()`, keeps
+  the fold out of `facecross` (no consistent lattice crossing exists) and
+  answers `neighbors` by hand on the fold row, mapping each duplicate onto
+  its primary (CR's halves: `1:Nx÷4` and `Nx÷2+1:Nx÷2+Nx÷4`); [`unique_cells`](@ref)
+  is the `Subset` of primaries, which tessellates and is what
+  `grid_of` returns.
+"""
+struct OceananigansCurvilinearGrid{A,M} <: AbstractStructuredGrid
+    λ::A
+    φ::A
+    manifold::M
+    Nx::Int
+    Ny::Int
+    periodic_x::Bool
+    fold::Symbol            # :none, :face (RightFaceFolded), :center (RightCenterFolded)
+    collapsed::NTuple{2,Bool}
+end
+function OceananigansCurvilinearGrid(grid::Oceananigans.OrthogonalSphericalShellGrid)
+    Nx, Ny, _ = size(grid)
+    TX, TY, _ = Oceananigans.Grids.topology(grid)
+    fold = TY === RightCenterFolded ? :center : TY === RightFaceFolded ? :face : :none
+    λ, φ = grid.λᶠᶠᵃ, grid.φᶠᶠᵃ
+    m = GO.Spherical(; radius=grid.radius)
+    # a pole row: every vertex of the row is the same point (a rotated lat/lon grid reaching its poles)
+    samerow(b) = all(a -> GrI._near(_USFG((λ[a, b], φ[a, b])), _USFG((λ[1, b], φ[1, b]))), 2:Nx+1)
+    collapsed = fold === :none ? (samerow(1), samerow(Ny + 1)) : (false, false)
+    return OceananigansCurvilinearGrid(λ, φ, m, Nx, Ny, _isperiodic(TX), fold, collapsed)
+end
+GOCore.best_manifold(g::OceananigansCurvilinearGrid) = g.manifold
+nfaces(::OceananigansCurvilinearGrid) = 1
+facesize(g::OceananigansCurvilinearGrid, f) = (g.Nx, g.Ny)
+@inline facevertex(g::OceananigansCurvilinearGrid, f, a, b) = @inbounds _USFG((g.λ[a, b], g.φ[a, b]))
+@inline faceposition(g::OceananigansCurvilinearGrid, f, i, j) = i + (j - 1) * g.Nx
+@inline facecell(g::OceananigansCurvilinearGrid, k) = (1, (k - 1) % g.Nx + 1, (k - 1) ÷ g.Nx + 1)
+@inline function facecross(g::OceananigansCurvilinearGrid, f, i, j, s)
+    if s == 3 && g.fold === :face
+        return (1, g.Nx + 1 - i, g.Ny, 3)                # the F-pivot fold: a seam onto the mirrored cell
+    end
+    s == 3 && g.fold === :center && return nothing     # the U-pivot fold: no lattice crossing (see the docstring)
+    return Structured._seamcross((g.periodic_x, false), g.collapsed, g.Nx, g.Ny, i, j, s)
+end
+facefan(g::OceananigansCurvilinearGrid, f, a, b) = Structured._facefan(g, (g.periodic_x, false), g.collapsed, f, a, b)
+GrI.maxneighbors(g::OceananigansCurvilinearGrid, ::GrI.Vertex) = Structured._vertexmaxneighbors(g.collapsed)
+GrI.isglobal(g::OceananigansCurvilinearGrid) = g.fold === :none && g.periodic_x && g.collapsed[1] && g.collapsed[2]
+GrI.tessellation(g::OceananigansCurvilinearGrid) = g.fold === :center ? GrI.Overlapping() : GrI.Tessellating()
+
+# --- the U-pivot fold row ---------------------------------------------------
+"Whether column `i` of the fold row is a primary (CR's halves) rather than a duplicate."
+@inline _isprimary(g::OceananigansCurvilinearGrid, i) = (Nq = g.Nx ÷ 4; Nh = g.Nx ÷ 2; i <= Nq || Nh < i <= Nh + Nq)
+@inline _primary(g::OceananigansCurvilinearGrid, i) = (i = mod1(i, g.Nx); _isprimary(g, i) ? i : g.Nx + 1 - i)
+
+"""
+    unique_cells(g::OceananigansCurvilinearGrid) -> Subset
+
+The cells of the field layout that are not duplicates: everything but the
+duplicated half of a U-pivot fold row (the whole grid otherwise).
+"""
+function unique_cells(g::OceananigansCurvilinearGrid)
+    g.fold === :center || return GrI.subset(g, 1:GrI.ncells(g))
+    Nq, Nh = g.Nx ÷ 4, g.Nx ÷ 2
+    off = (g.Ny - 1) * g.Nx
+    return GrI.subset(g, GrI.RangeCat([1:off+Nq, off+Nh+1:off+Nh+Nq]))     # lazy: O(1), not O(ncells)
+end
+unique_cells(g::AbstractStructuredGrid) = GrI.subset(g, 1:GrI.ncells(g))
+
+function GrI.neighbors(g::OceananigansCurvilinearGrid, k::Integer; connectivity::GrI.Connectivity=GrI.Vertex())
+    g.fold === :center || return Structured._structured_neighbors(g, Int(k), connectivity)
+    return _fold_neighbors(g, Int(k), connectivity)
+end
+# The structured answer with the fold row's duplicates mapped onto their
+# primaries, and the fold row itself by hand: physically, the north side of
+# fold-row cell (i, Ny) meets cell (Nx+1-i, Ny-1), the cell under its twin.
+function _fold_neighbors(g::OceananigansCurvilinearGrid, k::Int, connectivity)
+    Nx, Ny = g.Nx, g.Ny
+    _, i, j = facecell(g, k)
+    pos(ii, jj) = mod1(ii, Nx) + (jj - 1) * Nx
+    if j < Ny
+        nb = Structured._structured_neighbors(g, k, connectivity)
+        out = SmallVector{8,Int}()
+        for q in nb
+            _, qi, qj = facecell(g, q)
+            qj == Ny && (qi = _primary(g, qi))
+            out = Structured._add(out, pos(qi, qj))
+        end
+        return out
+    end
+    i = _primary(g, i)                 # a duplicate answers as its primary
+    k0 = pos(i, Ny)
+    p = Nx + 1 - i                     # the twin's column
+    out = SmallVector{8,Int}()
+    cand = connectivity isa GrI.Edge ?
+        ((i, Ny - 1), (_primary(g, i + 1), Ny), (p, Ny - 1), (_primary(g, i - 1), Ny), (0, 0), (0, 0), (0, 0), (0, 0)) :
+        ((i, Ny - 1), (i + 1, Ny - 1), (_primary(g, i + 1), Ny), (p - 1, Ny - 1),
+         (p, Ny - 1), (p + 1, Ny - 1), (_primary(g, i - 1), Ny), (i - 1, Ny - 1))
+    for (ii, jj) in cand
+        1 <= jj <= Ny || continue
+        q = pos(ii, jj)
+        q == k0 || (out = Structured._add(out, q))
+    end
+    return out
+end
+
+"""
+    wet_cells(ibg::ImmersedBoundaryGrid; k = size(ibg, 3)) -> Subset
+
+The active cells of an immersed-boundary grid: the unique cells of the
+underlying grid's provider that are not immersed at level `k` (the surface
+by default), as a `Subset` whose tree is the provider's quadtree with the
+masked cells skipped. O(active cells) storage.
+"""
+function wet_cells(ibg::Oceananigans.ImmersedBoundaryGrid; k::Integer=size(ibg, 3))
+    g = structured_grid(ibg.underlying_grid)
+    ib = ibg.immersed_boundary
+    keep = Int[]
+    for p in GrI.parentpositions(unique_cells(g))
+        _, i, j = facecell(g, p)
+        Oceananigans.ImmersedBoundaries.immersed_cell(i, j, k, ibg.underlying_grid, ib) || push!(keep, p)
+    end
+    return GrI.subset(g, keep)
+end
+
+"""
+    OceananigansCubedSphereGrid(grid::ConformalCubedSphereGrid)
+
+Six lattice faces, one per panel, over each panel's own `λᶠᶠᵃ`/`φᶠᶠᵃ` on
+`Spherical(; radius)`; positions are panel-major, `i + (j-1) Nx + (f-1) Nx Ny`.
+The twelve panel seams are found from the panels' corner vertices
+([`FaceSeams`](@ref GridInterface.Structured.FaceSeams)) once at construction.
+"""
+struct OceananigansCubedSphereGrid{A,M} <: AbstractStructuredGrid
+    λ::NTuple{6,A}
+    φ::NTuple{6,A}
+    manifold::M
+    Nx::Int
+    Ny::Int
+    seams::FaceSeams
+end
+function OceananigansCubedSphereGrid(grid::Oceananigans.MultiRegion.MultiRegionGrid)
+    ps = ntuple(k -> Oceananigans.MultiRegion.getregion(grid, k), 6)
+    Nx, Ny, _ = size(ps[1])
+    g = OceananigansCubedSphereGrid(ntuple(k -> ps[k].λᶠᶠᵃ, 6), ntuple(k -> ps[k].φᶠᶠᵃ, 6),
+        GO.Spherical(; radius=ps[1].radius), Nx, Ny, FaceSeams(Matrix{Tuple{Int,Int}}(undef, 0, 0)))
+    return OceananigansCubedSphereGrid(g.λ, g.φ, g.manifold, Nx, Ny, FaceSeams(g))
+end
+GOCore.best_manifold(g::OceananigansCubedSphereGrid) = g.manifold
+nfaces(::OceananigansCubedSphereGrid) = 6
+facesize(g::OceananigansCubedSphereGrid, f) = (g.Nx, g.Ny)
+@inline facevertex(g::OceananigansCubedSphereGrid, f, a, b) = @inbounds _USFG((g.λ[f][a, b], g.φ[f][a, b]))
+@inline faceposition(g::OceananigansCubedSphereGrid, f, i, j) = i + (j - 1) * g.Nx + (f - 1) * g.Nx * g.Ny
+@inline function facecell(g::OceananigansCubedSphereGrid, k)
+    f, r = divrem(k - 1, g.Nx * g.Ny)
+    return (f + 1, r % g.Nx + 1, r ÷ g.Nx + 1)
+end
+@inline facecross(g::OceananigansCubedSphereGrid, f, i, j, s) = seamcross(g.seams, g, f, i, j, s)
+GrI.isglobal(::OceananigansCubedSphereGrid) = true
+
+"""
+    structured_grid(grid) -> AbstractStructuredGrid
+
+The provider for a native Oceananigans grid, with every cell of its field
+layout: [`OceananigansLatLonGrid`](@ref), [`OceananigansCurvilinearGrid`](@ref)
+or [`OceananigansCubedSphereGrid`](@ref); an immersed-boundary grid answers
+its underlying grid's. The active cells (`wet_cells`, `unique_cells`) are
+subsets of it.
+"""
+structured_grid(grid::Oceananigans.LatitudeLongitudeGrid) = OceananigansLatLonGrid(grid)
+structured_grid(grid::Oceananigans.RectilinearGrid) = OceananigansLatLonGrid(grid)
+structured_grid(grid::Oceananigans.OrthogonalSphericalShellGrid) = OceananigansCurvilinearGrid(grid)
+structured_grid(grid::Oceananigans.MultiRegion.MultiRegionGrid) = OceananigansCubedSphereGrid(grid)
+structured_grid(grid::Oceananigans.ImmersedBoundaryGrid) = structured_grid(grid.underlying_grid)
+structured_grid(field::Oceananigans.AbstractField) = structured_grid(field.grid)
 
 end
