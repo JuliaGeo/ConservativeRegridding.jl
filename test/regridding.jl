@@ -39,6 +39,30 @@ end
     @test buffers === (cache.candidate_pairs, cache.rows, cache.cols, cache.vals)
 end
 
+@testset "candidate_pairs and the positional-pairs intersection_areas" begin
+    make_grid(nx, ny; x0 = 0.0, y0 = 0.0) = [GI.Polygon([GI.LinearRing([
+        (x0 + (i - 1) / nx, y0 + (j - 1) / ny), (x0 + i / nx, y0 + (j - 1) / ny),
+        (x0 + i / nx, y0 + j / ny), (x0 + (i - 1) / nx, y0 + j / ny),
+        (x0 + (i - 1) / nx, y0 + (j - 1) / ny)])]) for i in 1:nx, j in 1:ny]
+    m = GeometryOpsCore.Planar()
+    src_grid = cr_grid(m, make_grid(8, 8))
+    dst_grid = cr_grid(m, make_grid(12, 6; x0 = 0.3, y0 = 0.1))
+    tree = ConservativeRegridding.intersection_areas(m, GeometryOpsCore.False(), dst_grid, src_grid)
+    for threaded in (GeometryOpsCore.False(), GeometryOpsCore.True())
+        pairs = ConservativeRegridding.candidate_pairs(threaded,
+            sweep_tree(dst_grid), sweep_tree(src_grid))
+        @test pairs isa Vector{Tuple{Int,Int}}
+        @test allunique(pairs)
+        # every overlapping (src, dst) pair is named
+        rows, cols, _ = findnz(tree)
+        @test all(in(pairs), zip(cols, rows))
+        # the same pairs assemble the same matrix
+        A = ConservativeRegridding.intersection_areas(m, threaded, dst_grid, src_grid, pairs)
+        @test A == tree
+        @test size(A) == size(tree)
+    end
+end
+
 @testset "Custom intersection_operator" begin
     make_square() = GI.Polygon([GI.LinearRing([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)])])
 

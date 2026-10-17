@@ -143,6 +143,23 @@ end
 get_all_candidate_pairs(threaded, predicate_f, src_tree, dst_tree) =
     get_all_candidate_pairs!(Tuple{Int, Int}[], threaded, predicate_f, src_tree, dst_tree)
 
+"""
+    candidate_pairs(threaded, dst_tree, src_tree) -> Vector{Tuple{Int,Int}}
+
+The candidate `(src_index, dst_index)` pairs the dual-tree search of
+[`intersection_areas`](@ref) would name: every pair of leaves of `src_tree` and
+`dst_tree` whose extents intersect (`Extents.intersects`, so spherical caps and
+Cartesian boxes may be paired), each listed once, in the deterministic weighted
+order both the serial and the threaded search share. Every pair that truly
+overlaps is listed; a listed pair need not overlap.
+
+`threaded` is a `GeometryOpsCore.BoolsAsTypes`. Hand the result to the
+positional-pairs form of [`intersection_areas`](@ref) to assemble over pairs
+discovered some other way, or to compare discoveries.
+"""
+candidate_pairs(threaded::BoolsAsTypes, dst_tree, src_tree) =
+    get_all_candidate_pairs(threaded, Extents.intersects, src_tree, dst_tree)
+
 # Shared parallel COO assembly. `style` (the resolved `IntersectionReturnStyle`)
 # is threaded through so the trait is never looked up in the hot loop.
 
@@ -305,6 +322,42 @@ function intersection_areas(
 
         # Map candidate pairs → work units (default: one pair per unit), assemble the
         # COO triplets (in parallel or serially), and build the sparse matrix.
+        items = work_items(intersection_operator, candidate_pairs)
+        nrows, ncols = output_matrix_size(intersection_operator, src, dst)
+        return _assemble_sparse(
+            style, intersection_operator, items, src, dst, threaded, nrows, ncols,
+            scratch; npartitions, progress)
+    finally
+        empty!(scratch)
+    end
+end
+
+"""
+    intersection_areas(manifold, threaded, dst, src, candidate_pairs;
+                       intersection_operator = DefaultIntersectionOperator(manifold, src, dst),
+                       npartitions = Threads.nthreads() * 4, progress = false,
+                       cache = nothing)
+
+Assemble the sparse intersection matrix between the GridInterface grids `src`
+and `dst` over the candidate `(src_index, dst_index)` pairs given, instead of
+the pairs a dual-tree search of the grids' trees would name. The pairs are in
+the grids' positions, each listed once; every pair that truly overlaps must be
+listed. The operator interface, the threading and the cache are the tree
+form's. [`candidate_pairs`](@ref) names the pairs the tree form would use, so
+the two forms assemble the same matrix from the same trees.
+"""
+function intersection_areas(
+        manifold::M, threaded::BoolsAsTypes, dst, src,
+        candidate_pairs::AbstractVector{Tuple{Int, Int}};
+        intersection_operator = DefaultIntersectionOperator(manifold, src, dst),
+        npartitions::Int = Threads.nthreads() * 4,
+        progress = false,
+        cache = nothing,
+    ) where {M <: Manifold}
+    style = IntersectionReturnStyle(intersection_operator)
+    ValType = output_eltype(intersection_operator, src, dst)
+    scratch = _assembly_cache(ValType, cache)
+    try
         items = work_items(intersection_operator, candidate_pairs)
         nrows, ncols = output_matrix_size(intersection_operator, src, dst)
         return _assemble_sparse(

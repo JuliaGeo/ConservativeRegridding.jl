@@ -52,7 +52,7 @@ include("regridder/intersection_operators/intersection_grid_operator.jl")
 @public areas
 @public AbstractDimensionalSlicer, NDSliceLoop, slice_views, extract_source_arraylike, extract_dest_arraylike
 # Intersection-operator assembly interface (operators can plug into `intersection_areas`)
-@public intersection_areas, SparseMatrixAssemblyCache, DefaultIntersectionOperator, IntersectionGridOperator
+@public intersection_areas, candidate_pairs, SparseMatrixAssemblyCache, DefaultIntersectionOperator, IntersectionGridOperator
 @public IntersectionReturnStyle, OutOfPlaceSingleResult, InPlace
 # Deterministic weight-guided traversal.
 @public weighted_dual_depth_first_search
