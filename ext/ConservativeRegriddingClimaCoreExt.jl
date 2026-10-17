@@ -1,7 +1,6 @@
 module ConservativeRegriddingClimaCoreExt
 
 import ConservativeRegridding
-using ConservativeRegridding: Trees
 
 import GeometryOpsCore as GOCore
 import GeometryOps as GO
@@ -40,67 +39,11 @@ function coords_for_face(mesh::Meshes.AbstractCubedSphere, face_idx)
     return coords
 end
 
-function Trees.treeify(manifold::GOCore.Spherical, topology::Topologies.Topology2D{<: ClimaComms.AbstractCommsContext, <: Meshes.AbstractCubedSphere})
-    mesh = topology.mesh
-    ne = mesh.ne
-    # There are always 6 faces of a cubed sphere -
-    # see the ClimaCore docs on AbstractCubedSphere
-    # for an explanation on how they are connected.
-    # TODO: set the border elements of each cubed sphere face
-    # explicitly equal to each other, so that there are no numerical
-    # inaccuracies.
-    face_idxs = 1:6
-    face_coords = map(i -> coords_for_face(mesh, i), face_idxs)
-    # Determine whether the elements are ordered in a space-filling curve
-    # or a regular grid.
-    quadtrees = if topology.elemorder isa CartesianIndices # Matrix order filling
-        # Create a quadtree for each face.
-        map(face_idxs, face_coords) do face_idx, coords
-            Trees.IndexOffsetQuadtreeCursor(
-                Trees.CellBasedGrid(manifold, coords),
-                (face_idx - 1) * ne^2
-            )
-        end
-    elseif topology.elemorder isa Vector{CartesianIndex{3}} # Some sort of space filling curve
-        lin2carts = map.(
-            i -> CartesianIndex((i[1], i[2])),
-            Iterators.partition(topology.elemorder, length(topology.elemorder) ÷ 6)
-        )
-        cart2lins = map(enumerate(lin2carts)) do (face_idx, face_indices)
-            mat = Matrix{Int}(undef, ne, ne)
-            for (i, elem) in enumerate(face_indices)
-                mat[elem] = i + (face_idx - 1) * ne^2  # Global index for child_indices_extents
-            end
-            mat
-        end
-
-        map(face_idxs, lin2carts, cart2lins, face_coords) do face_idx, lin2cart, cart2lin, coords
-            Trees.IndexLocalizerRewrapperTree(
-                Trees.ReorderedTopDownQuadtreeCursor(
-                    Trees.CellBasedGrid(
-                        GO.Spherical(; radius = mesh.domain.radius),
-                        coords
-                    ),
-                    Trees.Reorderer2D(cart2lin, lin2cart)
-                ),
-                (face_idx - 1) * ne^2
-            )
-        end
-    else
-        error("Unknown spacefillingcurve type: $(typeof(topology.spacefillingcurve))\nExpected a CartesianIndices or a Vector{CartesianIndex{3}}")
-    end
-
-    return Trees.CubedSphereToplevelTree(quadtrees)
-end
-
-Trees.treeify(manifold::GOCore.Spherical, space::ClimaCore.Spaces.AbstractSpectralElementSpace) = Trees.treeify(manifold, Spaces.topology(space))
-
 GOCore.best_manifold(mesh::Meshes.AbstractCubedSphere) = GOCore.Spherical(; radius = mesh.domain.radius)
 GOCore.best_manifold(topology::Topologies.Topology2D) = GOCore.best_manifold(topology.mesh)
 GOCore.best_manifold(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = GOCore.best_manifold(Spaces.topology(space))
 
 GOCore.best_manifold(field::ClimaCore.Fields.Field) = GOCore.best_manifold(getfield(field, :space))
-Trees.treeify(manifold::GOCore.Spherical, field::ClimaCore.Fields.Field) = Trees.treeify(manifold, getfield(field, :space))
 
 ## Node extraction helpers for spectral element fields
 """
@@ -412,9 +355,9 @@ end
 ConservativeRegridding.IntersectionReturnStyle(::SEToFVIntersectionOperator) = ConservativeRegridding.InPlace()
 ConservativeRegridding.output_matrix_size(op::SEToFVIntersectionOperator, ::Any, ::Any) = (op.N_fv, op.N_nodes)
 
-function (op::SEToFVIntersectionOperator)(rows, cols, vals, (elem, cell), src_tree, dst_tree)
-    elem_poly = Trees.getcell(src_tree, elem)
-    cell_poly = Trees.getcell(dst_tree, cell)
+function (op::SEToFVIntersectionOperator)(rows, cols, vals, (elem, cell), src, dst)
+    elem_poly = GrI.cell_geometry(src, elem)
+    cell_poly = GrI.cell_geometry(dst, cell)
 
     intersection_result = if op.manifold isa GOCore.Spherical
         GO.intersection(GO.ConvexConvexSutherlandHodgman(op.manifold),
@@ -450,27 +393,32 @@ function (op::SEToFVIntersectionOperator)(rows, cols, vals, (elem, cell), src_tr
 end
 
 function se_to_fv_principled(manifold, dst, src; threaded, triangle_quad_degree, kwargs...)
-    se_tree = Trees.treeify(manifold, src)
-    fv_tree = Trees.treeify(manifold, dst)
+    # the FV side as the grid CR regrids, the SE elements as their provider grid
+    fv = ConservativeRegridding.asgrid(manifold, dst)
+    se = ClimaCoreCubedSphereGrid(src)
+    fv_tree = GrI.treeify(fv; leaf_capacity = GrI.ForSweeps())
+    se_tree = GrI.treeify(se; leaf_capacity = GrI.ForSweeps())
 
     Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(src))
     Nh = Meshes.nelements(Topologies.mesh(Spaces.topology(src)))
     N_nodes = Nq^2 * Nh
-    N_fv = prod(Trees.ncells(fv_tree))
+    N_fv = GrI.ncells(fv)
 
     triangle_quad_degree = something(triangle_quad_degree, 2 * (Nq - 1))
 
     # Assemble the N_fv × N_nodes matrix via the shared parallel driver: src = SE
-    # elements, dst = FV cells, so candidate pairs are uniformly (elem, cell).
+    # elements, dst = FV cells, so candidate pairs are uniformly (elem, cell). The
+    # trees are passed in that order too (the matrix is N_fv × N_nodes, not the
+    # grids' cell counts, so the operator sizes it).
     op = SEToFVIntersectionOperator(manifold, src, Nq, triangle_quad_degree, N_fv, N_nodes)
     # Extra kwargs (e.g. `normalize`) are absorbed by the signature and not forwarded;
     # `intersection_areas` only accepts assembly kwargs.
     intersections = ConservativeRegridding.intersection_areas(
-        manifold, GOCore.booltype(threaded), fv_tree, se_tree;
-        intersection_operator = op,
+        manifold, GOCore.booltype(threaded), fv, se;
+        intersection_operator = op, dst_tree = fv_tree, src_tree = se_tree,
     )
 
-    dst_areas = ConservativeRegridding.areas(manifold, dst, fv_tree)
+    dst_areas = ConservativeRegridding.areas(manifold, fv)
     src_areas = Vector{eltype(dst_areas)}(se_node_weights(src))
 
     return ConservativeRegridding.Regridder(
@@ -580,14 +528,14 @@ function ConservativeRegridding.work_items(op::FVToSEIntersectionOperator, candi
     return [(e, cells_by_elem[e]) for e in 1:op.Nh if !isempty(cells_by_elem[e])]
 end
 
-function (op::FVToSEIntersectionOperator)(rows, cols, vals, (elem, cells), src_tree, dst_tree)
+function (op::FVToSEIntersectionOperator)(rows, cols, vals, (elem, cells), src, dst)
     Nq = op.Nq
-    elem_poly = Trees.getcell(src_tree, elem)
+    elem_poly = GrI.cell_geometry(src, elem)
 
     # Phase 1: accumulate B for this element, keyed by destination cell, value = Nq² vector.
     d = Dict{Int, Vector{Float64}}()
     for cell in cells
-        cell_poly = Trees.getcell(dst_tree, cell)
+        cell_poly = GrI.cell_geometry(dst, cell)
 
         intersection_result = if op.manifold isa GOCore.Spherical
             GO.intersection(GO.ConvexConvexSutherlandHodgman(op.manifold),
@@ -682,13 +630,15 @@ element `e`. See the "FV → SE" section of `docs/src/extensions/climacore.md`.
 """
 function fv_to_se_l2_projection(manifold, dst, src;
                                 threaded, triangle_quad_degree, kwargs...)
-    se_tree = Trees.treeify(manifold, dst)
-    fv_tree = Trees.treeify(manifold, src)
+    se = ClimaCoreCubedSphereGrid(dst)
+    fv = ConservativeRegridding.asgrid(manifold, src)
+    se_tree = GrI.treeify(se; leaf_capacity = GrI.ForSweeps())
+    fv_tree = GrI.treeify(fv; leaf_capacity = GrI.ForSweeps())
 
     Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(dst))
     Nh = Meshes.nelements(Topologies.mesh(Spaces.topology(dst)))
     N_nodes = Nq^2 * Nh
-    N_fv = prod(Trees.ncells(fv_tree))
+    N_fv = GrI.ncells(fv)
 
     triangle_quad_degree = something(triangle_quad_degree, 2 * (Nq - 1))
 
@@ -699,11 +649,11 @@ function fv_to_se_l2_projection(manifold, dst, src;
     # Extra kwargs (e.g. `normalize`) are absorbed by the signature and not forwarded;
     # `intersection_areas` only accepts assembly kwargs.
     intersections = ConservativeRegridding.intersection_areas(
-        manifold, GOCore.booltype(threaded), fv_tree, se_tree;
-        intersection_operator = op,
+        manifold, GOCore.booltype(threaded), fv, se;
+        intersection_operator = op, dst_tree = fv_tree, src_tree = se_tree,
     )
 
-    src_areas = ConservativeRegridding.areas(manifold, src, fv_tree)
+    src_areas = ConservativeRegridding.areas(manifold, fv)
     # inv-mass already baked into `intersections`; ones make pipeline normalize a no-op
     dst_areas = ones(N_nodes)
 
@@ -747,7 +697,9 @@ end
 ##### mesh at (ϕ[a], ϕ[b]) on face f, normalised), so nothing is precomputed;
 ##### positions are the topology's element numbers (`orderindex`), whatever the
 ##### element order (regular or a space-filling curve). The spectral-element
-##### node interface (SE ↔ FV operators above) stays CR's.
+##### node interface (SE ↔ FV operators above) stays CR's; `asgrid` makes the
+##### provider what `Regridder` regrids a topology, space or field as (the
+##### SE constructors above dispatch on the native space or field first).
 #####
 
 """
@@ -793,5 +745,19 @@ end
 facecolumnmajor(g::ClimaCoreCubedSphereGrid, f) = g.columnmajor
 GrI.isglobal(::ClimaCoreCubedSphereGrid) = true
 GrI.chunks(g::ClimaCoreCubedSphereGrid) = Structured.TileChunks(g, (16, 16))
+
+"""
+    ConservativeRegridding.asgrid(topology::Topologies.Topology2D)
+    ConservativeRegridding.asgrid(space::Spaces.AbstractSpectralElementSpace)
+    ConservativeRegridding.asgrid(field::Fields.Field)
+
+The grid `Regridder` regrids a cubed-sphere topology, space or field as: the
+elements of the topology, [`ClimaCoreCubedSphereGrid`](@ref) (the FV view of
+a spectral-element space; the SE node operators take the space or field itself).
+"""
+ConservativeRegridding.asgrid(topology::Topologies.Topology2D{<:ClimaComms.AbstractCommsContext,<:Meshes.AbstractCubedSphere}) =
+    ClimaCoreCubedSphereGrid(topology)
+ConservativeRegridding.asgrid(space::ClimaCore.Spaces.AbstractSpectralElementSpace) = ClimaCoreCubedSphereGrid(space)
+ConservativeRegridding.asgrid(field::ClimaCore.Fields.Field) = ClimaCoreCubedSphereGrid(getfield(field, :space))
 
 end

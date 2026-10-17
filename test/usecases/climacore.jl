@@ -1,5 +1,4 @@
 using ConservativeRegridding
-using ConservativeRegridding: Trees
 using StaticArrays
 using Statistics
 using Test
@@ -80,7 +79,7 @@ end
 
     ConservativeRegridding.regrid!(latlon_vals, regridder, src_field)
 
-    fv_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(latlon_grid))
+    fv_areas = ConservativeRegridding.areas(GO.Spherical(), latlon_grid)
     @test isapprox(
         sum(latlon_vals .* fv_areas),
         sum(src_field);
@@ -112,7 +111,7 @@ end
 
     ConservativeRegridding.regrid!(latlon_vals, regridder, src_field)
 
-    fv_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(latlon_grid))
+    fv_areas = ConservativeRegridding.areas(GO.Spherical(), latlon_grid)
     @test isapprox(
         sum(latlon_vals .* fv_areas),
         sum(src_field);
@@ -188,7 +187,7 @@ end
     roundtrip_field = Fields.zeros(space)
     ConservativeRegridding.regrid!(roundtrip_field, bwd, fv_vals)
 
-    fv_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(latlon_grid))
+    fv_areas = ConservativeRegridding.areas(GO.Spherical(), latlon_grid)
     @test isapprox(sum(fv_vals .* fv_areas), sum(src_field); rtol=1e-2, atol=10.0)
 end
 

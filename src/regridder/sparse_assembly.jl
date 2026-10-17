@@ -318,12 +318,12 @@ end
 # The serial path fills the cache-owned COO vectors, while the threaded path preserves
 # the independent ordered-chunk/window pipeline extracted here by #139.
 function _assemble_sparse(
-        style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::False,
+        style::S, op::O, items::I, src::T1, dst::T2, ::False,
         nrows::Int, ncols::Int, scratch::SparseMatrixAssemblyCache{ValType}; kwargs...,
     ) where {S, O, I, T1, T2, ValType}
     chunk_op = task_local_operator(op)
     chunk = _assemble_chunk_kernel!(
-        style, chunk_op, items, src_tree, dst_tree,
+        style, chunk_op, items, src, dst,
         scratch.rows, scratch.cols, scratch.vals,
     )
     # The sparse constructor copies the cache-owned COO inputs before the caller clears them.
@@ -331,11 +331,11 @@ function _assemble_sparse(
 end
 
 function _assemble_sparse(
-        style::S, op::O, items::I, src_tree::T1, dst_tree::T2, threaded::True,
+        style::S, op::O, items::I, src::T1, dst::T2, threaded::True,
         nrows::Int, ncols::Int, ::SparseMatrixAssemblyCache; kwargs...,
     ) where {S, O, I, T1, T2}
     chunks = _collect_coo_chunks(
-        style, op, items, src_tree, dst_tree, threaded; kwargs...,
+        style, op, items, src, dst, threaded; kwargs...,
     )
     return _sparse_from_chunks(chunks, nrows, ncols; max_windows = Threads.nthreads())
 end

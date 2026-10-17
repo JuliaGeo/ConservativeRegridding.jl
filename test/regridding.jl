@@ -4,7 +4,13 @@ using Test
 import GeometryOps as GO, GeoInterface as GI
 import GeometryOpsCore
 import Extents
+import GridInterface as GrI
 using SparseArrays
+
+# CR's grid for a bare input (a corner or polygon matrix, an axis pair) and the tree
+# `Regridder` sweeps it with.
+cr_grid(manifold, x) = ConservativeRegridding.asgrid(manifold, x)
+sweep_tree(grid) = GrI.treeify(grid; leaf_capacity = GrI.ForSweeps())
 
 @testset "DefaultIntersectionOperator task-local cache" begin
     op = ConservativeRegridding.DefaultIntersectionOperator(GO.Spherical())
@@ -39,8 +45,9 @@ end
     dst_polys = [make_square() for _ in 1:2]
     src_polys = [make_square() for _ in 1:3]
 
-    dst_tree = GO.SpatialTreeInterface.FlatNoTree(dst_polys)
-    src_tree = GO.SpatialTreeInterface.FlatNoTree(src_polys)
+    # bare polygon vectors: `PolygonVectorGrid`s under GridInterface's R-tree fallback
+    dst_tree = dst_polys
+    src_tree = src_polys
 
     @testset "explicit assembly cache" begin
         cache = ConservativeRegridding.SparseMatrixAssemblyCache()
@@ -408,59 +415,21 @@ end
 
     src = make_grid(8, 8)
     dst = make_grid(16, 16)
-    src_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), src)
-    dst_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), dst)
+    src_grid = cr_grid(GeometryOpsCore.Planar(), src)
+    dst_grid = cr_grid(GeometryOpsCore.Planar(), dst)
+    @test src_grid isa ConservativeRegridding.ExplicitPolygonGrid
 
-    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_tree, src_tree; threaded=true)
+    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_grid, src_grid; threaded=true)
     @test r isa ConservativeRegridding.Regridder
     @test size(r) == (16*16, 8*8)
     @test sum(r.intersections) > 0
 
-    serial = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_tree, src_tree; threaded=false)
+    serial = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_grid, src_grid; threaded=false)
     @test r.intersections == serial.intersections
 end
 
-# `WithParallelizePolicy` is deprecated - its policy is no longer consulted - but a
-# wrapped tree must still traverse (through the `AbstractTreeWrapper` forwarding) and
-# regrid to exactly what the unwrapped tree gives.
-@testset "WithParallelizePolicy wrapper" begin
-    function make_grid(nx, ny)
-        polys = Matrix{GI.Polygon}(undef, nx, ny)
-        for j in 1:ny, i in 1:nx
-            x0, x1 = (i-1)/nx, i/nx
-            y0, y1 = (j-1)/ny, j/ny
-            ring = GI.LinearRing([(x0,y0),(x1,y0),(x1,y1),(x0,y1),(x0,y0)])
-            polys[i,j] = GI.Polygon([ring])
-        end
-        polys
-    end
-
-    src_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), make_grid(8, 8))
-    dst_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), make_grid(16, 16))
-
-    src_wrapped = ConservativeRegridding.Trees.WithParallelizePolicy(
-        src_tree, (tree, node, extent) -> true,
-    )
-    dst_wrapped = ConservativeRegridding.Trees.WithParallelizePolicy(
-        dst_tree, (tree, node, extent) -> true,
-    )
-
-    # The wrapper forwards `split_weight` to the tree it wraps, so the frontier sizes
-    # tasks identically either way.
-    @test ConservativeRegridding.Trees.split_weight(src_wrapped) ==
-        ConservativeRegridding.Trees.split_weight(src_tree)
-
-    r = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_wrapped, src_wrapped; threaded=true)
-    @test r isa ConservativeRegridding.Regridder
-    @test size(r) == (16*16, 8*8)
-    @test sum(r.intersections) > 0
-
-    plain = ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), dst_tree, src_tree; threaded=true)
-    @test r.intersections == plain.intersections
-end
-
 # Forwards a real tree but reports one fixed `split_weight` everywhere, the way a tree
-# whose `Trees.ncells` answers for its whole grid does at every node.
+# whose weight answers for its whole grid does at every node.
 struct LyingWeightTree{T}
     tree::T
     total::Int
@@ -475,7 +444,7 @@ GO.SpatialTreeInterface.getchild(w::LyingWeightTree, i::Int) =
     LyingWeightTree(GO.SpatialTreeInterface.getchild(w.tree, i), w.total)
 GO.SpatialTreeInterface.child_indices_extents(w::LyingWeightTree) =
     GO.SpatialTreeInterface.child_indices_extents(w.tree)
-ConservativeRegridding.Trees.split_weight(w::LyingWeightTree) = w.total
+GrI.split_weight(w::LyingWeightTree) = w.total
 
 # Model the Cartesian XYZ extents stored by a packed unit-spherical tree while keeping
 # exactly the same topology, leaf indices, and cell geometry as the cap cursor it wraps.
@@ -495,12 +464,7 @@ GO.SpatialTreeInterface.node_extent(w::XYZExtentTree) =
 GO.SpatialTreeInterface.child_indices_extents(w::XYZExtentTree) =
     ((i, convert(Extents.Extent, e))
      for (i, e) in GO.SpatialTreeInterface.child_indices_extents(w.tree))
-ConservativeRegridding.Trees.getcell(w::XYZExtentTree, i) =
-    ConservativeRegridding.Trees.getcell(w.tree, i)
-ConservativeRegridding.Trees.cell_index_count(w::XYZExtentTree) =
-    ConservativeRegridding.Trees.cell_index_count(w.tree)
-ConservativeRegridding.Trees.split_weight(w::XYZExtentTree) =
-    ConservativeRegridding.Trees.split_weight(w.tree)
+GrI.split_weight(w::XYZExtentTree) = GrI.split_weight(w.tree)
 
 # Two trees that share no intersecting cell pair must yield an all-zero matrix, not an
 # error. The threaded path used to hit `reduce` over an empty collection at two places:
@@ -521,18 +485,17 @@ ConservativeRegridding.Trees.split_weight(w::XYZExtentTree) =
 
     # Grids must be big enough that neither root cursor is a leaf, or the dual DFS
     # short-circuits into a task before it can come up empty.
-    src_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), make_grid(8, 8))
-    dst_tree = ConservativeRegridding.Trees.treeify(GeometryOpsCore.Planar(), make_grid(16, 16; x0 = 10.0, y0 = 10.0))
+    src_grid = cr_grid(GeometryOpsCore.Planar(), make_grid(8, 8))
+    dst_grid = cr_grid(GeometryOpsCore.Planar(), make_grid(16, 16; x0 = 10.0, y0 = 10.0))
 
     expected = ConservativeRegridding.intersection_areas(
-        GeometryOpsCore.Planar(), GeometryOpsCore.False(), dst_tree, src_tree)
+        GeometryOpsCore.Planar(), GeometryOpsCore.False(), dst_grid, src_grid)
     @test nnz(expected) == 0
 
-    for tree_pair in ((src_tree, dst_tree),
-                      (ConservativeRegridding.Trees.WithParallelizePolicy(src_tree, (t, n, e) -> true),
-                       ConservativeRegridding.Trees.WithParallelizePolicy(dst_tree, (t, n, e) -> true)))
+    # the default (sweep) trees, and a pair of trees handed in explicitly
+    for trees in ((;), (; src_tree = sweep_tree(src_grid), dst_tree = sweep_tree(dst_grid)))
         A = ConservativeRegridding.intersection_areas(
-            GeometryOpsCore.Planar(), GeometryOpsCore.True(), tree_pair[2], tree_pair[1])
+            GeometryOpsCore.Planar(), GeometryOpsCore.True(), dst_grid, src_grid; trees...)
         @test A == expected
         @test size(A) == size(expected)
         @test eltype(A) == eltype(expected)
@@ -566,22 +529,21 @@ end
         [GO.UnitSpherical.UnitSphereFromGeographic()((lon, lat))
          for lon in range(-180, 180, length = nx + 1), lat in range(-80, 80, length = ny + 1)]
 
-    cases = (
+    grids = (
         (name = "spherical",
          manifold = GO.Spherical(),
          predicate = Extents.intersects,
-         src = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(60, 40)),
-         dst = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(48, 32))),
+         src = cr_grid(GO.Spherical(), sphere_points(60, 40)),
+         dst = cr_grid(GO.Spherical(), sphere_points(48, 32))),
         (name = "planar",
          manifold = GO.Planar(),
          predicate = Extents.intersects,
-         src = ConservativeRegridding.Trees.treeify(
-             GO.Planar(), (collect(range(0.0, 1.0, length = 61)), collect(range(0.0, 1.0, length = 41)))),
-         dst = ConservativeRegridding.Trees.treeify(
-             GO.Planar(), (collect(range(0.1, 1.1, length = 49)), collect(range(0.0, 1.0, length = 33))))),
+         src = cr_grid(GO.Planar(), (collect(range(0.0, 1.0, length = 61)), collect(range(0.0, 1.0, length = 41)))),
+         dst = cr_grid(GO.Planar(), (collect(range(0.1, 1.1, length = 49)), collect(range(0.0, 1.0, length = 33))))),
     )
 
-    for case in cases
+    for g in grids
+        case = (; g.name, g.manifold, g.predicate, src = sweep_tree(g.src), dst = sweep_tree(g.dst))
         @testset "$(case.name)" begin
             expected = serial_pairs(case.predicate, case.src, case.dst)
             @test length(expected) > 1000
@@ -601,9 +563,9 @@ end
                 case.predicate, (n, e) -> false, (n, e) -> false, case.src, case.dst) == expected
 
             threaded = ConservativeRegridding.intersection_areas(
-                case.manifold, GeometryOpsCore.True(), case.dst, case.src)
+                case.manifold, GeometryOpsCore.True(), g.dst, g.src)
             serial = ConservativeRegridding.intersection_areas(
-                case.manifold, GeometryOpsCore.False(), case.dst, case.src)
+                case.manifold, GeometryOpsCore.False(), g.dst, g.src)
             @test threaded == serial
             @test nnz(threaded) > 1000
         end
@@ -629,10 +591,9 @@ end
         [GO.UnitSpherical.UnitSphereFromGeographic()((λ, φ))
          for λ in range(lon..., length = nx + 1), φ in range(lat..., length = ny + 1)]
 
-    src_cap = ConservativeRegridding.Trees.treeify(
-        GO.Spherical(), sphere_points(24, 16; lon = (-80.0, 60.0), lat = (-50.0, 70.0)))
-    dst_cap = ConservativeRegridding.Trees.treeify(
-        GO.Spherical(), sphere_points(16, 12; lon = (-30.0, 110.0), lat = (-20.0, 80.0)))
+    src_grid = cr_grid(GO.Spherical(), sphere_points(24, 16; lon = (-80.0, 60.0), lat = (-50.0, 70.0)))
+    dst_grid = cr_grid(GO.Spherical(), sphere_points(16, 12; lon = (-30.0, 110.0), lat = (-20.0, 80.0)))
+    src_cap, dst_cap = sweep_tree(src_grid), sweep_tree(dst_grid)
     src_box, dst_box = XYZExtentTree(src_cap), XYZExtentTree(dst_cap)
 
     @test GO.SpatialTreeInterface.node_extent(src_cap) isa GO.UnitSpherical.SphericalCap
@@ -643,7 +604,7 @@ end
     # comparison proves the public cap-cap protocol preserves the pre-B2 traversal.
     @test cap_candidates == serial_pairs(GO.UnitSpherical._intersects, src_cap, dst_cap)
     cap_weights = ConservativeRegridding.intersection_areas(
-        GO.Spherical(), GeometryOpsCore.False(), dst_cap, src_cap)
+        GO.Spherical(), GeometryOpsCore.False(), dst_grid, src_grid; dst_tree = dst_cap, src_tree = src_cap)
 
     pairings = (
         ("cap-cap", src_cap, dst_cap),
@@ -660,9 +621,9 @@ end
                 Extents.intersects, src, dst; chunks_per_thread = 8) == expected
 
             serial = ConservativeRegridding.intersection_areas(
-                GO.Spherical(), GeometryOpsCore.False(), dst, src)
+                GO.Spherical(), GeometryOpsCore.False(), dst_grid, src_grid; dst_tree = dst, src_tree = src)
             threaded = ConservativeRegridding.intersection_areas(
-                GO.Spherical(), GeometryOpsCore.True(), dst, src)
+                GO.Spherical(), GeometryOpsCore.True(), dst_grid, src_grid; dst_tree = dst, src_tree = src)
             @test threaded == serial == cap_weights
         end
     end
@@ -682,8 +643,8 @@ end
          for lon in range(-180, 180, length = nx + 1), lat in range(-80, 80, length = ny + 1)]
 
     for sizes in (((120, 80), (12, 8)), ((120, 80), (120, 80)))
-        src = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(sizes[1]...))
-        dst = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(sizes[2]...))
+        src = sweep_tree(cr_grid(GO.Spherical(), sphere_points(sizes[1]...)))
+        dst = sweep_tree(cr_grid(GO.Spherical(), sphere_points(sizes[2]...)))
         w1 = LyingWeightTree(src, prod(sizes[1]))
         w2 = LyingWeightTree(dst, prod(sizes[2]))
         pred = Extents.intersects
@@ -713,8 +674,8 @@ end
         [GO.UnitSpherical.UnitSphereFromGeographic()((lon, lat))
          for lon in range(-180, 180, length = nx + 1), lat in range(-80, 80, length = ny + 1)]
 
-    src_cap = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(120, 80))
-    dst_cap = ConservativeRegridding.Trees.treeify(GO.Spherical(), sphere_points(12, 8))
+    src_cap = sweep_tree(cr_grid(GO.Spherical(), sphere_points(120, 80)))
+    dst_cap = sweep_tree(cr_grid(GO.Spherical(), sphere_points(12, 8)))
     for (src, dst) in ((src_cap, XYZExtentTree(dst_cap)),
                        (XYZExtentTree(src_cap), dst_cap),
                        (XYZExtentTree(src_cap), XYZExtentTree(dst_cap)))

@@ -8,15 +8,18 @@ When you call `Regridder(dst, src)` on two grids `dst` and `src`, you enter the 
 
 ### 1. Input sanitization and tree construction
 
-First, `dst` and `src` are converted into spatial tree structures via `Trees.treeify`.  This creates a data structure that:
+First, `dst` and `src` are turned into [GridInterface](interfaces/grids.md) grids via `ConservativeRegridding.asgrid`
+(a GridInterface grid is its own; a corner matrix, axis pair or polygon collection becomes one of the shipped grids; the
+package extensions answer for their native objects), and each grid's spatial tree is built with
+`GridInterface.treeify(grid; leaf_capacity = ForSweeps())`.  The tree:
 
 - Efficiently describes the underlying grid structure,
-- Caches expensive computations (like calculating the vertices of each cell, for e.g. tripolar grids),
 - Provides a way to efficiently traverse the grid structure in a hierarchical way, from top level (very large) to leaf (each cell).
 
-The object returned by `treeify` must implement the `GeometryOps.SpatialTreeInterface` as well as our internal `Trees` interface.  
-Several helper structs, like the quadtree representations and cursors, are made available to help with this, and those are used for e.g. the longitude-latitude, tripolar, cubed sphere, etc. grids.
-But an implementor can also create their own tree structures, as is done in the Healpix extension here.
+The tree implements `SpatialTreeInterface`; its leaves emit cell indices, and the grid answers every cell's geometry
+(`cell_geometry`) and extent (`cell_extent`) on demand; `dst_areas`/`src_areas` are the `GeometryOps.area` of those geometries.  Structured grids (`GridInterface.Structured`)
+get a quadtree cursor over their index ranges, which is what the longitude-latitude, tripolar, cubed sphere, HEALPix, etc.
+providers use; any other grid gets an STR R-tree over its cell extents, and a grid can carry its own tree in a `GridAndTree`.
 
 ### 2. Finding potentially intersecting cells
 
@@ -26,12 +29,12 @@ Both trees are walked simultaneously.  The children of each node are checked for
 
 As an accelerator, we have an integrated multithreading step here.  Before descending, a short serial pass 
 splits the root node pair into a *frontier* of independent node pairs: it repeatedly splits the pair with the 
-largest estimated work (overlap area times cell density, from `Trees.split_weight`) until there are 
+largest estimated work (overlap area times cell density, from `GridInterface.split_weight`) until there are 
 `nthreads * chunks_per_thread` of them.  Each frontier pair then becomes one task, and the tasks' results are 
 concatenated in depth-first order, so the threaded search returns exactly what the serial one does.  
 No caching need be done ahead of time, since it's all baked into the algorithm.
 
-At the end, we have a list of potentially intersecting cell pairs, represented as a vector of `(dst_cell_index, src_cell_index)` tuples. 
+At the end, we have a list of potentially intersecting cell pairs, represented as a vector of `(src_cell_index, dst_cell_index)` tuples. 
 Each index is an integer, starting from 1.  This index corresponds to the linear index of the data corresponding to that cell, in the 
 vector (flattened/`vec`) representation of the actual underlying dataset.
 
@@ -45,8 +48,10 @@ There are many ways to procure this value.  For now, let's use the simplest meth
 Here, we compute the area of intersection between the source and destination cells, which is then used directly as the weight.  Other methods,
 like second-order conservative regridding, bilinear, etc. will use different weight metrics, and some may not even use intersection areas at all.
 
-The way this is done is by splitting up the list of candidates into chunks, and then computing the weights for each chunk in parallel.  We use 
-GeometryOps' optimized spherical convex polygon intersection algorithm (Sutherland-Hodgman) by default, but this can be overridden by the user.
+The way this is done is by splitting up the list of candidates into chunks, and then computing the weights for each chunk in parallel.  The
+clipper is chosen from the grids' `cellshape`: when both grids declare `ConvexCells()` we use GeometryOps' optimized spherical convex polygon
+intersection (Sutherland-Hodgman); otherwise GeometryOps' general polygon clipper (Foster-Hormann) handles the non-convex cells.  Planar grids
+always use the general clipper.  The operator can be overridden by the user (`intersection_operator`).
 
 At the end of this, each task returns a vector of `(dst_cell_index, src_cell_index, weight)` tuples.  These are then concatenated together, and 
 assembled into a sparse matrix which is the regridder object.
@@ -65,15 +70,15 @@ to [`ConservativeRegridding.intersection_areas`](@ref). The four seams are:
    - [`OutOfPlaceSingleResult`](@ref) (the default): the operator is a function
      `op(src_cell, dst_cell) -> area::Real`, and the driver stores the COO triplet.
    - [`InPlace`](@ref): the operator is
-     `op(rows, cols, vals, item, src_tree, dst_tree) -> nothing` and pushes its own COO
-     contributions directly.
+     `op(rows, cols, vals, item, src, dst) -> nothing` (`src` and `dst` the grids) and pushes
+     its own COO contributions directly.
 2. **[`work_items`](@ref)`(op, candidate_pairs)`** — the units of work the parallel loop
    iterates over (default: one candidate `(src, dst)` pair per unit). Override it to change
    the parallel granularity — e.g. to group all of a source element's candidate cells into
    a single work unit.
-3. **[`output_matrix_size`](@ref)`(op, src_tree, dst_tree)`** — the `(nrows, ncols)` shape
-   of the assembled matrix (default: destination-cell count × source-cell count).
-4. **[`output_eltype`](@ref)`(op, src_tree, dst_tree)`** — the element type of the sparse
+3. **[`output_matrix_size`](@ref)`(op, src, dst)`** — the `(nrows, ncols)` shape
+   of the assembled matrix (default: `(ncells(dst), ncells(src))`).
+4. **[`output_eltype`](@ref)`(op, src, dst)`** — the element type of the sparse
    matrix (default: `Float64`). Override it when you want something other than scalar areas —
    e.g. to build up a matrix of intersection _polygons_ rather than just areas, as the
    shipped [`IntersectionGridOperator`](@ref) does.
@@ -115,9 +120,9 @@ end
 ConservativeRegridding.IntersectionReturnStyle(::MyBlockOperator) = ConservativeRegridding.InPlace()
 ConservativeRegridding.output_matrix_size(op::MyBlockOperator, ::Any, ::Any) = (op.nrows, op.ncols)
 
-function (op::MyBlockOperator)(rows, cols, vals, (i_src, i_dst), src_tree, dst_tree)
-    src_cell = ConservativeRegridding.Trees.getcell(src_tree, i_src)
-    dst_cell = ConservativeRegridding.Trees.getcell(dst_tree, i_dst)
+function (op::MyBlockOperator)(rows, cols, vals, (i_src, i_dst), src, dst)
+    src_cell = GridInterface.cell_geometry(src, i_src)
+    dst_cell = GridInterface.cell_geometry(dst, i_dst)
     weight = ConservativeRegridding.DefaultIntersectionOperator(GO.Spherical())(src_cell, dst_cell)
     # A real block emitter pushes several (row, col, value) entries per work item;
     # here we push a single one to illustrate the mechanics.

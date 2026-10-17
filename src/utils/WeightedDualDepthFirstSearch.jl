@@ -3,7 +3,7 @@
 
 A deterministic dual-tree traversal that descends one tree at a time.
 
-When both nodes can be split, the side with the greater [`Trees.split_weight`](@ref)
+When both nodes can be split, the side with the greater `SpatialTreeInterface.split_weight`
 is opened; ties consistently open the first side.  Opening only one side avoids the
 child Cartesian product used by the generic dual-tree walk.  More importantly, the
 first leaf reached is held fixed while the opposing tree finishes descending, so its
@@ -20,7 +20,7 @@ import GeometryOps as GO
 using GeometryOps: SpatialTreeInterface as STI
 using GeometryOps.LoopStateMachine: @controlflow
 
-import ..Trees: split_weight
+import SpatialTreeInterface: split_weight
 
 export weighted_dual_depth_first_search
 
@@ -51,7 +51,7 @@ Call `f(i1, i2)` for every intersecting leaf-index pair in a deterministic,
 weight-guided order.
 
 Only one tree descends at each recursive step.  The tree with more estimated leaf work
-opens first, according to [`Trees.split_weight`](@ref), and the first side wins ties.
+opens first, according to `SpatialTreeInterface.split_weight`, and the first side wins ties.
 Once either side reaches a leaf, its `child_indices_extents` value is constructed once
 and carried while the other side descends.  No grid-sized or traversal-sized extent
 cache is retained.

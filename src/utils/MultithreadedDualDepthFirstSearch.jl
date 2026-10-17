@@ -4,7 +4,7 @@ using GeometryOps: SpatialTreeInterface as STI
 import GeometryOps as GO
 import StableTasks
 
-import ..Trees: split_weight
+import SpatialTreeInterface: split_weight
 import ..WeightedDualDepthFirstSearch:
     weighted_dual_depth_first_search, _split_first, _may_intersect
 
@@ -105,7 +105,7 @@ Splitting continues past `nchunks` while the heaviest pair still claims more tha
 
 A pair is splittable unless both sides are leaves.  Each split opens the same single
 side [`weighted_dual_depth_first_search`](@ref) would open: the non-leaf side when only
-one can descend, otherwise the side with greater `Trees.split_weight` (first side on a
+one can descend, otherwise the side with greater `SpatialTreeInterface.split_weight` (first side on a
 tie).  Children failing `predicate` are pruned exactly as in the serial traversal.
 
 A split never raises the estimate: children whose weights sum past their parent's are
@@ -207,7 +207,7 @@ deterministic but may differ from `STI.dual_depth_first_search`.
 `chunks_per_thread` sets the task budget: the traversal is split into at least
 `Threads.nthreads() * chunks_per_thread` node pairs (see [`frontier`](@ref)), one task
 each.  Raising it costs more spawns but tolerates more skew between pairs; it cannot
-change the result.  Work estimates come from `Trees.split_weight`.
+change the result.  Work estimates come from `SpatialTreeInterface.split_weight`.
 """
 function multithreaded_dual_query!(
     result::Vector{Tuple{Int, Int}},

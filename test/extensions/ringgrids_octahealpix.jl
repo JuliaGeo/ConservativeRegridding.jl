@@ -1,12 +1,13 @@
 using ConservativeRegridding
-using ConservativeRegridding.Trees
 using Test
 
 using RingGrids
-using SmallCollections: SmallVector, capacity
 import GeometryOps as GO, GeometryOpsCore as GOCore
 import GeoInterface as GI
 import GeometryOps: SpatialTreeInterface as STI
+import GridInterface as GrI
+using GridInterface: ncells, cell_geometry, cell_area
+using GridInterface.Structured: nfaces
 
 const RingGridsExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingRingGridsExt)
 
@@ -14,80 +15,61 @@ const RingGridsExt = Base.get_extension(ConservativeRegridding, :ConservativeReg
 leaves(node) = STI.isleaf(node) ? [node] :
     reduce(vcat, (leaves(STI.getchild(node, i)) for i in 1:STI.nchild(node)))
 
-@testset "OctaHEALPix tree: root node + treeify" begin
+sweep_tree(g) = GrI.treeify(g; leaf_capacity = GrI.ForSweeps())
+
+@testset "OctaHEALPix provider: asgrid" begin
     field = rand(OctaHEALPixGrid, 4)          # nlat_half = nside = 4
-    tree  = Trees.treeify(GO.Spherical(), field)
+    g = ConservativeRegridding.asgrid(field)
 
-    @test tree isa RingGridsExt.OctaHEALPixRootNode
-    @test Trees.ncells(tree) == 4 * 4^2        # 64 pixels
+    @test g isa RingGridsExt.OctaHEALPixRingGrid
+    @test ncells(g) == 4 * 4^2                 # 64 pixels
+    @test nfaces(g) == 4                       # 4 base faces (octahedral)
+    @test GOCore.best_manifold(g) == GO.Spherical()
+    @test GOCore.best_manifold(field) == GO.Spherical()
+    @test ConservativeRegridding.asgrid(field.grid) isa RingGridsExt.OctaHEALPixRingGrid
 
-    @test STI.isspatialtree(typeof(tree)) == true
-    @test STI.isleaf(tree) == false
-    @test STI.nchild(tree) == 4                # 4 base faces (octahedral)
+    tree = sweep_tree(g)
+    @test STI.isspatialtree(typeof(tree))
     @test STI.node_extent(tree) isa GO.UnitSpherical.SphericalCap
-    @test GOCore.best_manifold(tree) == GO.Spherical()
-
-    # treeify on the bare grid works too
-    @test Trees.treeify(GO.Spherical(), field.grid) isa RingGridsExt.OctaHEALPixRootNode
 end
 
-@testset "OctaHEALPix tree: any nlat_half (no power-of-two requirement)" begin
-    # The curvilinear-face design subdivides the (r,c) matrix by index range, not a
-    # Morton nest, so every nlat_half works — pow2 and not (the old nested hierarchy
-    # required pow2).
+@testset "OctaHEALPix provider: any nlat_half (no power-of-two requirement)" begin
+    # The quadrant faces subdivide by index range, not a Morton nest, so every
+    # nlat_half works — pow2 and not.
     for nside in (1, 2, 3, 4, 5, 7, 8, 16)
-        tree = Trees.treeify(GO.Spherical(), rand(OctaHEALPixGrid, nside))
-        @test tree isa RingGridsExt.OctaHEALPixRootNode
-        @test tree.nside == nside
-        @test Trees.ncells(tree) == 4 * nside^2
+        g = ConservativeRegridding.asgrid(rand(OctaHEALPixGrid, nside))
+        @test g isa RingGridsExt.OctaHEALPixRingGrid
+        @test g.nside == nside
+        @test ncells(g) == 4 * nside^2
+        @test sort(GrI.subtree_indices(sweep_tree(g))) == 1:4nside^2
     end
 end
 
-@testset "OctaHEALPix tree: parent/child traversal" begin
-    tree = RingGridsExt.OctaHEALPixRootNode(4)        # nside = 4
+@testset "OctaHEALPix provider: the tree partitions the pixels" begin
+    g = RingGridsExt.OctaHEALPixRingGrid(4)   # nside = 4
+    tree = sweep_tree(g)
+    @test STI.isleaf(tree) == false
 
-    @test STI.nchild(tree) == 4
-    face = STI.getchild(tree, 1)
-    @test face isa Trees.TopDownQuadtreeCursor
-    @test face.grid isa RingGridsExt.OctaHEALPixFaceGrid
-    @test face.grid.q == 1                      # quadrant 1..4
-    @test face.leafranges == (1:4, 1:4)
-    @test Trees.cell_index_count(face) == 4 * 4^2
-    @test STI.getchild(tree, 4).grid.q == 4
-    @test STI.isleaf(face) == false
-    @test STI.nchild(face) == 4                 # 4×4 block → quartered
-
-    # A 4×4 face quarters into four 2×2 cursor leaves; each enumerates its 4 cells.
-    leaf = STI.getchild(face, 1)
-    @test leaf isa Trees.TopDownQuadtreeCursor && leaf.grid.q == 1
-    @test length.(leaf.leafranges) == (2, 2)
-    @test STI.isleaf(leaf) == true
-    entries = @inferred STI.child_indices_extents(leaf)
-    @test entries isa SmallVector{4}
-    @test capacity(entries) == 4
-    @test length(entries) == 4
-
-    # Leaves partition each face; every pixel is emitted exactly once: 4·nside² total.
+    # Leaves partition the faces; every pixel is emitted exactly once: 4·nside² total.
     allcells = reduce(vcat, [collect(STI.child_indices_extents(l)) for l in leaves(tree)])
     @test length(allcells) == 4 * 4^2
+    @test sort(first.(allcells)) == 1:4 * 4^2
 end
 
-@testset "OctaHEALPix tree: `getcell` corners match RingGrids `get_vertices`" begin
+@testset "OctaHEALPix provider: cell corners match RingGrids `get_vertices`" begin
     usp(lon, lat) = GO.UnitSphereFromGeographic()((lon, lat))
     pdist(p, q) = maximum(abs.(Tuple(p) .- Tuple(q)))
 
     for nside in (4, 8, 16)
-        tree = RingGridsExt.OctaHEALPixRootNode(nside)
+        g = RingGridsExt.OctaHEALPixRingGrid(nside)
         E, S, W, N = RingGrids.get_vertices(OctaHEALPixGrid, nside)  # reference (ring order)
         npts = 4 * nside^2
 
-        # getcell(root, i) is ring-indexed; corners come out in (E,S,W,N) order
+        # cell_geometry(g, i) is ring-indexed; corners come out CCW: (E, N, W, S)
         maxerr = 0.0
         for ij in 1:npts
-            poly = Trees.getcell(tree, ij)
-            pts  = collect(GI.getpoint(GI.getexterior(poly)))
+            pts  = collect(GI.getpoint(GI.getexterior(cell_geometry(g, ij))))
             @test length(pts) == 5            # 4 corners + closing point
-            # getcell emits corners CCW: (E, N, W, S)
             ref = (usp(E[1,ij],E[2,ij]), usp(N[1,ij],N[2,ij]), usp(W[1,ij],W[2,ij]), usp(S[1,ij],S[2,ij]))
             for k in 1:4
                 maxerr = max(maxerr, pdist(pts[k], ref[k]))
@@ -95,25 +77,22 @@ end
         end
         @test maxerr < 1e-9
     end
-
-    # full-grid iterator
-    tree = RingGridsExt.OctaHEALPixRootNode(4)
-    @test length(collect(Trees.getcell(tree))) == Trees.ncells(tree)
 end
 
-@testset "OctaHEALPix tree: node_extent + child_indices_extents" begin
+@testset "OctaHEALPix provider: node extents contain the cells beneath" begin
     incap(p, cap) = GO.spherical_distance(cap.point, p) <= cap.radius + 1e-9
 
     for nside in (4, 5)                          # power-of-two and non-power-of-two
-        tree = RingGridsExt.OctaHEALPixRootNode(nside)
+        g = RingGridsExt.OctaHEALPixRingGrid(nside)
+        tree = sweep_tree(g)
 
-        # A face cap must contain every corner of every cell beneath it (DFS pruning).
+        # A child's cap must contain every corner of every cell beneath it (DFS pruning).
         for i in 1:STI.nchild(tree)
             face = STI.getchild(tree, i)
             cap  = STI.node_extent(face)
             @test cap isa GO.UnitSpherical.SphericalCap
             for leaf in leaves(face), (ij, _) in STI.child_indices_extents(leaf)
-                for p in GI.getpoint(GI.getexterior(Trees.getcell(tree, ij)))
+                for p in GI.getpoint(GI.getexterior(cell_geometry(g, ij)))
                     @test incap(p, cap)
                 end
             end
@@ -129,8 +108,16 @@ end
     end
 end
 
+@testset "OctaHEALPix: cells tessellate the sphere" begin
+    S = GO.Spherical()
+    for nside in (2, 3, 4, 5)
+        g = RingGridsExt.OctaHEALPixRingGrid(nside)
+        @test isapprox(sum(cell_area(g, i) for i in 1:ncells(g)), 4π * S.radius^2; rtol = 1e-10)
+    end
+end
+
 @testset "OctaHEALPix: end-to-end regridding + conservation" begin
-    # Regridder construction (nlat_half must be a power of two for the nested tree)
+    # Regridder construction
     src = rand(OctaHEALPixGrid, 8)
     dst = rand(OctaHEALPixGrid, 16)
     R = ConservativeRegridding.Regridder(dst, src)

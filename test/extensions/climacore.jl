@@ -1,5 +1,5 @@
 using ConservativeRegridding
-using ConservativeRegridding: Trees
+import GridInterface as GrI
 using Statistics
 using Test
 import GeometryOps as GO, GeoInterface as GI, LibGEOS
@@ -121,12 +121,12 @@ const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeReg
         # This is the principled-version analogue of PDF Eq. 21 collapsed to a
         # single element. Note that individual B[i,j] entries form the FULL mass
         # matrix Mᵢⱼ, not the diagonal Wᵉᵢⱼ — those agree only under GLL quadrature.
-        se_tree = Trees.treeify(GO.Spherical(), space)
+        se_grid = ConservativeRegridding.asgrid(space)
 
         for face in 1:6
             ne = Topologies.mesh(Spaces.topology(space)).ne
             elem_idx = (face - 1) * ne^2 + 1
-            poly = Trees.getcell(se_tree, elem_idx)
+            poly = GrI.cell_geometry(se_grid, elem_idx)
             B = ClimaCoreExt.accumulate_principled_b(
                 GO.Spherical(), space, elem_idx, poly;
                 triangle_quad_degree = 2 * (Nq - 1),

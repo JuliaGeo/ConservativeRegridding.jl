@@ -1,11 +1,11 @@
 # The GridInterface providers of CR's extensions: GridInterfaceConformance on
-# every native grid type through `grid_of`, the provider path into CR's engine
-# (`Regridder(cr_tree(dst), cr_tree(src))`), its weights against the native
-# path on a few small pairs, and the issue #147 reproducer (a stretched-z
-# U-pivot tripolar grid conserves a constant field through the provider path).
+# every native grid type through `grid_of` (what `Regridder` regrids) and the
+# providers' active-cell views, the native inputs against their grids passed
+# directly (and the U-pivot layout against its unique cells) on a few small
+# pairs, and the issue #147 reproducer (a stretched-z U-pivot tripolar grid
+# conserves a constant field).
 using Test
 using ConservativeRegridding
-using ConservativeRegridding: Trees
 using ConservativeRegriddingTestHelpers
 import GridInterface as GrI
 using GridInterface: ncells, cellshape, tessellation, isglobal, parentpositions, Subset
@@ -63,44 +63,46 @@ bathy(λ, φ) = (abs(φ) < 40 && 0 < mod(λ, 360) < 60) || φ > 75 ? 10.0 : -100
 const SUBSET_EXTENT_GAP = "GridAndTree forwards every verb in WRAPPED_VERBS"
 const DIAMOND_DUAL_GAPS = ["vertex fans wind CCW about the vertex", "dual cells are valid CCW rings"]
 
-# (name, native grid thunk, expected provider type, expected faces, known gaps)
+# (name, native grid thunk, grid under test (`grid_of` the native, or a provider view of it),
+#  expected type, expected faces, known gaps)
 const CASES = [
     ("LatitudeLongitudeGrid 360x180", () -> LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1)),
-        OcExt.OceananigansLatLonGrid, 1, String[]),
+        grid_of, OcExt.OceananigansLatLonGrid, 1, String[]),
     ("TripolarGrid F-pivot 120x60", () -> TripolarGrid(size=(120, 60, 1), fold_topology=RightFaceFolded),
-        OcExt.OceananigansCurvilinearGrid, 1, String[]),
-    # a Subset's grid_extent is the members' union while its GridAndTree answers the tree root
-    # (the parent's whole-sphere cap): GridInterface's generic Subset, not the provider
+        grid_of, OcExt.OceananigansCurvilinearGrid, 1, String[]),
+    # the U-pivot provider's active-cell views (the layout `Regridder` regrids, `FoldedLayoutGrid`,
+    # is checked in extensions/oceananigans.jl); a Subset's grid_extent is the members' union
+    # while its GridAndTree answers the tree root (the parent's whole-sphere cap)
     ("TripolarGrid U-pivot 120x60 (unique cells)", () -> TripolarGrid(size=(120, 60, 1), fold_topology=RightCenterFolded),
-        Subset, 1, [SUBSET_EXTENT_GAP]),
+        g -> OcExt.unique_cells(OcExt.structured_grid(g)), Subset, 1, [SUBSET_EXTENT_GAP]),
     ("TripolarGrid U-pivot, masked (wet cells)",
         () -> ImmersedBoundaryGrid(TripolarGrid(size=(40, 20, 2), z=(-1000, 0)), GridFittedBottom(bathy)),
-        Subset, 1, [SUBSET_EXTENT_GAP]),
+        OcExt.wet_cells, Subset, 1, [SUBSET_EXTENT_GAP]),
     ("RotatedLatitudeLongitudeGrid 90x40", () -> RotatedLatitudeLongitudeGrid(size=(90, 40, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1), north_pole=(70, 55)),
-        OcExt.OceananigansCurvilinearGrid, 1, String[]),
+        grid_of, OcExt.OceananigansCurvilinearGrid, 1, String[]),
     ("RectilinearGrid 100x100 (planar)", () -> RectilinearGrid(size=(100, 100), x=(0, 2), y=(0, 2), topology=(Periodic, Periodic, Flat)),
-        OcExt.OceananigansLatLonGrid, 1, String[]),
+        grid_of, OcExt.OceananigansLatLonGrid, 1, String[]),
     ("ConformalCubedSphereGrid 16x16x6", () -> ConformalCubedSphereGrid(; panel_size=(16, 16, 1), z=(0, 1)),
-        OcExt.OceananigansCubedSphereGrid, 6, String[]),
-    ("ClimaCore cubed sphere h16 regular", () -> cubedsphere_space(; h_elem=16), CCExt.ClimaCoreCubedSphereGrid, 6, String[]),
-    ("ClimaCore cubed sphere h16 Gilbert", () -> cubedsphere_space(; h_elem=16, use_sfc=true), CCExt.ClimaCoreCubedSphereGrid, 6, String[]),
-    ("Healpix nested 16", () -> Healpix.HealpixMap{Float64,Healpix.NestedOrder}(16), HPExt.HealpixMapGrid{Healpix.NestedOrder}, 12, String[]),
-    ("Healpix ring 16", () -> Healpix.HealpixMap{Float64,Healpix.RingOrder}(16), HPExt.HealpixMapGrid{Healpix.RingOrder}, 12, String[]),
-    ("FullClenshawGrid 16", () -> FullClenshawGrid(16), RGExt.FullRingGrid, 1, String[]),
-    ("FullGaussianGrid 12", () -> FullGaussianGrid(12), RGExt.FullRingGrid, 1, String[]),
-    ("HEALPixGrid 8", () -> HEALPixGrid(8), RGExt.HEALPixRingGrid, 12, String[]),
+        grid_of, OcExt.OceananigansCubedSphereGrid, 6, String[]),
+    ("ClimaCore cubed sphere h16 regular", () -> cubedsphere_space(; h_elem=16), grid_of, CCExt.ClimaCoreCubedSphereGrid, 6, String[]),
+    ("ClimaCore cubed sphere h16 Gilbert", () -> cubedsphere_space(; h_elem=16, use_sfc=true), grid_of, CCExt.ClimaCoreCubedSphereGrid, 6, String[]),
+    ("Healpix nested 16", () -> Healpix.HealpixMap{Float64,Healpix.NestedOrder}(16), grid_of, HPExt.HealpixMapGrid{Healpix.NestedOrder}, 12, String[]),
+    ("Healpix ring 16", () -> Healpix.HealpixMap{Float64,Healpix.RingOrder}(16), grid_of, HPExt.HealpixMapGrid{Healpix.RingOrder}, 12, String[]),
+    ("FullClenshawGrid 16", () -> FullClenshawGrid(16), grid_of, RGExt.FullRingGrid, 1, String[]),
+    ("FullGaussianGrid 12", () -> FullGaussianGrid(12), grid_of, RGExt.FullRingGrid, 1, String[]),
+    ("HEALPixGrid 8", () -> HEALPixGrid(8), grid_of, RGExt.HEALPixRingGrid, 12, String[]),
     # Diamond cells: a cell's centroid sits equatorward of its E/W corners, so a
     # vertex lies outside its median-dual cell and the winding test about the
     # vertex reads the (CCW) dual ring as reversed; and the four equatorial face
     # corners of OctaHEALPix are hanging vertices of two cells (a 2-point dual ring).
-    ("OctaHEALPixGrid 8", () -> OctaHEALPixGrid(8), RGExt.OctaHEALPixRingGrid, 4, DIAMOND_DUAL_GAPS),
-    ("OctahedralGaussianGrid 9", () -> OctahedralGaussianGrid(9), RGExt.ReducedRingGrid, 0, DIAMOND_DUAL_GAPS),
+    ("OctaHEALPixGrid 8", () -> OctaHEALPixGrid(8), grid_of, RGExt.OctaHEALPixRingGrid, 4, DIAMOND_DUAL_GAPS),
+    ("OctahedralGaussianGrid 9", () -> OctahedralGaussianGrid(9), grid_of, RGExt.ReducedRingGrid, 0, DIAMOND_DUAL_GAPS),
 ]
 
 @testset "providers: conformance" begin
-    for (name, mk, T, nf, known) in CASES
+    for (name, mk, view, T, nf, known) in CASES
         native = mk()
-        g = grid_of(native)
+        g = view(native)
         @test g isa T
         base = g isa Subset ? parent(g) : g
         nf == 0 || @test nfaces(base) == nf
@@ -154,34 +156,34 @@ end
     @test length(facefan(g, 1, 1, Ny + 1)) == 2 && length(facefan(g, 1, Nx ÷ 2 + 1, Ny + 1)) == 2
 end
 
-@testset "providers: weights agree with the native path (small pairs)" begin
+@testset "providers: native inputs and their grids agree (small pairs)" begin
     R(d, s) = ConservativeRegridding.Regridder(d, s; threaded=false)
     ll = LatitudeLongitudeGrid(size=(60, 30, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
     tf = TripolarGrid(size=(40, 20, 1), fold_topology=RightFaceFolded)
     tu = TripolarGrid(size=(40, 20, 1), fold_topology=RightCenterFolded)
     for (dst, src) in ((ll, tf), (tf, ll), (ll, tu), (tu, ll))
-        D, S = grid_of(dst), grid_of(src)
-        test_weights_agree(R(dst, src), R(cr_tree(D), cr_tree(S)); dst=D, src=S)
+        test_weights_agree(R(dst, src), R(grid_of(dst), grid_of(src)))
     end
+    # the U-pivot layout (ghosts of zero area) against the provider's unique cells
+    U = OcExt.unique_cells(OcExt.structured_grid(tu))
+    test_weights_agree(R(ll, tu), R(grid_of(ll), U); src=U)
+    test_weights_agree(R(tu, ll), R(U, grid_of(ll)); dst=U)
     hp = HEALPixGrid(8); fc = FullClenshawGrid(16); oh = OctaHEALPixGrid(8); og = OctahedralGaussianGrid(8)
     for (dst, src) in ((fc, hp), (oh, fc), (og, hp), (fc, og))
-        test_weights_agree(R(dst, src), R(cr_tree(grid_of(dst)), cr_tree(grid_of(src))))
+        test_weights_agree(R(dst, src), R(grid_of(dst), grid_of(src)))
     end
     hm = Healpix.HealpixMap{Float64,Healpix.NestedOrder}(8)
     m = GO.Spherical()                                            # mixed radii: the manifold is explicit, as in CR's tests
     Rm(d, s) = ConservativeRegridding.Regridder(m, d, s; threaded=false)
-    test_weights_agree(Rm(ll, hm), Rm(cr_tree(grid_of(ll)), cr_tree(grid_of(hm))))
-    # the provider grids go straight into Regridder (the helpers' treeify bridge)
-    Rg = Rm(grid_of(ll), grid_of(hm))
-    @test Rg.intersections == Rm(cr_tree(grid_of(ll)), cr_tree(grid_of(hm))).intersections
+    test_weights_agree(Rm(ll, hm), Rm(grid_of(ll), grid_of(hm)))
 end
 
 @testset "issue #147: stretched-z U-pivot tripolar grid conserves a constant field" begin
-    src = TripolarGrid(size=(144, 72, 1); z=[0, 1])              # a vector z: not ZReg, CR's fold-aware treeify does not apply
+    src = TripolarGrid(size=(144, 72, 1); z=[0, 1])              # a vector z: not ZReg, which the old native tree required
     dst = LatitudeLongitudeGrid(size=(90, 42, 1), z=(0, 1), longitude=(0, 360), latitude=(-84, 84))
     S = grid_of(src); D = grid_of(dst)
-    @test S isa Subset                                             # the unique cells of the fold row
-    Rp = ConservativeRegridding.Regridder(cr_tree(D), cr_tree(S); threaded=false)
+    @test S isa OcExt.FoldedLayoutGrid                            # the layout, the fold row's duplicates as ghosts
+    Rp = ConservativeRegridding.Regridder(D, S; threaded=false)
     out = zeros(ncells(D))
     ConservativeRegridding.regrid!(out, Rp, ones(ncells(S)))
     # the tripolar grid starts at -81.2 for this size: the first destination row (-84..-80) is only
@@ -190,9 +192,11 @@ end
     covered[1:90] .= false
     @test maximum(abs.(out[covered] .- 1)) < 1e-10
     @test maximum(out) < 1 + 1e-10                                 # the fold row is counted once
-    @test maximum(vec(sum(Rp.intersections; dims=1)) ./ Rp.src_areas) < 1 + 1e-10   # no source cell used twice
-    # the native path on the same grid counts the fold twice (the issue); the provider path is the fix
+    real = Rp.src_areas .> 0                                     # the ghosts have no area to cover
+    @test maximum(vec(sum(Rp.intersections; dims=1))[real] ./ Rp.src_areas[real]) < 1 + 1e-10   # no source cell used twice
+    # the native input regrids the same layout: the fold row is counted once there too
     Rn = ConservativeRegridding.Regridder(dst, src; threaded=false)
+    @test Rn.intersections == Rp.intersections
     outn = zeros(ncells(D)); ConservativeRegridding.regrid!(outn, Rn, ones(size(Rn.intersections, 2)))
-    @test maximum(outn) > 1.5
+    @test maximum(outn) < 1 + 1e-10
 end

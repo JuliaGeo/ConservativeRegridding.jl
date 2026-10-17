@@ -11,7 +11,7 @@
 # though it NaNs in the vec sweat.
 
 using ConservativeRegridding
-using ConservativeRegridding: ConservativeRegridding as CR, Trees
+using ConservativeRegridding: ConservativeRegridding as CR
 using Test
 import GeometryOps as GO, GeoInterface as GI
 

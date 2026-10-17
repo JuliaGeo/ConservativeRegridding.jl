@@ -1,111 +1,82 @@
-
-
 using ConservativeRegridding
-using ConservativeRegridding.Trees
+using Test
 
 import GeometryOps as GO, GeometryOpsCore as GOCore
 import GeoInterface as GI
-import GeometryOps: SpatialTreeInterface as STI, UnitSpherical
-using StaticArrays: SA
-using SmallCollections: FixedVector, capacity
-using LinearAlgebra: normalize
+import GeometryOps: SpatialTreeInterface as STI
+import GridInterface as GrI
+using GridInterface: ncells, cell_geometry, cell_area
+using GridInterface.Structured: nfaces
 
 import Healpix
 
 const HealpixExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingHealpixExt)
 
-@testset "HealpixTree basic functionality" begin
-    @testset "Core types and constructors" begin
-        tree = HealpixExt.HealpixTree(4)
-        @test tree isa HealpixExt.HealpixRootNode{Healpix.NestedOrder}
-        @test tree.nside_max == 4
-        @test Trees.ncells(tree) == 12 * 4^2  # 192 pixels
+@testset "HealpixMapGrid provider" begin
+    @testset "asgrid, sizes, manifold" begin
+        map = Healpix.HealpixMap{Float64, Healpix.NestedOrder}(4)
+        g = ConservativeRegridding.asgrid(map)
+        @test g isa HealpixExt.HealpixMapGrid{Healpix.NestedOrder}
+        @test ncells(g) == 12 * 4^2  # 192 pixels
+        @test nfaces(g) == 12
+        @test GOCore.best_manifold(g) == GO.Spherical()
+        @test GOCore.best_manifold(map) == GO.Spherical()
 
-        tree_ring = HealpixExt.HealpixTree(Healpix.RingOrder, 8)
-        @test tree_ring isa HealpixExt.HealpixRootNode{Healpix.RingOrder}
-        @test tree_ring.nside_max == 8
+        ring = Healpix.HealpixMap{Float64, Healpix.RingOrder}(8)
+        gr = ConservativeRegridding.asgrid(ring)
+        @test gr isa HealpixExt.HealpixMapGrid{Healpix.RingOrder}
+        @test ncells(gr) == 12 * 8^2
     end
 
-    @testset "SpatialTreeInterface - HealpixRootNode" begin
-        tree = HealpixExt.HealpixTree(2)
-        @test STI.isspatialtree(typeof(tree)) == true
-        @test STI.isleaf(tree) == false
-        @test STI.nchild(tree) == 12
-
-        # Check children are HealpixTreeNodes at level 0
-        child = STI.getchild(tree, 1)
-        @test child isa HealpixExt.HealpixTreeNode{Healpix.NestedOrder}
-        @test child.level == 0
-        @test child.pixel == 0
-        @test Trees.cell_index_count(child) == 12 * 2^2
-
-        child12 = STI.getchild(tree, 12)
-        @test child12.pixel == 11
-
-        # Check extent is full sphere
-        extent = STI.node_extent(tree)
-        @test extent isa GO.UnitSpherical.SphericalCap
+    @testset "cell geometry: Healpix's own pixel corners" begin
+        res = Healpix.Resolution(2)
+        for O in (Healpix.NestedOrder, Healpix.RingOrder)
+            g = HealpixExt.HealpixMapGrid{O}(res)
+            maxerr = 0.0
+            for k in 1:ncells(g)
+                cell = cell_geometry(g, k)
+                @test GI.geomtrait(cell) == GI.PolygonTrait()
+                pts = collect(GI.getpoint(GI.getexterior(cell)))
+                @test length(pts) == 5  # 4 corners + closing point
+                ringpix = O === Healpix.NestedOrder ? Healpix.nest2ring(res, k) : k
+                bd = Healpix.boundariesRing(res, ringpix, 1, Float64)
+                for c in 1:4
+                    maxerr = max(maxerr, minimum(maximum(abs.(Tuple(pts[c]) .- bd[b, :])) for b in 1:4))
+                end
+            end
+            @test maxerr < 1e-12
+        end
     end
 
-    @testset "SpatialTreeInterface - HealpixTreeNode" begin
-        tree = HealpixExt.HealpixTree(4)  # leaf level is log2(4) = 2
-
-        # Level 0 node (base face)
-        node0 = STI.getchild(tree, 1)
-        @test STI.isleaf(node0) == false
-        @test STI.nchild(node0) == 4
-
-        # Level 1 node
-        node1 = STI.getchild(node0, 1)
-        @test node1.level == 1
-        @test node1.pixel == 0
-        @test STI.isleaf(node1) == false
-
-        # Level 2 node (leaf for nside=4)
-        node2 = STI.getchild(node1, 1)
-        @test node2.level == 2
-        @test STI.isleaf(node2) == true
-        @test STI.nchild(node2) == 0
+    @testset "cells tessellate the sphere" begin
+        S = GO.Spherical()
+        for nside in (1, 2, 4)
+            g = HealpixExt.HealpixMapGrid{Healpix.NestedOrder}(nside)
+            total = sum(cell_area(g, k) for k in 1:ncells(g))
+            @test isapprox(total, 4π * S.radius^2; rtol = 1e-12)
+        end
     end
 
-    @testset "getcell" begin
-        tree = HealpixExt.HealpixTree(2)
-
-        # Single cell
-        cell = Trees.getcell(tree, 1)
-        @test GI.geomtrait(cell) == GI.PolygonTrait()
-        ring = GI.getexterior(cell)
-        @test GI.npoint(ring) == 5  # 4 corners + closing point
-
-        # Iterator
-        cells = collect(Trees.getcell(tree))
-        @test length(cells) == Trees.ncells(tree)
+    @testset "the tree emits every pixel once" begin
+        g = HealpixExt.HealpixMapGrid{Healpix.NestedOrder}(4)
+        tree = GrI.treeify(g; leaf_capacity = GrI.ForSweeps())
+        @test STI.isspatialtree(typeof(tree))
+        @test STI.node_extent(tree) isa GO.UnitSpherical.SphericalCap
+        @test sort(GrI.subtree_indices(tree)) == 1:ncells(g)
+        idxs = Int[]
+        STI.depth_first_search(_ -> true, tree) do i
+            push!(idxs, i)
+        end
+        @test sort(idxs) == 1:ncells(g)
     end
 
-    @testset "child_indices_extents" begin
-        tree = HealpixExt.HealpixTree(1)  # nside=1 means leaves at level 0
-        leaf = STI.getchild(tree, 1)
-        @test STI.isleaf(leaf) == true
-
-        idx_ext = @inferred STI.child_indices_extents(leaf)
-        @test idx_ext isa FixedVector{1}
-        @test capacity(idx_ext) == 1
-        @test length(idx_ext) == 1
-        idx, ext = idx_ext[1]
-        @test idx == 1  # 1-based index
-        @test ext isa GO.UnitSpherical.SphericalCap
-    end
-
-    @testset "Manifold" begin
-        tree = HealpixExt.HealpixTree(4)
-        @test GOCore.best_manifold(tree) == GO.Spherical()
-
-        node = STI.getchild(tree, 1)
-        @test GOCore.best_manifold(node) == GO.Spherical()
-    end
-
-    @testset "treeify passthrough" begin
-        tree = HealpixExt.HealpixTree(4)
-        @test Trees.treeify(GO.Spherical(), tree) === tree
+    @testset "end-to-end: a constant field is preserved" begin
+        src = Healpix.HealpixMap{Float64, Healpix.NestedOrder}(2)
+        dst = Healpix.HealpixMap{Float64, Healpix.RingOrder}(4)
+        R = ConservativeRegridding.Regridder(dst, src; threaded = false)
+        @test size(R) == (12 * 4^2, 12 * 2^2)
+        out = zeros(12 * 4^2)
+        ConservativeRegridding.regrid!(out, R, ones(12 * 2^2))
+        @test all(isapprox.(out, 1.0; atol = 1e-9))
     end
 end

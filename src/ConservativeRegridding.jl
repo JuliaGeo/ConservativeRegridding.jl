@@ -4,7 +4,6 @@ using DocStringExtensions
 import LinearAlgebra
 import GeoInterface
 import GeometryOps
-import SortTileRecursiveTree
 import Extents
 import SparseArrays
 import ChunkSplitters
@@ -12,28 +11,31 @@ import StableTasks
 import ProgressMeter
 
 using GeometryOpsCore: booltype, BoolsAsTypes, True, False, istrue
-using GeometryOpsCore: Manifold, Planar, Spherical
+using GeometryOpsCore: Manifold, Planar, Spherical, best_manifold
+
+# The engine takes GridInterface grids: `treeify` gives the tree, the hot loop
+# reads `cell_geometry`, areas are the `GeometryOps.area` of those geometries, the clipper from `cellshape`.
+using GridInterface
+import GridInterface.Structured: CellBasedGrid, RegularGrid, ExplicitPolygonGrid
 
 using SciMLPublic: @public
 
 include("utils/example_data.jl")
 export ExampleFieldFunction, LongitudeField, SinusoidField, HarmonicField, GulfStreamField, VortexField
 
-include("trees/Trees.jl")
-using .Trees
-
-# The serial traversal and its task frontier both dispatch on `Trees.split_weight`.
+# The serial traversal and its task frontier both dispatch on
+# `SpatialTreeInterface.split_weight`.
 include("utils/WeightedDualDepthFirstSearch.jl")
 using .WeightedDualDepthFirstSearch
 
 include("utils/MultithreadedDualDepthFirstSearch.jl")
 using .MultithreadedDualDepthFirstSearch
 
-export AbstractCurvilinearGrid, ncells, cell_index_count, getcell
+# `asgrid`: what `Regridder` makes of its inputs; the grids CR builds for bare
+# corner matrices, axis pairs and polygon vectors.
+include("grids.jl")
+export asgrid, PolygonVectorGrid
 export ExplicitPolygonGrid, CellBasedGrid, RegularGrid
-export QuadtreeCursor, TopDownQuadtreeCursor
-export should_parallelize, WithParallelizePolicy
-export split_weight
 
 include("regridder/triangle_quadrature.jl")
 
