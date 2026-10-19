@@ -1,7 +1,7 @@
 module ConservativeRegriddingOceananigansExt
 
 using Oceananigans
-using Oceananigans.Grids: ξnode, ηnode, RightFaceFolded, RightCenterFolded
+using Oceananigans.Grids: ξnode, ηnode
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Architectures: CPU
 using Oceananigans.Utils: launch!, KernelParameters
