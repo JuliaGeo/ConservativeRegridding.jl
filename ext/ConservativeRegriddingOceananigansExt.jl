@@ -6,6 +6,14 @@ using Oceananigans.Fields: AbstractField
 using Oceananigans.Architectures: CPU
 using Oceananigans.Utils: launch!, KernelParameters
 
+@static if isdefined(Oceananigans.Grids, :Sides)
+    using Oceananigans.Grids: Sides, CenterFolded, FaceFolded
+    const RightCenterFolded = Sides{<:Any, <:CenterFolded}
+    const RightFaceFolded   = Sides{<:Any, <:FaceFolded}
+else
+    using Oceananigans.Grids: RightCenterFolded, RightFaceFolded
+end
+
 using KernelAbstractions: @kernel, @index
 
 using ConservativeRegridding
@@ -124,7 +132,7 @@ end
 
 function Trees.treeify(
     manifold::GOCore.Spherical,
-    grid::Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Oceananigans.RightCenterFolded}
+    grid::Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, RightCenterFolded}
 )
     # Compute the matrix of vertices - for an n×m grid, this is an (n+1)×(m+1) matrix of vertices.
     cells_longlat = compute_cell_matrix(grid)
@@ -192,7 +200,7 @@ function Trees.treeify(
     return Trees.KnownFullSphereExtentWrapper(tree)
 end
 
-const RightCenterFoldedGrid = Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Oceananigans.RightCenterFolded}
+const RightCenterFoldedGrid = Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, RightCenterFolded}
 
 #####
 ##### `regrid!` plumbing for Oceananigans fields.
