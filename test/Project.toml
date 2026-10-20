@@ -33,12 +33,12 @@ XESMF = "0.2"
 [sources]
 ConservativeRegridding = {path = ".."}
 ConservativeRegriddingTestHelpers = {path = "../lib/ConservativeRegriddingTestHelpers"}
-GridInterface = {path = "../../GridInterface.jl"}
-GridInterfaceConformance = {path = "../../GridInterface.jl/lib/GridInterfaceConformance"}
-GeometryOps = {path = "/home/anshul/.julia/dev/geo/GeometryOps-split"}
-GeometryOpsCore = {path = "/home/anshul/.julia/dev/geo/GeometryOps-split/GeometryOpsCore"}
-SpatialTreeInterface = {path = "/home/anshul/.julia/dev/geo/GeometryOps-split/SpatialTreeInterface"}
-UnitSphericalGeometryCore = {path = "/home/anshul/.julia/dev/geo/GeometryOps-split/UnitSphericalGeometryCore"}
+GridInterface = {url = "https://github.com/JuliaGeo/GridInterface.jl.git", rev = "gridinterface"}
+GridInterfaceConformance = {url = "https://github.com/JuliaGeo/GridInterface.jl.git", rev = "gridinterface", subdir = "lib/GridInterfaceConformance"}
+GeometryOps = {url = "https://github.com/JuliaGeo/GeometryOps.jl.git", rev = "as/split-unitsphericalgeometrycore"}
+GeometryOpsCore = {url = "https://github.com/JuliaGeo/GeometryOps.jl.git", rev = "as/split-unitsphericalgeometrycore", subdir = "GeometryOpsCore"}
+SpatialTreeInterface = {url = "https://github.com/JuliaGeo/GeometryOps.jl.git", rev = "as/split-unitsphericalgeometrycore", subdir = "SpatialTreeInterface"}
+UnitSphericalGeometryCore = {url = "https://github.com/JuliaGeo/GeometryOps.jl.git", rev = "as/split-unitsphericalgeometrycore", subdir = "UnitSphericalGeometryCore"}
 
 [extras]
 SpatialTreeInterface = "bf42099b-6274-40f2-a94d-272408263a4f"
