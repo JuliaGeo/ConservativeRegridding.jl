@@ -35,6 +35,14 @@ export weighted_dual_depth_first_search
     return split_weight(node1) >= split_weight(node2)
 end
 
+# The inner loop of a leaf pair indexes a vector of entries rather than iterating
+# it: iterating copies each `(index, cap)` tuple through the stack, which cost 4x
+# the predicate it feeds (HEALPix x H3 leaves). Any other iterator is its own keys.
+@inline _entry_keys(entries::AbstractVector) = eachindex(entries)
+@inline _entry_keys(entries) = entries
+@inline _entry(entries::AbstractVector, k) = @inbounds entries[k]
+@inline _entry(entries, entry) = entry
+
 # GeometryOps uses a radius-NaN cap as the conservative whole-sphere fallback for
 # point sets whose mean direction is undefined.  Such a node cannot prune anything.
 # The `!(r < π)` spelling catches both that representation and an explicit full sphere.
@@ -88,7 +96,8 @@ function weighted_dual_depth_first_search(
         cie1 = @something entries1 STI.child_indices_extents(node1)
         cie2 = @something entries2 STI.child_indices_extents(node2)
         for (i1, cell_extent1) in cie1
-            for (i2, cell_extent2) in cie2
+            for k2 in _entry_keys(cie2)
+                i2, cell_extent2 = _entry(cie2, k2)
                 predicate(cell_extent1, cell_extent2) && @controlflow f(i1, i2)
             end
         end

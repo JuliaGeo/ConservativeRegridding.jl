@@ -220,12 +220,13 @@ faceaxes(g::OceananigansLatLonGrid, f) = (view(g.xs, 1:g.Nx+1), view(g.ys, 1:g.N
 facecoords(g::OceananigansLatLonGrid, f, p) = g.manifold isa GOCore.Spherical ? GO.GeographicFromUnitSphere()(p) :
     (Float64(GI.x(p)), Float64(GI.y(p)))
 faceperiod(g::OceananigansLatLonGrid, f) = g.manifold isa GOCore.Spherical ? (360.0, nothing) : (nothing, nothing)
-GrI.extent_is_expensive(g::OceananigansLatLonGrid) = g.manifold isa GOCore.Spherical
 GrI.isglobal(g::OceananigansLatLonGrid) = g.manifold isa GOCore.Spherical && g.periodic[1] && g.collapsed[1] && g.collapsed[2]
 function Structured._blockextent(::GOCore.Planar, g::OceananigansLatLonGrid, f, ir::UnitRange{Int}, jr::UnitRange{Int})
     return Extents.Extent(X=(Float64(g.xs[first(ir)]), Float64(g.xs[last(ir)+1])), Y=(Float64(g.ys[first(jr)]), Float64(g.ys[last(jr)+1])))
 end
 Structured._cellextent(m::GOCore.Planar, g::OceananigansLatLonGrid, f, i, j) = Structured._blockextent(m, g, f, i:i, j:j)
+# four axis reads: the planar quadtree's node extents are cheap
+STI.node_extent_is_expensive(::Type{<:Structured.TopDownQuadtreeCursor{<:OceananigansLatLonGrid{<:Any,<:Any,<:GOCore.Planar}}}) = false
 
 """
     OceananigansCurvilinearGrid(grid::OrthogonalSphericalShellGrid)
@@ -444,7 +445,6 @@ GOCore.best_manifold(g::FoldedLayoutGrid) = GOCore.best_manifold(g.grid)
 GrI.cellshape(::FoldedLayoutGrid) = GrI.ConvexCells()
 GrI.tessellation(::FoldedLayoutGrid) = GrI.Tessellating()
 GrI.isglobal(g::FoldedLayoutGrid) = GrI.isglobal(g.grid)
-GrI.extent_is_expensive(::FoldedLayoutGrid) = true
 GrI.cell_geometry_is_expensive(g::FoldedLayoutGrid) = GrI.cell_geometry_is_expensive(g.grid)
 function GrI.cell_boundary(g::FoldedLayoutGrid, k::Integer)
     _isghost(g, k) || return GrI.cell_boundary(g.grid, k)

@@ -95,6 +95,5 @@ GOCore.best_manifold(g::PolygonVectorGrid) = g.manifold
 GridInterface.cellshape(::PolygonVectorGrid) = GridInterface.GeneralCells()
 GridInterface.cell_geometry(g::PolygonVectorGrid, i::Integer) = g.polygons[i]
 GridInterface.cell_geometry_is_expensive(::PolygonVectorGrid) = false
-GridInterface.extent_is_expensive(::PolygonVectorGrid) = true
 Base.show(io::IO, g::PolygonVectorGrid) =
     print(io, "PolygonVectorGrid(", length(g.polygons), " polygons on ", g.manifold, ")")
