@@ -1,3 +1,6 @@
 [deps]
 esmpy = ""
 esmf = ""
+# 4.6.4 needs libnetcdf 4.10's nc_set_meta_block_size_ints, but NCDatasets has
+# already loaded NetCDF_jll's older libnetcdf.so.22 (same soname) by then.
+netcdf-fortran = "<4.6.4"
