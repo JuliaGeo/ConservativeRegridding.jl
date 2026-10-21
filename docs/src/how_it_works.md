@@ -1,57 +1,57 @@
 # How it works
 
-This guide explains what happens under the hood when you create a `Regridder` and use it to regrid data. Understanding these internals can help you make better decisions about grid representations and debug unexpected behavior.
+```@meta
+CurrentModule = ConservativeRegridding
+```
+
+This guide explains what happens when you create a `Regridder` and use it to regrid data. Knowing the pipeline helps you choose grid representations and debug unexpected behaviour.
 
 ## The high-level picture
 
-When you call `Regridder(dst, src)` on two grids `dst` and `src`, you enter the ConservativeRegridding pipeline.
+`Regridder(dst, src)` runs three steps: it turns the two inputs into grids with trees, sweeps the two trees for the cell pairs that may overlap, and assembles the weight of every pair into a sparse matrix.
 
 ### 1. Input sanitization and tree construction
 
-First, `dst` and `src` are turned into [GridInterface](interfaces/grids.md) grids via `ConservativeRegridding.asgrid`
-(a GridInterface grid is its own; a corner matrix, axis pair or polygon collection becomes one of the shipped grids; the
-package extensions answer for their native objects), and each grid's spatial tree is built with
-`GridInterface.treeify(grid; leaf_capacity = ForSweeps())`.  The tree:
+`dst` and `src` become [GridInterface](interfaces/grids.md) grids through [`asgrid`](@ref): a GridInterface grid is its own; a corner matrix, axis pair or polygon collection becomes one of the shipped grids; the package extensions answer for their native objects. Each grid's tree is then built with `GridInterface.treeify(grid; leaf_capacity = ForSweeps())`.
 
-- Efficiently describes the underlying grid structure,
-- Provides a way to efficiently traverse the grid structure in a hierarchical way, from top level (very large) to leaf (each cell).
+The tree is a `SpatialTreeInterface` tree whose leaves emit cell indices. It answers the traversal questions (children, node extents, leaf entries) and the grid answers everything about a cell (`cell_geometry`, `cell_extent`), so `dst_areas`/`src_areas` are the `GeometryOps.area` of exactly the polygons the clipper sees. Which tree a grid gets:
 
-The tree implements `SpatialTreeInterface`; its leaves emit cell indices, and the grid answers every cell's geometry
-(`cell_geometry`) and extent (`cell_extent`) on demand; `dst_areas`/`src_areas` are the `GeometryOps.area` of those geometries.  Structured grids (`GridInterface.Structured`)
-get a quadtree cursor over their index ranges, which is what the longitude-latitude, tripolar, cubed sphere, HEALPix, etc.
-providers use; any other grid gets an STR R-tree over its cell extents, and a grid can carry its own tree in a `GridAndTree`.
+| grid | tree |
+|---|---|
+| structured (`GridInterface.Structured`: the longitude-latitude, tripolar, cubed-sphere, HEALPix, ... providers) | a quadtree cursor over its index ranges |
+| a `Subset` of a grid (the wet cells of an ocean grid, the unique cells of a folded layout) | the parent's tree restricted by `GridInterface.subtree`: the same nodes and extents, children whose `position_span` misses every member dropped, leaves emitting members only |
+| `GridAndTree(grid, tree)` | the stored `tree` |
+| anything else | an STR R-tree over the cell extents |
+
+A cell index is the linear index of that cell's value in the field (the `vec` of the underlying array), so the weight matrix is indexed by field positions directly.
 
 ### 2. Finding potentially intersecting cells
 
-Then, we descend simultaneously down into `dst` and `src` trees together, using a dual depth-first tree descent.  
-This is an algorithm in the class of _dual-tree_ algorithms, which you can think of as aggressive pruning.  
-Both trees are walked simultaneously.  The children of each node are checked for intersection, and pruned if they don't intersect.
+Both trees are walked together by a dual depth-first search ([`weighted_dual_depth_first_search`](@ref ConservativeRegridding.weighted_dual_depth_first_search)): a node pair whose extents do not intersect is pruned with its whole subtree, and every surviving leaf pair yields its cell pairs. One side opens per step:
 
-As an accelerator, we have an integrated multithreading step here.  Before descending, a short serial pass 
-splits the root node pair into a *frontier* of independent node pairs: it repeatedly splits the pair with the 
-largest estimated work (overlap area times cell density, from `GridInterface.split_weight`) until there are 
-`nthreads * chunks_per_thread` of them.  Each frontier pair then becomes one task, and the tasks' results are 
-concatenated in depth-first order, so the threaded search returns exactly what the serial one does.  
-No caching need be done ahead of time, since it's all baked into the algorithm.
+- the non-leaf side, when only one side can still descend;
+- otherwise the side with the greater `SpatialTreeInterface.split_weight` (the cells under the node), the source on a tie.
 
-At the end, we have a list of potentially intersecting cell pairs, represented as a vector of `(src_cell_index, dst_cell_index)` tuples. 
-Each index is an integer, starting from 1.  This index corresponds to the linear index of the data corresponding to that cell, in the 
-vector (flattened/`vec`) representation of the actual underlying dataset.
+The extent of each opened child is read once and carried through the descent below it. Once a side reaches a leaf, its entries (`SpatialTreeInterface.child_indices_extents`, the leaf's cell indices and extents) are built once and carried while the other side finishes descending. At a leaf pair the loop runs the source entries outside and the destination entries inside, indexing the destination's entry vector, and emits `(src_cell_index, dst_cell_index)` for every pair whose cell extents intersect.
+
+The search is multithreaded by a *frontier*: a short serial pass splits the root pair, always the pair with the largest estimated work (overlap area times cell density, from `split_weight`), until there are at least `nthreads * chunks_per_thread` independent node pairs. Each frontier pair becomes one task, and the tasks' results are concatenated in depth-first order. The frontier opens the same side the serial search would, so the threaded search returns exactly what the serial one does, in the same order.
+
+At the end, we have the candidate pairs as a vector of `(src_cell_index, dst_cell_index)` tuples. Every pair that truly overlaps is listed; a listed pair need not overlap.
 
 ### 3. Computing regridding weights
 
-Now that we know which cells potentially intersect, we can compute the regridding weights.  These are stored in a sparse matrix, 
-where the row indicates the destination cell index and the column indicates the source cell index.  Each entry is the weight of 
+Now that we know which cells potentially intersect, we can compute the regridding weights.  These are stored in a sparse matrix,
+where the row indicates the destination cell index and the column indicates the source cell index.  Each entry is the weight of
 the value of the source cell that contributes to the destination cell.
 
 There are many ways to procure this value.  For now, let's use the simplest method - first order, area based regridding - as an example.
 Here, we compute the area of intersection between the source and destination cells, which is then used directly as the weight.  Other methods,
 like second-order conservative regridding, bilinear, etc. will use different weight metrics, and some may not even use intersection areas at all.
 
-The way this is done is by splitting up the list of candidates into chunks, and then computing the weights for each chunk in parallel.  The
-clipper is chosen from the grids' `cellshape`: when both grids declare `ConvexCells()` we use GeometryOps' optimized spherical convex polygon
-intersection (Sutherland-Hodgman); otherwise GeometryOps' general polygon clipper (Foster-Hormann) handles the non-convex cells.  Planar grids
-always use the general clipper.  The operator can be overridden by the user (`intersection_operator`).
+The list of candidates is split into chunks, and the weights of each chunk are computed in parallel. The clipper follows the
+manifold and the grids' `cellshape` ([`DefaultIntersectionOperator`](@ref)): on the sphere, convex-convex Sutherland-Hodgman when
+both grids have single-ring cells (`ConvexCells()` or `SimpleCells()`), and GeometryOps' general Foster-Hormann clipper when either
+has `GeneralCells()`; on the plane, Foster-Hormann always. Pass `intersection_operator` to override it.
 
 At the end of this, each task returns a vector of `(dst_cell_index, src_cell_index, weight)` tuples.  These are then concatenated together, and 
 assembled into a sparse matrix which is the regridder object.
@@ -61,9 +61,9 @@ Success!  We have now constructed a regridder.  There are a couple of steps afte
 ## Customizing the weights: the intersection operator interface
 
 Step 3 above is driven by a single extensible object — the **intersection operator** —
-plus four dispatched seams, each with a default that reproduces the area-based weight.
+plus five dispatched seams, each with a default that reproduces the area-based weight.
 The operator is passed as `Regridder(dst, src; intersection_operator = ...)`, or directly
-to [`ConservativeRegridding.intersection_areas`](@ref). The four seams are:
+to [`ConservativeRegridding.intersection_areas`](@ref). The five seams are:
 
 1. **[`IntersectionReturnStyle`](@ref)`(op)`** — how the operator delivers a contribution
    for one work item:
@@ -82,6 +82,8 @@ to [`ConservativeRegridding.intersection_areas`](@ref). The four seams are:
    matrix (default: `Float64`). Override it when you want something other than scalar areas —
    e.g. to build up a matrix of intersection _polygons_ rather than just areas, as the
    shipped [`IntersectionGridOperator`](@ref) does.
+5. **[`task_local_operator`](@ref)`(op)`** — the operator instance one assembly task uses
+   (default: `op` itself). Override it to give each task a private mutable cache.
 
 Everything else — candidate search, chunking, multithreaded assembly, and sparse-matrix
 construction — is shared, so whatever your operator computes runs inside the same parallel
@@ -113,6 +115,8 @@ spectral-element assemblers do, emitting an `Nq²` block per intersection — de
 operator [`InPlace`](@ref) and `push!` directly onto the COO vectors:
 
 ```julia
+import GridInterface
+
 struct MyBlockOperator
     nrows::Int
     ncols::Int
@@ -136,5 +140,3 @@ end
 The ClimaCore extension (`SE → FV` and `FV → SE` regridding) is built entirely on this
 interface: each direction is an `InPlace` operator, and `FV → SE` additionally overrides
 [`work_items`](@ref) to make the per-element mass-matrix solve the unit of parallel work.
-
-## How we actually do it

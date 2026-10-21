@@ -22,7 +22,8 @@ makedocs(
         ],
         "devnotes.md",
     ],
-    warnonly = true,#[:missing_docs],
+    checkdocs = :public,
+    warnonly = false,
 )
 
 deploydocs(

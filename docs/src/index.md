@@ -17,23 +17,15 @@ Here's an example of regridding between two different geodesic grids from [Speed
 using SpeedyWeather
 using ConservativeRegridding
 
-import GeoInterface as GI
-import GeometryOps as GO
-
 # Create random data on two different geodesic grid types
 field1 = rand(OctaHEALPixGrid, 4)
 field2 = rand(OctaminimalGaussianGrid, 4)
-
-# Get the polygon vertices for each grid (each column is a polygon as (lon, lat) tuples)
-# The Regridder constructor handles wrapping these as GeoInterface polygons and
-# fixing antimeridian crossings internally
-verts1 = RingGrids.get_gridcell_polygons(field1.grid)
-verts2 = RingGrids.get_gridcell_polygons(field2.grid)
 ```
 
 ```@example speedy
-# Build the regridder (precomputes intersection areas)
-R = ConservativeRegridding.Regridder(verts1, verts2)
+# Build the regridder (precomputes intersection areas). The RingGrids extension
+# answers for the fields' grids, so they are passed as they are.
+R = ConservativeRegridding.Regridder(field1, field2)
 ```
 
 ```@example speedy
@@ -59,8 +51,8 @@ source and destination grid cells. For a source grid with ``m`` cells and a dest
 grid with ``n`` cells, the matrix ``A`` is ``n \times m``, where each entry ``A_{ij}``
 represents the area of intersection between destination cell ``i`` and source cell ``j``.
 
-The algorithm uses an efficient spatial tree structure (STRtree) to compute only the
-non-zero intersections, avoiding the ``O(nm)`` cost of checking all cell pairs.
+A dual-tree search over the two grids' spatial trees finds the cell pairs that may
+intersect, so only those are clipped; see [How it works](how_it_works.md).
 
 ### Forward Regridding
 
@@ -112,16 +104,40 @@ a^d_i = \sum_j A_{ij} \quad \text{and} \quad a^s_j = \sum_i A_{ij}
 In ConservativeRegridding.jl:
 
 - **Sparse storage**: The intersection matrix ``A`` is stored as a sparse matrix since most grid cell pairs do not intersect.
-- **STRtree acceleration**: A Sort-Tile-Recursive tree enables efficient spatial queries to find intersecting cell pairs.
+- **Grids and trees**: Both inputs are [GridInterface](interfaces/grids.md) grids, each with a spatial tree from `GridInterface.treeify`; a dual-tree search of the two trees names the candidate cell pairs.
 - **GeometryOps integration**: Polygon intersections and area calculations are handled by [GeometryOps.jl](https://github.com/JuliaGeo/GeometryOps.jl).
-- ~**Antimeridian handling**: Polygons crossing the antimeridian are automatically fixed via `GeometryOps.fix`.~
-- **Normalization**: By default, the intersection areas are normalized to improve numerical conditioning.
+- **Normalization**: `Regridder(dst, src; normalize = true)` rescales ``A`` and both area vectors by the largest entry of ``A``, for numerical conditioning; the weights of `regrid!` are unchanged.
 
 ## API Reference
 
 ```@docs
 ConservativeRegridding.Regridder
 ConservativeRegridding.regrid!
+ConservativeRegridding.areas
+Base.transpose(::ConservativeRegridding.Regridder)
+ConservativeRegridding.AbstractRegridder
+ConservativeRegridding.save_esmf_weights
+```
+
+### Grids
+
+What `Regridder` makes of its inputs; see [Grid Interface](interfaces/grids.md) for
+regridding your own grid type.
+
+```@docs
+ConservativeRegridding.asgrid
+ConservativeRegridding.PolygonVectorGrid
+```
+
+### Candidate search
+
+```@docs
+ConservativeRegridding.candidate_pairs
+ConservativeRegridding.WeightedDualDepthFirstSearch
+ConservativeRegridding.weighted_dual_depth_first_search
+ConservativeRegridding.MultithreadedDualDepthFirstSearch.multithreaded_dual_query!
+ConservativeRegridding.MultithreadedDualDepthFirstSearch.frontier
+ConservativeRegridding.MultithreadedDualDepthFirstSearch.MAX_EXTRA_PAIRS
 ```
 
 ### Intersection operator interface
@@ -138,13 +154,35 @@ ConservativeRegridding.work_items
 ConservativeRegridding.output_matrix_size
 ConservativeRegridding.output_eltype
 ConservativeRegridding.should_store_result
+ConservativeRegridding.task_local_operator
+ConservativeRegridding.SparseMatrixAssemblyCache
 ```
 
 These are the various intersection operators already implemented:
 
 ```@docs
 ConservativeRegridding.DefaultIntersectionOperator
+ConservativeRegridding.ClipKind
+ConservativeRegridding.ConvexClip
+ConservativeRegridding.GeneralClip
+ConservativeRegridding.clip_kind
+ConservativeRegridding.DefaultIntersectionFailureError
 ConservativeRegridding.IntersectionGridOperator
+ConservativeRegridding.intersection_polygon_type
 ```
 
 and there are two more in the ClimaCore extension, for spectral element based regridding.
+
+### Example fields
+
+Analytic test fields, evaluated at a cell's longitude and latitude, for checking a
+regridder against a known function.
+
+```@docs
+ConservativeRegridding.ExampleFieldFunction
+ConservativeRegridding.LongitudeField
+ConservativeRegridding.SinusoidField
+ConservativeRegridding.HarmonicField
+ConservativeRegridding.GulfStreamField
+ConservativeRegridding.VortexField
+```

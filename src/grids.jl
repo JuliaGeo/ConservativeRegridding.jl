@@ -8,9 +8,7 @@ using UnitSphericalGeometryCore: UnitSphericalPoint
 
 The grid [`Regridder`](@ref) regrids for an input `x`: a GridInterface grid is
 its own; a bare corner matrix, axis pair or polygon collection becomes one of
-CR's own grids ([`CellBasedGrid`](@ref GridInterface.Structured.CellBasedGrid),
-[`RegularGrid`](@ref GridInterface.Structured.RegularGrid),
-[`ExplicitPolygonGrid`](@ref GridInterface.Structured.ExplicitPolygonGrid),
+CR's own grids (`CellBasedGrid`, `RegularGrid`, `ExplicitPolygonGrid`,
 [`PolygonVectorGrid`](@ref)); the package extensions define it for their
 native objects (an Oceananigans grid or field, a ClimaCore cubed-sphere
 topology, space or field, a `Healpix.HealpixMap`, a RingGrids grid or field),
@@ -81,7 +79,7 @@ A vector of polygons as a GridInterface grid: cell `i` is `polygons[i]`
 (`GeneralCells`, so every verb comes from the geometry), on `manifold`
 (`UnitSphericalPoint` vertices on `Spherical()`). Its tree is GridInterface's
 generic STR R-tree over the cell extents, built on each `treeify`; wrap the
-grid in [`GridAndTree`](@ref GridInterface.GridAndTree) to reuse one tree, or
+grid in `GridInterface.GridAndTree` to reuse one tree, or
 pair it with any SpatialTreeInterface tree over the same indices (an
 `STRtree` of the polygons).
 """
