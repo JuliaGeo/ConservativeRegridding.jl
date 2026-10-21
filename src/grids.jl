@@ -1,6 +1,6 @@
 import GeoInterface as GI
 import GeometryOpsCore as GOCore
-using GridInterface: UnitSphericalPoint
+using UnitSphericalGeometryCore: UnitSphericalPoint
 
 """
     asgrid(x) -> GridInterface grid
