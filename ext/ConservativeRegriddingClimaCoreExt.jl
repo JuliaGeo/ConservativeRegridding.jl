@@ -279,9 +279,9 @@ function accumulate_principled_b(
         # Weight each quadrature point by the area density of the map onto the physical
         # triangle, which is not constant on the sphere, and normalize the weights to sum to
         # the triangle's exact area Aₜ so that constants are integrated exactly.
-        ρ_sum = zero(Aₜ)
+        Σρ = zero(Aₜ)
         for (λ, wᵧ) in zip(bary, w)
-            ρ_sum += wᵧ * triangle_area_density(manifold, λ, centroid, v₁, v₂)
+            Σρ += wᵧ * triangle_area_density(manifold, λ, centroid, v₁, v₂)
         end
 
         for (λ, wᵧ) in zip(bary, w)
@@ -291,7 +291,7 @@ function accumulate_principled_b(
             Mξ = Quadratures.interpolation_matrix(SVector(ξ), ξs)
             Mη = Quadratures.interpolation_matrix(SVector(η), ξs)
 
-            wAᵧ = Aₜ * wᵧ * triangle_area_density(manifold, λ, centroid, v₁, v₂) / ρ_sum
+            wAᵧ = Aₜ * wᵧ * triangle_area_density(manifold, λ, centroid, v₁, v₂) / Σρ
 
             @inbounds for j in 1:Nq, i in 1:Nq
                 B[i, j] += wAᵧ * Mξ[1, i] * Mη[1, j]
@@ -571,9 +571,7 @@ function compute_local_mass_matrix(
 end
 
 # An element counts as covered by the source when its intersections with the source cells
-# account for its whole area up to this relative tolerance, which absorbs the small
-# differences between the quadratures of `B` and `Mᵉ` (and between the sphere radii of the
-# two grids).
+# account for its whole area on the manifold up to this relative tolerance.
 const FULL_COVERAGE_RTOL = 1e-4
 
 # FV → SE operator (`InPlace`, per-element L2 projection). The per-element mass-matrix solve
@@ -658,13 +656,10 @@ function (op::FVToSEIntersectionOperator)(rows, cols, vals, (elem, cells), src_t
     # that its row sum equals the column sum of B makes constants exact.
     #
     # On a partially covered element (for example under the edge of a tripolar grid that
-    # stops short of the South Pole), the uncovered part counts as zero, as in the FV → FV and
-    # SE → FV transfers: b integrates only the covered part, and the unscaled Mᵉ gives the L2
-    # projection of the source extended by zero, which is conservative and well conditioned.
-    # Rescaling there would instead extrapolate the source over the whole element, and where
-    # the column sums of B approach zero it would make the local system nearly singular.
+    # stops short of the South Pole), the uncovered part counts as zero: b integrates only the
+    # covered part, and the unscaled Mᵉ gives the L2 projection of the source extended by zero.
     row_sums = vec(sum(Mᵉ; dims = 2))
-    if sum(b_full) > (1 - FULL_COVERAGE_RTOL) * sum(row_sums)
+    if sum(b_full) > (1 - FULL_COVERAGE_RTOL) * GO.area(op.manifold, elem_poly)
         for r in axes(Mᵉ, 1)
             scale = b_full[r] / row_sums[r]
             @inbounds for c in axes(Mᵉ, 2)
@@ -673,11 +668,11 @@ function (op::FVToSEIntersectionOperator)(rows, cols, vals, (elem, cells), src_t
         end
     end
 
-    Mᵉ_inv = inv(Mᵉ)
+    Mᵉ⁻¹ = inv(Mᵉ)
 
     offset = (elem - 1) * Nq^2
     for (cell, b_vec) in d
-        new_col = Mᵉ_inv * b_vec
+        new_col = Mᵉ⁻¹ * b_vec
         for r in eachindex(new_col)
             val = new_col[r]
             val == 0 && continue
@@ -694,11 +689,12 @@ end
 
 Per-element L2 projection FV → SE. Same `B` accumulation as the SE → FV path, but
 per-element rows are multiplied by the *full* mass-matrix inverse `(M^{e})^{-1}` rather than
-divided by the lumped diagonal `Wᵉᵢⱼ`. This preserves constants exactly on elements the source
-covers and is higher-order accurate: `f_dst = (M^{e})^{-1} (Bᵀ f_src)|_e` is the optimal L2 fit
-on the SE basis over element `e`. Where the source covers an element only partly, its
-uncovered part counts as zero; elements it does not reach are set to zero. See the "FV → SE"
-section of `docs/src/extensions/climacore.md`.
+divided by the lumped diagonal `Wᵉᵢⱼ`. This preserves constants exactly on nodes all of whose
+elements the source covers and is higher-order accurate: `f_dst = (M^{e})^{-1} (Bᵀ f_src)|_e`
+is the optimal L2 fit on the SE basis over element `e`. Where the source covers an element
+only partly, its uncovered part counts as zero; elements it does not reach are set to zero.
+`manifold` should have the radius of `dst`. See the "FV → SE" section of
+`docs/src/extensions/climacore.md`.
 """
 function fv_to_se_l2_projection(manifold, dst, src;
                                 threaded, triangle_quad_degree, kwargs...)

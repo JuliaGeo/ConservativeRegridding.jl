@@ -108,8 +108,9 @@ f^{\mathrm{dst}}_k = \frac{1}{A_k} \sum_{e,i,j} B(k,(e,i,j)) \, f^{\mathrm{src},
 This is assembled as a sparse matrix with entries ``B(k,(e,i,j))`` (rows indexed by FV
 cell, columns by SE node), and `regrid!` performs the matrix–vector product followed by
 division by the destination areas. Conservation is exact in the continuous weights: summing
-over ``k`` and using ``\sum_k B = W^e_{ij}`` recovers ``\sum_{e,i,j} W^e_{ij}
-f^{\mathrm{src},e}_{ij}``, the SE quadrature integral of the source.
+over ``k`` and using ``\sum_k B = \int_e \phi_i \phi_j \, \mathrm{d}A`` recovers
+``\int f^{\mathrm{src}} \, \mathrm{d}A``, the integral of the SE expansion of the source,
+which the GLL sum ``\sum_{e,i,j} W^e_{ij} f^{\mathrm{src},e}_{ij}`` approximates.
 
 ## FV → SE
 
@@ -151,8 +152,8 @@ f^{\mathrm{dst},e}_{ij} = \sum_{a,b} \big[(M^e)^{-1}\big]_{(ij),(ab)} \,
 ```
 
 Using the full mass-matrix inverse — rather than dividing by the lumped diagonal
-``W^e_{ij}`` — preserves constants exactly on elements the source covers and is the optimal
-``L^2`` fit of the source on the SE basis over each element.
+``W^e_{ij}`` — preserves constants exactly on nodes all of whose elements the source covers
+and is the optimal ``L^2`` fit of the source on the SE basis over each element.
 
 Two corrections appear in the implementation:
 
@@ -240,13 +241,14 @@ weights   = ClimaCoreExt.se_node_weights(space)      # nodal weights W^e_{ij}
 ## Checking conservation
 
 On the SE side, `ClimaCore.sum(field)` computes the quadrature integral ``\sum_{e,i,j}
-W^e_{ij} f^e_{ij}`` and is the correct quantity for conservation checks. On the FV side the
-integral is the area-weighted sum:
+W^e_{ij} f^e_{ij}``, which approximates the integral of the SE expansion that SE → FV
+conserves, so compare the two up to the GLL quadrature error. On the FV side the integral is
+the area-weighted sum:
 
 ```julia
 using ConservativeRegridding: areas, Trees
 import GeometryOps as GO
 
 fv_areas = areas(GO.Spherical(), Trees.treeify(grid))
-@assert sum(fv_vals .* fv_areas) ≈ sum(src_field)   # SE → FV conservation
+@assert isapprox(sum(fv_vals .* fv_areas), sum(src_field); rtol = 1e-3)   # SE → FV
 ```
