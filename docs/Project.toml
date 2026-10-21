@@ -45,4 +45,6 @@ YAXArrayBase = "90b8fcef-0c2d-428d-9c56-5f86629e9d14"
 [sources]
 ConservativeRegridding = {path = ".."}
 GeometryBasics = {rev = "master", url = "https://github.com/JuliaGeometry/GeometryBasics.jl"}
+GeometryOps = {url = "https://github.com/JuliaGeo/GeometryOps.jl.git", rev = "as/split-unitsphericalgeometrycore"}
+GeometryOpsCore = {url = "https://github.com/JuliaGeo/GeometryOps.jl.git", rev = "as/split-unitsphericalgeometrycore", subdir = "GeometryOpsCore"}
 SphericalSpatialTrees = {rev = "main", url = "https://github.com/meggart/SphericalSpatialTrees.jl"}

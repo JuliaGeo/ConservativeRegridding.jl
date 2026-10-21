@@ -1,6 +1,8 @@
 using Test
 using ConservativeRegridding
-using ConservativeRegridding.Trees
+using ConservativeRegridding: RegularGrid, CellBasedGrid
+import GridInterface as GrI
+using GridInterface.Structured: TopDownQuadtreeCursor
 
 import ConservativeRegridding as CR
 import ConservativeRegridding.WeightedDualDepthFirstSearch as WDFS
@@ -10,6 +12,9 @@ import GeometryOps as GO
 import GeometryOps: SpatialTreeInterface as STI
 
 const _spherical_intersects = Extents.intersects
+
+# the tree `Regridder` sweeps a grid with (4x4 leaves) and the finest cursor (2x2 leaves)
+sweep_tree(grid) = GrI.treeify(grid; leaf_capacity = GrI.ForSweeps())
 
 function pairs_generic(predicate, tree1, tree2)
     pairs = Tuple{Int,Int}[]
@@ -82,16 +87,15 @@ function STI.child_indices_extents(node::CountedLeafEntriesNode)
     node.counter.n += 1
     return STI.child_indices_extents(node.node)
 end
-CR.Trees.ncells(node::CountedLeafEntriesNode) = CR.Trees.ncells(node.node)
-CR.Trees.split_weight(node::CountedLeafEntriesNode) = CR.Trees.split_weight(node.node)
+GrI.split_weight(node::CountedLeafEntriesNode) = GrI.split_weight(node.node)
 
 @testset "weighted_dual_depth_first_search" begin
     @testset "same candidate set, deterministic weighted order" begin
         cases = Any[]
         for (nx, ny) in ((4, 4), (16, 16), (13, 17))
             grid = regional_spherical_grid(nx, ny)
-            push!(cases, ("QuadtreeCursor spherical $(nx)x$(ny) self",
-                          _spherical_intersects, QuadtreeCursor(grid), QuadtreeCursor(grid)))
+            push!(cases, ("sweep tree spherical $(nx)x$(ny) self",
+                          _spherical_intersects, sweep_tree(grid), sweep_tree(grid)))
             push!(cases, ("TopDownQuadtreeCursor spherical $(nx)x$(ny) self",
                           _spherical_intersects,
                           TopDownQuadtreeCursor(grid), TopDownQuadtreeCursor(grid)))
@@ -99,8 +103,8 @@ CR.Trees.split_weight(node::CountedLeafEntriesNode) = CR.Trees.split_weight(node
         push!(cases, (
             "spherical regional 16x8 vs 7x11",
             _spherical_intersects,
-            QuadtreeCursor(regional_spherical_grid(16, 8)),
-            QuadtreeCursor(regional_spherical_grid(7, 11)),
+            sweep_tree(regional_spherical_grid(16, 8)),
+            sweep_tree(regional_spherical_grid(7, 11)),
         ))
         push!(cases, (
             "spherical regional offset overlap",
@@ -112,14 +116,14 @@ CR.Trees.split_weight(node::CountedLeafEntriesNode) = CR.Trees.split_weight(node
         push!(cases, (
             "spherical cell-based vs regular",
             _spherical_intersects,
-            QuadtreeCursor(spherical_cellbased_grid(12, 9)),
+            sweep_tree(spherical_cellbased_grid(12, 9)),
             TopDownQuadtreeCursor(spherical_regular_grid(9, 12)),
         ))
         push!(cases, (
             "planar regular 12x12 self",
             Extents.intersects,
-            QuadtreeCursor(planar_regular_grid(12, 12)),
-            QuadtreeCursor(planar_regular_grid(12, 12)),
+            sweep_tree(planar_regular_grid(12, 12)),
+            sweep_tree(planar_regular_grid(12, 12)),
         ))
 
         polygons = [
@@ -146,7 +150,7 @@ CR.Trees.split_weight(node::CountedLeafEntriesNode) = CR.Trees.split_weight(node
     end
 
     @testset "a fixed leaf is constructed once in either orientation" begin
-        deep = QuadtreeCursor(planar_regular_grid(16, 16))
+        deep = TopDownQuadtreeCursor(planar_regular_grid(16, 16))
         covering = GI.Polygon([GI.LinearRing([
             (-1.0, -1.0), (11.0, -1.0), (11.0, 11.0), (-1.0, 11.0), (-1.0, -1.0),
         ])])
@@ -169,8 +173,8 @@ CR.Trees.split_weight(node::CountedLeafEntriesNode) = CR.Trees.split_weight(node
     end
 
     @testset "an Action still steers the deterministic traversal" begin
-        tree1 = QuadtreeCursor(planar_regular_grid(8, 8))
-        tree2 = QuadtreeCursor(planar_regular_grid(8, 8))
+        tree1 = sweep_tree(planar_regular_grid(8, 8))
+        tree2 = sweep_tree(planar_regular_grid(8, 8))
         expected = pairs_weighted(Extents.intersects, tree1, tree2)
         seen = Tuple{Int,Int}[]
         result = WDFS.weighted_dual_depth_first_search(

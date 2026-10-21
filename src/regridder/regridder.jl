@@ -1,9 +1,7 @@
-using SortTileRecursiveTree
 import GeometryOps as GO
 import GeometryOpsCore as GOCore
 import GeoInterface as GI
 
-const DEFAULT_NODECAPACITY = 10
 const DEFAULT_MANIFOLD = GeometryOps.Planar()
 const DEFAULT_FLOATTYPE = Float64
 const DEFAULT_MATRIX = SparseArrays.SparseMatrixCSC{DEFAULT_FLOATTYPE}
@@ -61,9 +59,28 @@ function LinearAlgebra.normalize!(regridder::Regridder)
     return regridder
 end
 
+"""
+    Regridder(dst, src; normalize = false, intersection_operator, threaded = true, kwargs...)
+    Regridder(manifold, dst, src; kwargs...)
+
+The conservative regridder from `src` to `dst`: the sparse matrix of the
+intersection areas of every overlapping cell pair and the cell areas of both
+grids. `dst` and `src` are anything [`asgrid`](@ref) accepts: GridInterface
+grids, the native grids and fields of the package extensions, or bare corner
+matrices, axis pairs and polygon vectors. The engine calls
+`treeify(grid; leaf_capacity = ForSweeps())` on both grids, reads the cells
+through `cell_geometry` (the areas are those polygons' areas), and chooses the
+clipper from `cellshape` ([`DefaultIntersectionOperator`](@ref)`(manifold,
+src, dst)`, unless `intersection_operator` is given).
+
+The two-argument form computes on the grids' own manifold, which must be the
+same on both sides; the three-argument form computes on `manifold` (areas
+included), for grids of different radii. The remaining keywords
+(`npartitions`, `progress`, `cache`) go to [`intersection_areas`](@ref).
+"""
 function Regridder(dst, src; kwargs...)
-    dst_manifold = GOCore.best_manifold(dst)
-    src_manifold = GOCore.best_manifold(src)
+    dst_manifold = input_manifold(dst)
+    src_manifold = input_manifold(src)
 
     # Manifolds are never promoted implicitly: `best_manifold` guesses for input that
     # declares none, so a mismatch is as likely a bad guess as a deliberate mix.
@@ -78,13 +95,18 @@ end
 function Regridder(
         manifold::M, dst, src;
         normalize = false,
-        intersection_operator::F = DefaultIntersectionOperator(manifold),
+        intersection_operator = nothing,
         threaded = True(),
         kwargs...
-    ) where {M <: Manifold, F}
-    # "Normalize" the destination and source grids into trees.
-    dst_tree = Trees.treeify(manifold, dst)
-    src_tree = Trees.treeify(manifold, src)
+    ) where {M <: Manifold}
+    # "Normalize" the destination and source inputs into grids, and tree them.
+    dst = asgrid(manifold, dst)
+    src = asgrid(manifold, src)
+    dst_tree = treeify(dst; leaf_capacity = ForSweeps())
+    src_tree = treeify(src; leaf_capacity = ForSweeps())
+
+    # The clipper follows the cell shapes of both grids unless an operator is given.
+    op = intersection_operator === nothing ? DefaultIntersectionOperator(manifold, src, dst) : intersection_operator
 
     _threaded = booltype(threaded)
 
@@ -92,15 +114,16 @@ function Regridder(
     intersections = intersection_areas(
         manifold,
         _threaded,
-        dst_tree, src_tree;
-        intersection_operator,
+        dst, src;
+        intersection_operator = op,
+        dst_tree, src_tree,
         kwargs...
     )
 
     # Compute the areas of each cell
     # of the destination and source grids.
-    dst_areas = areas(manifold, dst, dst_tree)
-    src_areas = areas(manifold, src, src_tree)
+    dst_areas = areas(manifold, dst)
+    src_areas = areas(manifold, src)
 
     # TODO: make this GPU-compatible?
     # Allocate temporary arrays for the regridding operation -
@@ -115,17 +138,19 @@ function Regridder(
     return regridder
 end
 
-function areas(manifold::GOCore.Manifold, item, tree)
-    areas(manifold, tree)
-end
+"""
+    areas(manifold, grid) -> Vector{Float64}
+    areas(grid)
 
-areas(manifold::GOCore.Manifold, tree::Trees.AbstractTreeWrapper) = areas(manifold, Trees.parent(tree))
-
-function areas(manifold::GOCore.Manifold, tree::Trees.AbstractQuadtreeCursor)
-    @assert Trees.istoplevel(tree) "Areas are only valid for the top level of the quadtree."
-    return vec([GO.area(manifold, cell) for cell in Trees.getcell(tree)])
+The areas of the cells of `grid` (anything [`asgrid`](@ref) accepts), in
+position order, measured on `manifold`: the `GeometryOps.area` of
+`cell_geometry(grid, i)`, the polygon the engine clips, so a regridder's
+weights sum to exactly these (a grid's own `cell_area` may be analytic, as
+a HEALPix pixel's, and differ from its polygon's area; a cell of no geometry,
+as a layout ghost, has none).
+"""
+function areas(manifold::GOCore.Manifold, item)
+    grid = asgrid(manifold, item)
+    return Float64[Float64(GO.area(manifold, cell_geometry(grid, i))) for i in 1:ncells(grid)]
 end
-
-function areas(manifold::GOCore.Manifold, tree)
-    return vec([GO.area(manifold, cell) for cell in Trees.getcell(tree)])
-end
+areas(item) = areas(input_manifold(item), item)

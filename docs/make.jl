@@ -14,7 +14,7 @@ makedocs(
         "Home" => "index.md",
         "How it works" => "how_it_works.md",
         "Interfaces" => [
-            "interfaces/trees.md",
+            "interfaces/grids.md",
             "interfaces/regrid.md",
         ],
         "Extensions" => [
@@ -22,7 +22,8 @@ makedocs(
         ],
         "devnotes.md",
     ],
-    warnonly = true,#[:missing_docs],
+    checkdocs = :public,
+    warnonly = false,
 )
 
 deploydocs(

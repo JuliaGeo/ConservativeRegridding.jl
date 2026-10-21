@@ -15,7 +15,7 @@ assembly, so the lookup never happens in the hot loop.
 
 Subtypes:
 - [`OutOfPlaceSingleResult`](@ref): kernel `op(src_cell, dst_cell) -> area`; driver stores the COO triplet.
-- [`InPlace`](@ref): kernel `op(rows, cols, vals, item, src_tree, dst_tree) -> nothing` pushes its own COO.
+- [`InPlace`](@ref): kernel `op(rows, cols, vals, item, src, dst) -> nothing` pushes its own COO.
 
 Defaults to [`OutOfPlaceSingleResult`](@ref), matching [`DefaultIntersectionOperator`](@ref).
 """
@@ -40,8 +40,9 @@ struct OutOfPlaceSingleResult <: IntersectionReturnStyle end
     InPlace <: IntersectionReturnStyle
 
 In this [`IntersectionReturnStyle`](@ref), the operator is a function 
-`op(rows, cols, vals, item, src_tree, dst_tree)`, pushing to the vectors
-`rows`, `cols`, and `vals` in place.
+`op(rows, cols, vals, item, src, dst)`, pushing to the vectors
+`rows`, `cols`, and `vals` in place; `src` and `dst` are the grids
+[`intersection_areas`](@ref) was given (read cells with `cell_geometry`).
 
 Here, `item` is a single entry from the list returned by [`work_items`](@ref).
 Usually, that's a single candidate pair `(src_index, dst_index)`.
@@ -84,20 +85,18 @@ Defaults to returning `op` unchanged.  For any threadsafe operator, this is a no
 task_local_operator(op) = op
 
 """
-    output_matrix_size(op, src_tree, dst_tree) -> (nrows, ncols)
+    output_matrix_size(op, src, dst) -> (nrows, ncols)
 
 Shape of the sparse matrix [`intersection_areas`](@ref) assembles for `op`.
 
-Defaults to `(cell_index_count(dst_tree), cell_index_count(src_tree))` — the
-dense global cell-index domains for dst rows and src columns. Operators whose
-counts differ from cell index counts (e.g. spectral-element node counts) may
-override this.
+Defaults to `(ncells(dst), ncells(src))` — the dense position domains for dst
+rows and src columns. Operators whose counts differ from cell counts (e.g.
+spectral-element node counts, a chunk's block) may override this.
 """
-output_matrix_size(op, src_tree, dst_tree) =
-    (Trees.cell_index_count(dst_tree), Trees.cell_index_count(src_tree))
+output_matrix_size(op, src, dst) = (ncells(dst), ncells(src))
 
 """
-    output_eltype(op, [src_tree, dst_tree]) -> eltype
+    output_eltype(op, [src, dst]) -> eltype
 
 Element type of the sparse matrix [`intersection_areas`](@ref) assembles for `op`.
 
@@ -105,7 +104,7 @@ Defaults to `Float64`. Operators may override this to e.g. return a matrix of in
 rather than just areas.
 """
 function output_eltype end
-output_eltype(op, src_tree, dst_tree) = output_eltype(op)
+output_eltype(op, src, dst) = output_eltype(op)
 output_eltype(op) = Float64
 
 """
@@ -144,13 +143,30 @@ end
 get_all_candidate_pairs(threaded, predicate_f, src_tree, dst_tree) =
     get_all_candidate_pairs!(Tuple{Int, Int}[], threaded, predicate_f, src_tree, dst_tree)
 
+"""
+    candidate_pairs(threaded, dst_tree, src_tree) -> Vector{Tuple{Int,Int}}
+
+The candidate `(src_index, dst_index)` pairs the dual-tree search of
+[`intersection_areas`](@ref) would name: every pair of leaves of `src_tree` and
+`dst_tree` whose extents intersect (`Extents.intersects`, so spherical caps and
+Cartesian boxes may be paired), each listed once, in the deterministic weighted
+order both the serial and the threaded search share. Every pair that truly
+overlaps is listed; a listed pair need not overlap.
+
+`threaded` is a `GeometryOpsCore.BoolsAsTypes`. Hand the result to the
+positional-pairs form of [`intersection_areas`](@ref) to assemble over pairs
+discovered some other way, or to compare discoveries.
+"""
+candidate_pairs(threaded::BoolsAsTypes, dst_tree, src_tree) =
+    get_all_candidate_pairs(threaded, Extents.intersects, src_tree, dst_tree)
+
 # Shared parallel COO assembly. `style` (the resolved `IntersectionReturnStyle`)
 # is threaded through so the trait is never looked up in the hot loop.
 
 # Run the operator for one work item and store its COO contribution(s).
-@inline function _run_and_store!(::OutOfPlaceSingleResult, op::O, rows::R, cols::C, vals::V, (i1, i2), src_tree::T1, dst_tree::T2) where {O, R, C, V, T1, T2}
-    p1 = Trees.getcell(src_tree, i1)
-    p2 = Trees.getcell(dst_tree, i2)
+@inline function _run_and_store!(::OutOfPlaceSingleResult, op::O, rows::R, cols::C, vals::V, (i1, i2), src::T1, dst::T2) where {O, R, C, V, T1, T2}
+    p1 = cell_geometry(src, i1)
+    p2 = cell_geometry(dst, i2)
     result = op(p1, p2) # usually an area of intersection, by default
     if should_store_result(op, result)
         push!(rows, i2)   # row = destination index
@@ -160,8 +176,8 @@ get_all_candidate_pairs(threaded, predicate_f, src_tree, dst_tree) =
     return nothing
 end
 
-@inline function _run_and_store!(::InPlace, op::O, rows::R, cols::C, vals::V, item::I, src_tree::T1, dst_tree::T2) where {O, R, C, V, I, T1, T2}
-    op(rows, cols, vals, item, src_tree, dst_tree)   # the operator stores in place
+@inline function _run_and_store!(::InPlace, op::O, rows::R, cols::C, vals::V, item::I, src::T1, dst::T2) where {O, R, C, V, I, T1, T2}
+    op(rows, cols, vals, item, src, dst)   # the operator stores in place
     return nothing
 end
 
@@ -169,30 +185,30 @@ end
 # `task_local_operator`'s return type may not be inferrable, so resolve the per-task
 # operator here and pay one dynamic dispatch per chunk into the type-stable kernel
 # below — never one per item.
-function _assemble_chunk(style, op, items, src_tree, dst_tree, ValType)
+function _assemble_chunk(style, op, items, src, dst, ValType)
     chunk_op = task_local_operator(op)
-    return _assemble_chunk_kernel(style, chunk_op, items, src_tree, dst_tree, ValType)
+    return _assemble_chunk_kernel(style, chunk_op, items, src, dst, ValType)
 end
 
-function _assemble_chunk_kernel(style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::Type{ValType}) where {S, O, I, T1, T2, ValType}
+function _assemble_chunk_kernel(style::S, op::O, items::I, src::T1, dst::T2, ::Type{ValType}) where {S, O, I, T1, T2, ValType}
     rows = Int[]
     cols = Int[]
     vals = ValType[]
-    return _assemble_chunk_kernel!(style, op, items, src_tree, dst_tree, rows, cols, vals)
+    return _assemble_chunk_kernel!(style, op, items, src, dst, rows, cols, vals)
 end
 
-function _assemble_chunk_kernel!(style::S, op::O, items::I, src_tree::T1, dst_tree::T2,
+function _assemble_chunk_kernel!(style::S, op::O, items::I, src::T1, dst::T2,
         rows::Vector{Int}, cols::Vector{Int}, vals::Vector{ValType}) where {S, O, I, T1, T2, ValType}
     for item in items
-        _run_and_store!(style, op, rows, cols, vals, item, src_tree, dst_tree)
+        _run_and_store!(style, op, rows, cols, vals, item, src, dst)
     end
     return COOChunk(rows, cols, vals)
 end
 
 # Produce ordered COO chunks in parallel. `$`-interpolation keeps spawned tasks
-# type-stable (concrete `style`/`op`/trees, no boxing).
+# type-stable (concrete `style`/`op`/grids, no boxing).
 function _collect_coo_chunks(
-        style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::True;
+        style::S, op::O, items::I, src::T1, dst::T2, ::True;
         npartitions, progress,
     ) where {S, O, I, T1, T2}
     # Partition the list of work items,
@@ -200,13 +216,13 @@ function _collect_coo_chunks(
     if progress
         progress_meter = ProgressMeter.Progress(length(partitions); desc = "Computing intersection areas")
     end
-    ValType = output_eltype(op, src_tree, dst_tree)
+    ValType = output_eltype(op, src, dst)
     # and assemble the COO triplets for each partition in parallel.
     # This is a bit oversubscribed though I guess.  But Julia's dynamic
     # scheduler should handle it fine.
     result_tasks = [
         StableTasks.@spawn begin
-            ret = _assemble_chunk($style, $op, partition, $src_tree, $dst_tree, $ValType)
+            ret = _assemble_chunk($style, $op, partition, $src, $dst, $ValType)
             $(progress ? :(ProgressMeter.next!(progress_meter)) : :())
             ret
         end
@@ -217,32 +233,38 @@ end
 
 # The sequential producer has the same output shape as the threaded producer: one chunk.
 function _collect_coo_chunks(
-        style::S, op::O, items::I, src_tree::T1, dst_tree::T2, ::False;
+        style::S, op::O, items::I, src::T1, dst::T2, ::False;
         kwargs...,
     ) where {S, O, I, T1, T2}
-    ValType = output_eltype(op, src_tree, dst_tree)
-    chunk = _assemble_chunk(style, op, items, src_tree, dst_tree, ValType)
+    ValType = output_eltype(op, src, dst)
+    chunk = _assemble_chunk(style, op, items, src, dst, ValType)
     return COOChunk{ValType}[chunk]
 end
 
 function assemble_sparse_matrix_coo(
-        style::S, op::O, items::I, src_tree::T1, dst_tree::T2,
+        style::S, op::O, items::I, src::T1, dst::T2,
         threaded::BoolsAsTypes; kwargs...,
     ) where {S, O, I, T1, T2}
     chunks = _collect_coo_chunks(
-        style, op, items, src_tree, dst_tree, threaded; kwargs...,
+        style, op, items, src, dst, threaded; kwargs...,
     )
     return _concat_chunks(chunks)
 end
 
 """
-    intersection_areas(manifold, threaded, dst_tree, src_tree;
-                       intersection_operator = DefaultIntersectionOperator(manifold),
+    intersection_areas(manifold, threaded, dst, src;
+                       intersection_operator = DefaultIntersectionOperator(manifold, src, dst),
+                       dst_tree = treeify(dst; leaf_capacity = ForSweeps()),
+                       src_tree = treeify(src; leaf_capacity = ForSweeps()),
                        npartitions = Threads.nthreads() * 4, progress = false,
                        cache = nothing)
 
-Assemble the sparse intersection matrix between `src_tree` and `dst_tree` on
-`manifold`.  Returns a `SparseMatrixCSC` of the output of the intersection operator.
+Assemble the sparse intersection matrix between the GridInterface grids `src`
+and `dst` on `manifold`.  Returns a `SparseMatrixCSC` of the output of the
+intersection operator. The candidate pairs come from a dual-tree search of
+`src_tree` against `dst_tree` (SpatialTreeInterface trees whose leaves emit
+the grids' positions; a `GridAndTree` answers its stored tree); the operator
+reads the cells of the pairs from the grids.
 
 This is more of a developer level function, which pulls together the intersection operator interface.
 Users should go through [`Regridder`](@ref)`(…; intersection_operator = …)`.
@@ -257,11 +279,10 @@ This calls out to five functions, which dispatch on `intersection_operator`:
   "work items".  For the regular area-of-intersection operator, this is a vector of
   `(src_index, dst_index)` pairs.  But it can also be more complex, as in the spectral element
   regridder.
-- [`output_matrix_size(intersection_operator, src_tree, dst_tree)`](@ref output_matrix_size):
+- [`output_matrix_size(intersection_operator, src, dst)`](@ref output_matrix_size):
   return the `(nrows, ncols)` shape of the sparse matrix.  For the regular operator, this is
-  `(cell_index_count(dst_tree), cell_index_count(src_tree))`.  For the spectral element
-  regridder, this is more complex.
-- [`output_eltype(intersection_operator, src_tree, dst_tree)`](@ref output_eltype): return the
+  `(ncells(dst), ncells(src))`.  For the spectral element regridder, this is more complex.
+- [`output_eltype(intersection_operator, src, dst)`](@ref output_eltype): return the
   element type of the sparse matrix.  This is usually `Float64`, but may be different, especially
   if you wish to build up e.g. a matrix of intersection _polygons_, rather than just areas.
 - [`task_local_operator(intersection_operator)`](@ref task_local_operator): return a private
@@ -275,8 +296,10 @@ Pass a [`SparseMatrixAssemblyCache`](@ref) with `cache=...` to reuse candidate
 and serial COO buffers across calls.
 """
 function intersection_areas(
-        manifold::M, threaded::BoolsAsTypes, dst_tree, src_tree;
-        intersection_operator = DefaultIntersectionOperator(manifold),
+        manifold::M, threaded::BoolsAsTypes, dst, src;
+        intersection_operator = DefaultIntersectionOperator(manifold, src, dst),
+        dst_tree = treeify(dst; leaf_capacity = ForSweeps()),
+        src_tree = treeify(src; leaf_capacity = ForSweeps()),
         npartitions::Int = Threads.nthreads() * 4,
         progress = false,
         cache = nothing,
@@ -284,7 +307,7 @@ function intersection_areas(
 
     # Resolve the return-style trait once, here, and thread `style` through everything.
     style = IntersectionReturnStyle(intersection_operator)
-    ValType = output_eltype(intersection_operator, src_tree, dst_tree)
+    ValType = output_eltype(intersection_operator, src, dst)
     scratch = _assembly_cache(ValType, cache)
 
     try
@@ -300,9 +323,45 @@ function intersection_areas(
         # Map candidate pairs → work units (default: one pair per unit), assemble the
         # COO triplets (in parallel or serially), and build the sparse matrix.
         items = work_items(intersection_operator, candidate_pairs)
-        nrows, ncols = output_matrix_size(intersection_operator, src_tree, dst_tree)
+        nrows, ncols = output_matrix_size(intersection_operator, src, dst)
         return _assemble_sparse(
-            style, intersection_operator, items, src_tree, dst_tree, threaded, nrows, ncols,
+            style, intersection_operator, items, src, dst, threaded, nrows, ncols,
+            scratch; npartitions, progress)
+    finally
+        empty!(scratch)
+    end
+end
+
+"""
+    intersection_areas(manifold, threaded, dst, src, candidate_pairs;
+                       intersection_operator = DefaultIntersectionOperator(manifold, src, dst),
+                       npartitions = Threads.nthreads() * 4, progress = false,
+                       cache = nothing)
+
+Assemble the sparse intersection matrix between the GridInterface grids `src`
+and `dst` over the candidate `(src_index, dst_index)` pairs given, instead of
+the pairs a dual-tree search of the grids' trees would name. The pairs are in
+the grids' positions, each listed once; every pair that truly overlaps must be
+listed. The operator interface, the threading and the cache are the tree
+form's. [`candidate_pairs`](@ref) names the pairs the tree form would use, so
+the two forms assemble the same matrix from the same trees.
+"""
+function intersection_areas(
+        manifold::M, threaded::BoolsAsTypes, dst, src,
+        candidate_pairs::AbstractVector{Tuple{Int, Int}};
+        intersection_operator = DefaultIntersectionOperator(manifold, src, dst),
+        npartitions::Int = Threads.nthreads() * 4,
+        progress = false,
+        cache = nothing,
+    ) where {M <: Manifold}
+    style = IntersectionReturnStyle(intersection_operator)
+    ValType = output_eltype(intersection_operator, src, dst)
+    scratch = _assembly_cache(ValType, cache)
+    try
+        items = work_items(intersection_operator, candidate_pairs)
+        nrows, ncols = output_matrix_size(intersection_operator, src, dst)
+        return _assemble_sparse(
+            style, intersection_operator, items, src, dst, threaded, nrows, ncols,
             scratch; npartitions, progress)
     finally
         empty!(scratch)

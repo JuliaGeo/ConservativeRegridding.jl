@@ -3,7 +3,7 @@
 
 A deterministic dual-tree traversal that descends one tree at a time.
 
-When both nodes can be split, the side with the greater [`Trees.split_weight`](@ref)
+When both nodes can be split, the side with the greater `SpatialTreeInterface.split_weight`
 is opened; ties consistently open the first side.  Opening only one side avoids the
 child Cartesian product used by the generic dual-tree walk.  More importantly, the
 first leaf reached is held fixed while the opposing tree finishes descending, so its
@@ -20,7 +20,7 @@ import GeometryOps as GO
 using GeometryOps: SpatialTreeInterface as STI
 using GeometryOps.LoopStateMachine: @controlflow
 
-import ..Trees: split_weight
+import SpatialTreeInterface: split_weight
 
 export weighted_dual_depth_first_search
 
@@ -34,6 +34,14 @@ export weighted_dual_depth_first_search
     leaf2 && return true
     return split_weight(node1) >= split_weight(node2)
 end
+
+# The inner loop of a leaf pair indexes a vector of entries rather than iterating
+# it: iterating copies each `(index, cap)` tuple through the stack, which cost 4x
+# the predicate it feeds (HEALPix x H3 leaves). Any other iterator is its own keys.
+@inline _entry_keys(entries::AbstractVector) = eachindex(entries)
+@inline _entry_keys(entries) = entries
+@inline _entry(entries::AbstractVector, k) = @inbounds entries[k]
+@inline _entry(entries, entry) = entry
 
 # GeometryOps uses a radius-NaN cap as the conservative whole-sphere fallback for
 # point sets whose mean direction is undefined.  Such a node cannot prune anything.
@@ -51,7 +59,7 @@ Call `f(i1, i2)` for every intersecting leaf-index pair in a deterministic,
 weight-guided order.
 
 Only one tree descends at each recursive step.  The tree with more estimated leaf work
-opens first, according to [`Trees.split_weight`](@ref), and the first side wins ties.
+opens first, according to `SpatialTreeInterface.split_weight`, and the first side wins ties.
 Once either side reaches a leaf, its `child_indices_extents` value is constructed once
 and carried while the other side descends.  No grid-sized or traversal-sized extent
 cache is retained.
@@ -88,7 +96,8 @@ function weighted_dual_depth_first_search(
         cie1 = @something entries1 STI.child_indices_extents(node1)
         cie2 = @something entries2 STI.child_indices_extents(node2)
         for (i1, cell_extent1) in cie1
-            for (i2, cell_extent2) in cie2
+            for k2 in _entry_keys(cie2)
+                i2, cell_extent2 = _entry(cie2, k2)
                 predicate(cell_extent1, cell_extent2) && @controlflow f(i1, i2)
             end
         end

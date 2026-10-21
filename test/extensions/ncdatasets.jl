@@ -24,9 +24,7 @@ const SRC_POLYS = begin
 end
 
 function build_regridder()
-    dst = GO.SpatialTreeInterface.FlatNoTree(DST_POLYS)
-    src = GO.SpatialTreeInterface.FlatNoTree(SRC_POLYS)
-    return ConservativeRegridding.Regridder(GO.Planar(), dst, src; normalize=false)
+    return ConservativeRegridding.Regridder(GO.Planar(), DST_POLYS, SRC_POLYS; normalize=false)
 end
 
 @testset "ESMF round-trip schema" begin

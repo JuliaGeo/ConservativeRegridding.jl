@@ -5,9 +5,6 @@ using Test, SafeTestsets
     @safetestset "Unit tests: TriangleQuadrature" begin include("triangle_quadrature.jl") end
     @safetestset "Unit tests: Regridding" begin include("regridding.jl") end
     @safetestset "Unit tests: Sparse assembly" begin include("sparse_assembly.jl") end
-    @safetestset "Unit tests: Grids" begin include("trees/grids.jl") end
-    @safetestset "Unit tests: QuadtreeCursors" begin include("trees/quadtree_cursors.jl") end
-    @safetestset "Unit tests: RTree trees" begin include("trees/rtree.jl") end
     @safetestset "Unit tests: WeightedDualDepthFirstSearch" begin include("weighted_dual_dfs.jl") end
 
     @safetestset "Extensions: Oceananigans" begin include("extensions/oceananigans.jl") end
@@ -17,6 +14,7 @@ using Test, SafeTestsets
     @safetestset "Extensions: HEALPix (RingGrids)" begin include("extensions/ringgrids_healpix.jl") end
     @safetestset "Extensions: reduced grids (RingGrids)" begin include("extensions/ringgrids_reduced.jl") end
     @safetestset "Extensions: NCDatasets" begin include("extensions/ncdatasets.jl") end
+    @safetestset "Extensions: GridInterface providers" begin include("providers.jl") end
   
     @safetestset "Comparison: XESMF" begin include("usecases/xesmf_comparison.jl") end
 

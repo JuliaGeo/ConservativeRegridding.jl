@@ -1,13 +1,14 @@
 using ConservativeRegridding
-using ConservativeRegridding.Trees
 using Test
 
 using RingGrids
-using SmallCollections: SmallVector, capacity
 import Healpix
 import GeometryOps as GO, GeometryOpsCore as GOCore
 import GeoInterface as GI
 import GeometryOps: SpatialTreeInterface as STI
+import GridInterface as GrI
+using GridInterface: ncells, cell_geometry, cell_area
+using GridInterface.Structured: nfaces
 
 const RingGridsExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingRingGridsExt)
 
@@ -15,71 +16,56 @@ const RingGridsExt = Base.get_extension(ConservativeRegridding, :ConservativeReg
 leaves(node) = STI.isleaf(node) ? [node] :
     reduce(vcat, (leaves(STI.getchild(node, i)) for i in 1:STI.nchild(node)))
 
-@testset "HEALPix tree: root node + treeify" begin
+sweep_tree(g) = GrI.treeify(g; leaf_capacity = GrI.ForSweeps())
+
+@testset "HEALPix provider: asgrid" begin
     field = rand(HEALPixGrid, 8)               # nlat_half = 8, nside = 4
-    tree  = Trees.treeify(GO.Spherical(), field)
+    g = ConservativeRegridding.asgrid(field)
 
-    @test tree isa RingGridsExt.HEALPixRootNode
-    @test tree.nside == 4
-    @test Trees.ncells(tree) == 12 * 4^2       # 192 pixels
+    @test g isa RingGridsExt.HEALPixRingGrid
+    @test g.nside == 4
+    @test ncells(g) == 12 * 4^2                # 192 pixels
+    @test nfaces(g) == 12                      # 12 base faces
+    @test GOCore.best_manifold(g) == GO.Spherical()
+    @test GOCore.best_manifold(field) == GO.Spherical()
+    @test ConservativeRegridding.asgrid(field.grid) isa RingGridsExt.HEALPixRingGrid
 
-    @test STI.isspatialtree(typeof(tree)) == true
-    @test STI.isleaf(tree) == false
-    @test STI.nchild(tree) == 12               # 12 base faces
+    tree = sweep_tree(g)
+    @test STI.isspatialtree(typeof(tree))
     @test STI.node_extent(tree) isa GO.UnitSpherical.SphericalCap
-    @test GOCore.best_manifold(tree) == GO.Spherical()
-
-    @test Trees.treeify(GO.Spherical(), field.grid) isa RingGridsExt.HEALPixRootNode
 end
 
-@testset "HEALPix tree: any even nlat_half (no power-of-two requirement)" begin
+@testset "HEALPix provider: any even nlat_half (no power-of-two requirement)" begin
     # Range subdivision needs no nested index, so every (even) nlat_half works.
     for nlat_half in (2, 4, 6, 8, 10, 12, 16)
-        tree = Trees.treeify(GO.Spherical(), rand(HEALPixGrid, nlat_half))
+        g = ConservativeRegridding.asgrid(rand(HEALPixGrid, nlat_half))
         nside = nlat_half ÷ 2
-        @test tree isa RingGridsExt.HEALPixRootNode
-        @test tree.nside == nside
-        @test Trees.ncells(tree) == 12 * nside^2
+        @test g isa RingGridsExt.HEALPixRingGrid
+        @test g.nside == nside
+        @test ncells(g) == 12 * nside^2
+        @test sort(GrI.subtree_indices(sweep_tree(g))) == 1:12nside^2
     end
 end
 
-@testset "HEALPix tree: parent/child traversal" begin
-    tree = RingGridsExt.HEALPixRootNode(4)     # nside = 4
+@testset "HEALPix provider: the tree partitions the pixels" begin
+    g = RingGridsExt.HEALPixRingGrid(4)        # nside = 4
+    tree = sweep_tree(g)
+    @test STI.isleaf(tree) == false
 
-    @test STI.nchild(tree) == 12
-    face = STI.getchild(tree, 1)
-    @test face isa Trees.TopDownQuadtreeCursor
-    @test face.grid isa RingGridsExt.HEALPixFaceGrid
-    @test face.grid.face == 0
-    @test face.leafranges == (1:4, 1:4)
-    @test Trees.cell_index_count(face) == 12 * 4^2
-    @test STI.getchild(tree, 12).grid.face == 11
-    @test STI.isleaf(face) == false
-    @test STI.nchild(face) == 4                # 4×4 block → quartered
-
-    # A 4×4 face quarters into four 2×2 cursor leaves; each enumerates its 4 cells.
-    leaf = STI.getchild(face, 1)
-    @test leaf isa Trees.TopDownQuadtreeCursor && leaf.grid.face == 0
-    @test length.(leaf.leafranges) == (2, 2)
-    @test STI.isleaf(leaf) == true
-    entries = @inferred STI.child_indices_extents(leaf)
-    @test entries isa SmallVector{4}
-    @test capacity(entries) == 4
-    @test length(entries) == 4
-
-    # Leaves partition each face; every pixel is emitted exactly once: 12·nside² total.
+    # Leaves partition the faces; every pixel is emitted exactly once: 12·nside² total.
     allcells = reduce(vcat, [collect(STI.child_indices_extents(l)) for l in leaves(tree)])
     @test length(allcells) == 12 * 4^2
+    @test sort(first.(allcells)) == 1:12 * 4^2
 end
 
-@testset "HEALPix tree: `getcell` corners match Healpix.boundariesRing" begin
+@testset "HEALPix provider: cell corners match Healpix.boundariesRing" begin
     pdist(p, q) = maximum(abs.(Tuple(p) .- q))
     for nside in (1, 2, 4, 8)                   # Healpix.jl oracle is power-of-two only
-        tree = RingGridsExt.HEALPixRootNode(nside)
+        g = RingGridsExt.HEALPixRingGrid(nside)
         res  = Healpix.Resolution(nside)
         maxerr = 0.0
         for ipix in 1:12nside^2
-            pts = collect(GI.getpoint(GI.getexterior(Trees.getcell(tree, ipix))))
+            pts = collect(GI.getpoint(GI.getexterior(cell_geometry(g, ipix))))
             @test length(pts) == 5             # 4 corners + closing point
             bd = Healpix.boundariesRing(res, ipix, 1, Float64)
             for k in 1:4
@@ -88,24 +74,22 @@ end
         end
         @test maxerr < 1e-12
     end
-
-    tree = RingGridsExt.HEALPixRootNode(2)
-    @test length(collect(Trees.getcell(tree))) == Trees.ncells(tree)
 end
 
-@testset "HEALPix tree: node_extent + child_indices_extents" begin
+@testset "HEALPix provider: node extents contain the cells beneath" begin
     incap(p, cap) = GO.spherical_distance(cap.point, p) <= cap.radius + 1e-9
 
     for nside in (4, 5)                         # power-of-two and non-power-of-two
-        tree = RingGridsExt.HEALPixRootNode(nside)
+        g = RingGridsExt.HEALPixRingGrid(nside)
+        tree = sweep_tree(g)
 
-        # Each face cap must contain every corner of every cell beneath it.
+        # Each child's cap must contain every corner of every cell beneath it.
         for i in 1:STI.nchild(tree)
             face = STI.getchild(tree, i)
             cap  = STI.node_extent(face)
             @test cap isa GO.UnitSpherical.SphericalCap
             for leaf in leaves(face), (ij, _) in STI.child_indices_extents(leaf)
-                for p in GI.getpoint(GI.getexterior(Trees.getcell(tree, ij)))
+                for p in GI.getpoint(GI.getexterior(cell_geometry(g, ij)))
                     @test incap(p, cap)
                 end
             end
@@ -125,8 +109,8 @@ end
     S = GO.Spherical()
     sphere = 4π * S.radius^2
     for nside in (1, 2, 4, 3, 5)               # power-of-two and non-power-of-two
-        tree = RingGridsExt.HEALPixRootNode(nside)
-        total = sum(GO.area(S, Trees.getcell(tree, i)) for i in 1:Trees.ncells(tree))
+        g = RingGridsExt.HEALPixRingGrid(nside)
+        total = sum(cell_area(g, i) for i in 1:ncells(g))
         @test isapprox(total, sphere; rtol = 1e-12)
     end
 end

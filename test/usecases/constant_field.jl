@@ -1,5 +1,4 @@
 using ConservativeRegridding
-using ConservativeRegridding.Trees
 
 import GeometryOps as GO
 import GeoInterface as GI

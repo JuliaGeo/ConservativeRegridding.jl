@@ -2,6 +2,7 @@ module TestHelpersOceananigansExt
 
 import Oceananigans
 
+import ConservativeRegridding
 import ConservativeRegriddingTestHelpers as TestHelpers
 
 TestHelpers.has_rotated(field::Oceananigans.Field) = field.grid isa Oceananigans.RotatedLatitudeLongitudeGrid

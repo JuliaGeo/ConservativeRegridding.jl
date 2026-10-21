@@ -1,14 +1,12 @@
 #=
-## Standard HEALPix native quadtree
+## Standard HEALPix closed forms
 
 The 12-face `HEALPixGrid` (Górski et al. 2005, DOI:10.1086/427976). RingGrids
 exposes it only through ring-order indexing and analytic coordinates — it has no
-nest machinery (unlike `OctaHEALPixGrid`). So instead of a Morton hierarchy we
-treat each face as its own `nside × nside` curvilinear grid (`HEALPixFaceGrid`)
-and wrap it in a stock `TopDownQuadtreeCursor`; `HEALPixRootNode` ties the 12
-faces together as the full sphere. Range subdivision needs no power-of-two
-restriction (the nested *index* is what needs it), so one code path covers any
-`nlat_half`.
+nest machinery (unlike `OctaHEALPixGrid`). The `HEALPixRingGrid` provider
+(providers.jl) treats each face as an `nside × nside` lattice over the forms
+below; range subdivision needs no power-of-two restriction, so one code path
+covers any `nlat_half`.
 
 `nside == nlat_half ÷ 2`. Pixel geometry and the `(face, x, y) ↔ ring`
 conversions are the standard HEALPix closed forms (ported here so the extension
@@ -104,95 +102,3 @@ function _hp_pix2xyf(ipix, nside)
     ipt >= n2 && (ipt -= 8nside)
     return ((ipt - irt) >> 1, (-ipt - irt) >> 1, face)
 end
-
-#=
-### Per-face curvilinear grid
-
-A single HEALPix face is an `nside × nside` block of pixels on the `(x, y)`
-lattice — exactly an `AbstractCurvilinearGrid`, so it plugs into the stock
-`TopDownQuadtreeCursor` for free. Cell/vertex geometry is analytic (no stored
-matrix), and the index maps are overridden so the cursor emits *global ring*
-indices: `cartesian_to_linear_idx` returns the ring data index of a pixel and
-`linear_to_cartesian_idx` inverts it.
-=#
-
-struct HEALPixFaceGrid{M <: Manifold} <: Trees.AbstractCurvilinearGrid{M}
-    manifold::M
-    nside::Int
-    face::Int                                   # 0-based
-end
-
-manifold(g::HEALPixFaceGrid) = g.manifold
-Trees.ncells(g::HEALPixFaceGrid, ::Int) = g.nside
-Trees.cell_index_count(g::HEALPixFaceGrid) = 12 * g.nside^2
-
-# Cell (1-based i, j) → pixel (i-1, j-1); corners come out CCW (see _hp_pixel_polygon).
-Trees.getcell(g::HEALPixFaceGrid, i::Int, j::Int) = _hp_pixel_polygon(i - 1, j - 1, g.face, g.nside)
-
-# Lattice vertex (1-based point index 1:(nside+1)) → continuous coord (i-1)/nside.
-# Drives the per-cell leaf caps (`cell_range_extent`) and block cap (`node_extent`).
-Trees.getvertex(g::HEALPixFaceGrid, i::Int, j::Int) =
-    _hp_xyf2point((i - 1) / g.nside, (j - 1) / g.nside, g.face)
-
-# Index maps target the *global* ring layout (field data order), not face-local.
-Trees.cartesian_to_linear_idx(g::HEALPixFaceGrid, idx::CartesianIndex{2}) =
-    _hp_xyf2ring(idx[1] - 1, idx[2] - 1, g.face, g.nside)
-function Trees.linear_to_cartesian_idx(g::HEALPixFaceGrid, idx::Integer)
-    ix, iy, _ = _hp_pix2xyf(idx, g.nside)
-    return CartesianIndex(ix + 1, iy + 1)
-end
-
-# A HEALPix pixel never bulges outside the cap of its 4 corners + great-circle edge
-# midpoints, so we can skip the generic method's inclusion of all perimeter vertices.
-function STI.node_extent(q::Trees.TopDownQuadtreeCursor{<: HEALPixFaceGrid})
-    g = q.grid
-    imin, imax = extrema(q.leafranges[1]); imax += 1
-    jmin, jmax = extrema(q.leafranges[2]); jmax += 1
-    bl = Trees.getvertex(g, imin, jmin)
-    tl = Trees.getvertex(g, imin, jmax)
-    br = Trees.getvertex(g, imax, jmin)
-    tr = Trees.getvertex(g, imax, jmax)
-    return Trees.circle_from_four_corners((bl, tl, br, tr), ())
-end
-
-#=
-### Toplevel tree
-=#
-
-"""
-    HEALPixRootNode(manifold, nside)
-
-Entry point for a standard HEALPix spatial tree from SpeedyWeather/RingGrids.
-This has the full sphere with all 12 base faces, and decomposes into
-[`Trees.TopDownQuadtreeCursor`](@ref)s with specialized `HEALPixFaceGrid`
-inner curvilinear grids.
-"""
-struct HEALPixRootNode{M <: Manifold}
-    manifold::M
-    nside::Int
-end
-
-# HEALPix is inherently spherical; default the manifold for REPL/test construction.
-HEALPixRootNode(nside::Integer) = HEALPixRootNode(Spherical(), nside)
-
-treeify(m::Spherical, grid::RingGrids.HEALPixGrid) = HEALPixRootNode(m, grid.nlat_half ÷ 2)
-treeify(::Spherical, node::HEALPixRootNode) = node
-
-best_manifold(node::HEALPixRootNode) = node.manifold
-Trees.ncells(node::HEALPixRootNode) = 12 * node.nside^2
-Trees.split_weight(node::HEALPixRootNode) = 12 * node.nside^2
-
-STI.isspatialtree(::Type{<: HEALPixRootNode}) = true
-STI.isleaf(::HEALPixRootNode) = false
-STI.nchild(::HEALPixRootNode) = 12
-STI.getchild(root::HEALPixRootNode, i::Int) =
-    Trees.TopDownQuadtreeCursor(HEALPixFaceGrid(root.manifold, root.nside, i - 1))
-STI.node_extent(::HEALPixRootNode) =
-    GO.UnitSpherical.SphericalCap(GO.UnitSphericalPoint(0.0, 0.0, 1.0), Float64(π) |> nextfloat)
-
-# `getcell` is ring-indexed to match the field data layout.
-function Trees.getcell(node::HEALPixRootNode, ipix::Int)
-    ix, iy, face = _hp_pix2xyf(ipix, node.nside)
-    return _hp_pixel_polygon(ix, iy, face, node.nside)
-end
-Trees.getcell(node::HEALPixRootNode) = (Trees.getcell(node, i) for i in 1:Trees.ncells(node))

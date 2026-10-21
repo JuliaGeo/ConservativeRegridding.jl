@@ -234,9 +234,20 @@ W^e_{ij} f^e_{ij}`` and is the correct quantity for conservation checks. On the 
 integral is the area-weighted sum:
 
 ```julia
-using ConservativeRegridding: areas, Trees
+using ConservativeRegridding: areas
 import GeometryOps as GO
 
-fv_areas = areas(GO.Spherical(), Trees.treeify(grid))
+fv_areas = areas(GO.Spherical(), grid)
 @assert sum(fv_vals .* fv_areas) ≈ sum(src_field)   # SE → FV conservation
+```
+
+## Quadrature helpers
+
+The intersection weights ``B`` are integrated with these rules from
+`ConservativeRegridding.TriangleQuadrature`.
+
+```@docs
+ConservativeRegridding.TriangleQuadrature.reference_rule
+ConservativeRegridding.TriangleQuadrature.fan_triangulate
+ConservativeRegridding.TriangleQuadrature.planar_triangle_area
 ```

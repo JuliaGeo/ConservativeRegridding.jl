@@ -1,6 +1,10 @@
 # # Regridding
 # This file defines the regridding pipeline and its behaviour.
 
+# `dims` is an explicit kwarg and the method is `@constprop :aggressive` so the
+# literal reaches `NDSliceLoop{dims}` at the extract callsite; inside `kwargs...`
+# it is boxed through the `Pairs` plumbing, the slicer's `Dim` parameter becomes
+# dynamic, and every downstream call runs through runtime dispatch.
 """$(TYPEDSIGNATURES)
 Regrid data on `src_field` onto `dst_field` conservatively (mean-preserving) using the `regridder` matrix.
 
@@ -18,6 +22,7 @@ Note that by construction,
 ```julia
 aᵈ = sum(A; dims=2)
 aˢ = sum(A; dims=1)
+```
 
 # Extended help
 
@@ -35,7 +40,6 @@ aˢ = sum(A; dims=1)
    Diagonal dispatch only (on the arraylike types).
 5. `finalize_regridding!(dst_field, regridder, dst_arraylike)` — load `dst_arraylike` back into
    `dst_field`, applying normalization. Dispatch on the destination type.
-```
 
 ## N-dimensional arrays
 
@@ -54,12 +58,6 @@ their own field layouts by subtyping `AbstractDimensionalSlicer` and overriding
 For the built-in `NDSliceLoop`, `dims` must be a valid axis and source/destination
 non-spatial axes must match exactly.
 """
-# `dims` is lifted to an explicit kwarg here (rather than ridden inside `kwargs...`)
-# and `@constprop :aggressive` so the literal value reaches `NDSliceLoop{dims}` at
-# the extract callsite. Without this, `dims` is boxed through the kwarg `Pairs`
-# plumbing and the `Dim` type parameter of the slicer becomes dynamic — every
-# downstream call (`slice_views`, `_slice_index`, the per-slice 1-D dispatch)
-# then runs through runtime dispatch, costing megabytes per N-D call.
 Base.@constprop :aggressive function regrid!(dst_field::D, regridder::R, src_field::S; dims::Int = 1, kwargs...) where {D, R, S}
     src_arraylike = extract_source_arraylike(src_field, regridder; dims, kwargs...)
     dst_arraylike = extract_dest_arraylike(dst_field, regridder; dims, kwargs...)

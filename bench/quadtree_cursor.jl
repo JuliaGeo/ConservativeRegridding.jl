@@ -1,11 +1,12 @@
 # Microbenchmark for the raster-shaped TopDownQuadtreeCursor hot path.
 #
-#     julia --project=docs bench/quadtree_cursor.jl
+#     julia --project=test bench/quadtree_cursor.jl   # the test env has GridInterface
 #
 # The 896×896 half-cell-shifted grids make cursor child construction visible.
 
 using Chairmarks
 import ConservativeRegridding as CR
+import GridInterface as GrI
 import Extents
 import GeometryOps as GO
 
@@ -32,10 +33,10 @@ function main()
     x1 = collect(range(0.0, 1.0; length = n + 1))
     x2 = x1 .+ step / 2
     y = collect(range(0.0, 1.0; length = n + 1))
-    grid1 = CR.Trees.RegularGrid(GO.Planar(), x1, y)
-    grid2 = CR.Trees.RegularGrid(GO.Planar(), x2, y)
-    tree1 = CR.Trees.TopDownQuadtreeCursor(grid1; leafsize = (leaf, leaf))
-    tree2 = CR.Trees.TopDownQuadtreeCursor(grid2; leafsize = (leaf, leaf))
+    grid1 = CR.RegularGrid(GO.Planar(), x1, y)
+    grid2 = CR.RegularGrid(GO.Planar(), x2, y)
+    tree1 = GrI.Structured.TopDownQuadtreeCursor(grid1, 1; leafsize = (leaf, leaf))
+    tree2 = GrI.Structured.TopDownQuadtreeCursor(grid2, 1; leafsize = (leaf, leaf))
 
     expected = traverse(tree1, tree2)
     sample = @b traverse($tree1, $tree2)

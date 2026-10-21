@@ -1,28 +1,33 @@
 using ConservativeRegridding
-using ConservativeRegridding.Trees
 using Test
 
 using RingGrids
 import GeometryOps as GO, GeometryOpsCore as GOCore
 import GeometryOps: SpatialTreeInterface as STI
+import GridInterface as GrI
+using GridInterface: ncells, cell_geometry, cell_area
 
-# Reduced grids without a native tree are treeified by materializing a vector of
-# cell polygons (RingGrids' E/S/W/N vertices) and R-treeing it.
+const RingGridsExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingRingGridsExt)
+
+# Reduced grids without a face structure are stored cells (RingGrids' E/N/W/S
+# vertices) under GridInterface's generic R-tree.
 const REDUCED_GRIDS = (OctahedralGaussianGrid, OctahedralClenshawGrid, OctaminimalGaussianGrid)
 
-@testset "$G: treeify" for G in REDUCED_GRIDS
+@testset "$G: asgrid + treeify" for G in REDUCED_GRIDS
     field = rand(G, 6)
-    tree = Trees.treeify(GO.Spherical(), field)
-    @test tree isa Trees.GeometryMaintainingTreeWrapper
-    @test STI.isspatialtree(tree)
-    @test Trees.ncells(tree) == length(field)
-    @test Trees.cell_index_count(tree) == length(field)
+    g = ConservativeRegridding.asgrid(field)
+    @test g isa RingGridsExt.ReducedRingGrid
+    @test ncells(g) == length(field)
+    @test GOCore.best_manifold(g) == GO.Spherical()
     @test GOCore.best_manifold(field) == GO.Spherical()
+    tree = GrI.treeify(g; leaf_capacity = GrI.ForSweeps())
+    @test STI.isspatialtree(typeof(tree))
+    @test sort(GrI.subtree_indices(tree)) == 1:ncells(g)
 
     # Cells tile the sphere and are counterclockwise (positive area).
-    cell_areas = [GO.area(GO.Spherical(; radius = 1.0), c) for c in Trees.getcell(tree)]
+    cell_areas = [cell_area(g, i) for i in 1:ncells(g)]
     @test all(>(0), cell_areas)
-    @test sum(cell_areas) ≈ 4π rtol = 1e-10
+    @test sum(cell_areas) ≈ 4π * GO.Spherical().radius^2 rtol = 1e-10
 end
 
 @testset "$G → FullGaussianGrid: conservation" for G in REDUCED_GRIDS
@@ -45,7 +50,7 @@ end
     @test sum(dst_out .* R.dst_areas) ≈ sum(src_vals .* R.src_areas) rtol = 1e-10
 end
 
-@testset "Reduced ↔ reduced and native trees" begin
+@testset "Reduced ↔ reduced and face grids" begin
     for (dst, src) in ((rand(OctaminimalGaussianGrid, 10), rand(OctahedralClenshawGrid, 8)),
                        (rand(OctaHEALPixGrid, 8), rand(OctahedralGaussianGrid, 10)),
                        (rand(OctahedralGaussianGrid, 8), rand(HEALPixGrid, 8)))

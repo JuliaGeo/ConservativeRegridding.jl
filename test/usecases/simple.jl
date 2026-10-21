@@ -1,5 +1,6 @@
 using ConservativeRegridding
-using ConservativeRegridding: Trees
+using ConservativeRegridding: PolygonVectorGrid
+import GridInterface as GrI
 using Test
 
 import GeometryOps as GO, GeoInterface as GI
@@ -24,8 +25,10 @@ polys2 = begin
     [diamondpoly, trianglepolys...]
 end
 
-tree1 = GO.SpatialTreeInterface.FlatNoTree(polys1)
-tree2 = GO.SpatialTreeInterface.FlatNoTree(polys2)
+# A bare vector of polygons is a `PolygonVectorGrid`, treeified by GridInterface's
+# generic R-tree fallback.
+tree1 = polys1
+tree2 = polys2
 
 @testset "Simple Regridding" begin
     # Construct a regridder from grid2 to grid1
@@ -74,9 +77,10 @@ end
     # Construct STRtrees from the polygons
     str1 = SortTileRecursiveTree.STRtree(polys1)
     str2 = SortTileRecursiveTree.STRtree(polys2)
-    # Wrap the STRtrees in a GeometryMaintainingTreeWrapper, so we can carry the geometries around.
-    str_tree1 = Trees.GeometryMaintainingTreeWrapper(polys1, str1)
-    str_tree2 = Trees.GeometryMaintainingTreeWrapper(polys2, str2)
+    # Pair each polygon vector with its STRtree through `GridAndTree`, so the regridder
+    # reuses the tree instead of building the fallback R-tree.
+    str_tree1 = GrI.GridAndTree(PolygonVectorGrid(GO.Planar(), polys1), str1)
+    str_tree2 = GrI.GridAndTree(PolygonVectorGrid(GO.Planar(), polys2), str2)
 
     R = ConservativeRegridding.Regridder(GO.Planar(), str_tree1, str_tree2; normalize=false)
     A = R.intersections
