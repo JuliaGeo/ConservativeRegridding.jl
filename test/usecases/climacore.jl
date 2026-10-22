@@ -265,7 +265,7 @@ end
     regridder = ConservativeRegridding.Regridder(manifold, grid, space; threaded = false)
     dst = zeros(90 * 45)
     ConservativeRegridding.regrid!(dst, regridder, Fields.ones(space))
-    @test maximum(abs.(dst .- 1)) < 1e-10
+    @test maximum(abs.(dst .- 1)) < 1e-12
 end
 
 @testset "B over a whole element matches the mass-matrix row sums" begin
@@ -284,7 +284,7 @@ end
         rel_err = maximum(abs(B[i, j] / row_sums[Utilities.linear_ind((Nq, Nq), (i, j))] - 1)
                           for j in 1:Nq, i in 1:Nq)
         # What remains is the error of the interpolated Jacobian in the row sums
-        @test rel_err < 2e-5
+        @test rel_err < 1e-5
     end
 end
 
@@ -305,9 +305,9 @@ end
     dst = Fields.zeros(space)
     ConservativeRegridding.regrid!(dst, regridder, ones(360 * 120))
     vals = ClimaCoreExt.se_field_to_vec(dst)
-    @test isapprox(sum(dst), sum(band_areas); rtol = 1e-4)
-    @test all(v -> -0.5 < v < 1.5, vals)
-    @test all(v -> isapprox(v, 1; atol = 1e-10), vals[abs.(lat) .< 50])
+    @test isapprox(sum(dst), sum(band_areas); rtol = 1e-6)
+    @test all(v -> -0.25 < v < 1.25, vals)
+    @test all(v -> isapprox(v, 1; atol = 1e-12), vals[abs.(lat) .< 50])
     @test all(iszero, vals[abs.(lat) .> 70])
 
     # Non-constant source in [0, 1]
@@ -315,7 +315,7 @@ end
     src = vec(@. (1 + sind(band_lon)) / 2)
     ConservativeRegridding.regrid!(dst, regridder, src)
     vals = ClimaCoreExt.se_field_to_vec(dst)
-    @test isapprox(sum(dst), sum(src .* band_areas); rtol = 1e-4)
-    @test all(v -> -0.5 < v < 1.5, vals)
-    @test maximum(abs.(vals[abs.(lat) .< 50] .- (1 .+ sind.(lon[abs.(lat) .< 50])) ./ 2)) < 1e-2
+    @test isapprox(sum(dst), sum(src .* band_areas); rtol = 1e-6)
+    @test all(v -> -0.25 < v < 1.25, vals)
+    @test maximum(abs.(vals[abs.(lat) .< 50] .- (1 .+ sind.(lon[abs.(lat) .< 50])) ./ 2)) < 2e-3
 end

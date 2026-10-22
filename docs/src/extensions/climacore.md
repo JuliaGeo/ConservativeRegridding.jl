@@ -166,11 +166,11 @@ Two corrections appear in the implementation:
 - **Partial coverage.** Where the source covers an element only partly (for example a
   tripolar ocean grid that stops short of the South Pole, regridded onto a full-sphere SE
   space), the uncovered part counts as zero, as in the FV ``\to`` FV and SE ``\to`` FV
-  transfers: ``b^e`` integrates only the covered part, and the unscaled mass matrix gives the
+  transfers. ``b^e`` integrates only the covered part, and the unscaled mass matrix gives the
   ``L^2`` projection of the source extended by zero. This is conservative and well
-  conditioned; near the edge of the source grid the result falls off toward zero, with the
-  small over- and undershoots of any ``L^2`` projection of a discontinuous field. Elements the
-  source does not reach are set to zero.
+  conditioned; near the edge of the source grid the result falls off toward zero (though
+  over- and undershoots of an ``L^2`` projection of a discontinuous field are to be expected).
+  Elements the source does not reach are set to zero.
 
 ## SE → SE
 
@@ -240,15 +240,16 @@ weights   = ClimaCoreExt.se_node_weights(space)      # nodal weights W^e_{ij}
 
 ## Checking conservation
 
-On the SE side, `ClimaCore.sum(field)` computes the quadrature integral ``\sum_{e,i,j}
-W^e_{ij} f^e_{ij}``, which approximates the integral of the SE expansion that SE → FV
-conserves, so compare the two up to the GLL quadrature error. On the FV side the integral is
-the area-weighted sum:
+SE → FV conserves the integral of the SE expansion of the source,
+``\sum_{e,i,j} \big(\sum_k B(k,(e,i,j))\big) f^{\mathrm{src},e}_{ij}``, exactly.
+`ClimaCore.sum(field)` computes the GLL sum ``\sum_{e,i,j} W^e_{ij} f^e_{ij}``, which
+approximates it to the GLL quadrature error. A check takes both sides from the regridder,
+whose areas are on its manifold's sphere:
 
 ```julia
-using ConservativeRegridding: areas, Trees
-import GeometryOps as GO
-
-fv_areas = areas(GO.Spherical(), Trees.treeify(grid))
-@assert isapprox(sum(fv_vals .* fv_areas), sum(src_field); rtol = 1e-3)   # SE → FV
+lat = Fields.coordinate_field(space).lat
+src_field = @. 2 + sind(lat)
+regrid!(fv_vals, R_se2fv, src_field)
+b = vec(sum(R_se2fv.intersections; dims = 1))  # Σ_k B(k,(e,i,j)) = ∫_e ϕ_i ϕ_j dA
+@assert sum(fv_vals .* R_se2fv.dst_areas) ≈ sum(b .* ClimaCoreExt.se_field_to_vec(src_field))
 ```
