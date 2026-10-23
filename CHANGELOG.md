@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.2.18
+
+### Fixed
+- ClimaCore extension: the `B` weights of the SE ↔ FV regridders are now integrated on the
+  manifold's sphere (not GeometryOps' default).
+- ClimaCore extension: the triangle quadrature in `accumulate_principled_b` now weights each
+  point by the area density of the radial projection onto the sphere rather than uniformly.
+- ClimaCore extension: FV → SE no longer extrapolates on elements that the source covers
+  only partly; the uncovered part now counts as zero, as in the other transfers.
+
+## v0.2.17
+
+Updated DocStringExtensions compat to 0.8, 0.9, 0.10.
+
+## v0.2.16
+
+Updated Oceananigans compat to 0.113, 0.114, 0.115, 0.116.
+
 ## v0.2.15
 
 ### Changed

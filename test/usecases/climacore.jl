@@ -6,7 +6,7 @@ using Test
 import GeometryOps as GO, GeoInterface as GI, LibGEOS
 
 using ClimaCore:
-    CommonSpaces, Fields, Spaces, Meshes, Quadratures, Topologies, Domains, ClimaComms
+    CommonSpaces, Fields, Spaces, Meshes, Quadratures, Topologies, Domains, ClimaComms, Utilities
 using Oceananigans
 
 const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingClimaCoreExt)
@@ -251,4 +251,71 @@ end
 
     dst_vec = ClimaCoreExt.se_field_to_vec(dst_field)
     @test isapprox(mean(dst_vec), 1.0, atol=0.1)
+end
+
+@testset "SE → FV: constants exact with a non-default radius" begin
+    R = 6.371e6
+    @assert R != GO.Spherical().radius
+    manifold = GO.Spherical(; radius = R)
+    space = make_cubedsphere_space(; h_elem = 8, n_quad_points = 4, radius = R)
+    grid = LatitudeLongitudeGrid(
+        size = (90, 45, 1), longitude = (0, 360), latitude = (-90, 90),
+        z = (0, 1), radius = R,
+    )
+    regridder = ConservativeRegridding.Regridder(manifold, grid, space; threaded = false)
+    dst = zeros(90 * 45)
+    ConservativeRegridding.regrid!(dst, regridder, Fields.ones(space))
+    @test maximum(abs.(dst .- 1)) < 1e-12
+end
+
+@testset "B over a whole element matches the mass-matrix row sums" begin
+    # For the element polygon itself, B[i, j] = ∫_e ϕᵢ ϕⱼ dA, which is also the row sum of the
+    # local mass matrix (computed with the interpolated Jacobian).
+    space = make_cubedsphere_space(; h_elem = 16, n_quad_points = 4)
+    Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
+    manifold = GO.Spherical()
+    se_tree = Trees.treeify(manifold, space)
+    # A cube-corner element (most distorted) and an element at the center of a face.
+    for elem_idx in (1, 8 + 7 * 16)
+        poly = Trees.getcell(se_tree, elem_idx)
+        B = ClimaCoreExt.accumulate_principled_b(manifold, space, elem_idx, poly;
+                                                 triangle_quad_degree = 8)
+        row_sums = vec(sum(ClimaCoreExt.compute_local_mass_matrix(space, elem_idx); dims = 2))
+        rel_err = maximum(abs(B[i, j] / row_sums[Utilities.linear_ind((Nq, Nq), (i, j))] - 1)
+                          for j in 1:Nq, i in 1:Nq)
+        # What remains is the error of the interpolated Jacobian in the row sums
+        @test rel_err < 1e-5
+    end
+end
+
+@testset "FV → SE: partially covered elements are conservative and bounded" begin
+    # A source that stops at ±60° cuts through elements. As in the FV → FV and SE → FV
+    # transfers, the uncovered part counts as zero.
+    space = make_cubedsphere_space(; h_elem = 16, n_quad_points = 4)
+    band = LatitudeLongitudeGrid(
+        size = (360, 120, 1), longitude = (0, 360), latitude = (-60, 60),
+        z = (0, 1), radius = GO.Spherical().radius,
+    )
+    regridder = ConservativeRegridding.Regridder(space, band; threaded = false)
+    band_areas = ConservativeRegridding.areas(GO.Spherical(), Trees.treeify(band))
+    lat = ClimaCoreExt.se_field_to_vec(Fields.coordinate_field(space).lat)
+    lon = ClimaCoreExt.se_field_to_vec(Fields.coordinate_field(space).long)
+
+    # Constant source
+    dst = Fields.zeros(space)
+    ConservativeRegridding.regrid!(dst, regridder, ones(360 * 120))
+    vals = ClimaCoreExt.se_field_to_vec(dst)
+    @test isapprox(sum(dst), sum(band_areas); rtol = 1e-6)
+    @test all(v -> -0.25 < v < 1.25, vals)
+    @test all(v -> isapprox(v, 1; atol = 1e-12), vals[abs.(lat) .< 50])
+    @test all(iszero, vals[abs.(lat) .> 70])
+
+    # Non-constant source in [0, 1]
+    band_lon = repeat(range(0.5, 359.5; length = 360), 1, 120)
+    src = vec(@. (1 + sind(band_lon)) / 2)
+    ConservativeRegridding.regrid!(dst, regridder, src)
+    vals = ClimaCoreExt.se_field_to_vec(dst)
+    @test isapprox(sum(dst), sum(src .* band_areas); rtol = 1e-6)
+    @test all(v -> -0.25 < v < 1.25, vals)
+    @test maximum(abs.(vals[abs.(lat) .< 50] .- (1 .+ sind.(lon[abs.(lat) .< 50])) ./ 2)) < 2e-3
 end
