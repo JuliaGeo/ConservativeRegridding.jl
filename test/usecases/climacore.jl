@@ -8,6 +8,7 @@ import GeometryOps as GO, GeoInterface as GI, LibGEOS
 using ClimaCore:
     CommonSpaces, Fields, Spaces, Meshes, Quadratures, Topologies, Domains, ClimaComms, Utilities
 using Oceananigans
+include("../oceananigans_compat.jl")
 
 const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingClimaCoreExt)
 
@@ -234,7 +235,7 @@ end
 end
 
 @testset "Oceananigans TripolarGrid to ClimaCore cubed sphere (RightFaceFolded)" begin
-    tripolar_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
+    tripolar_grid = TripolarGrid(size=(360, 180, 1), fold_topology = TripolarFaceFold)
     space = CommonSpaces.CubedSphereSpace(;
         radius = tripolar_grid.radius,
         n_quad_points = 4,

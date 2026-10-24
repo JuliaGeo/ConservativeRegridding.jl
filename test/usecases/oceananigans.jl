@@ -10,6 +10,7 @@ using Statistics
 using Test
 
 using Oceananigans
+include("../oceananigans_compat.jl")
 
 
 @testset "Lat-long upscaling" begin
@@ -36,7 +37,7 @@ end
 
 @testset "Tripolar (FPivot / RightFaceFolded) to lat-long" begin
     dst_grid = LatitudeLongitudeGrid(size=(360, 180, 1),   longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-    src_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
+    src_grid = TripolarGrid(size=(360, 180, 1), fold_topology = TripolarFaceFold)
 
     dst = CenterField(dst_grid)
     src = CenterField(src_grid)
@@ -57,7 +58,7 @@ end
 
 @testset "Tripolar (UPivot / RightCenterFolded) to lat-long" begin
     dst_grid = LatitudeLongitudeGrid(size=(360, 180, 1),   longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-    src_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightCenterFolded)
+    src_grid = TripolarGrid(size=(360, 180, 1), fold_topology = TripolarCenterFold)
 
     dst = CenterField(dst_grid)
     src = CenterField(src_grid)
@@ -119,7 +120,7 @@ end
 end
 
 @testset "Tripolar (FPivot) to RotatedLatitudeLongitudeGrid" begin
-    src_grid = TripolarGrid(size=(120, 60, 1), fold_topology = RightFaceFolded)
+    src_grid = TripolarGrid(size=(120, 60, 1), fold_topology = TripolarFaceFold)
     dst_grid = RotatedLatitudeLongitudeGrid(size=(90, 40, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1), north_pole=(70, 55))
 
     dst = CenterField(dst_grid)
@@ -139,7 +140,7 @@ end
 end
 
 @testset "Tripolar (UPivot) to RotatedLatitudeLongitudeGrid" begin
-    src_grid = TripolarGrid(size=(120, 60, 1), fold_topology = RightCenterFolded)
+    src_grid = TripolarGrid(size=(120, 60, 1), fold_topology = TripolarCenterFold)
     dst_grid = RotatedLatitudeLongitudeGrid(size=(90, 40, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1), north_pole=(70, 55))
 
     dst = CenterField(dst_grid)

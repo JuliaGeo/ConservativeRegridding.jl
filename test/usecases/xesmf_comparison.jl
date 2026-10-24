@@ -1,7 +1,7 @@
 using ConservativeRegridding
 using XESMF
 using Oceananigans
-using Oceananigans.Grids: RightCenterFolded
+include("../oceananigans_compat.jl")
 using Test
 import GeometryOps as GO
 using SparseArrays
@@ -41,13 +41,13 @@ latlon_configs = [
 tripolar_configs = [
     (
         name = "tripolar to latlon",
-        src  = TripolarGrid(size = (40, 20, 1), fold_topology = RightCenterFolded, radius = R),
+        src  = TripolarGrid(size = (40, 20, 1), fold_topology = TripolarCenterFold, radius = R),
         dst  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1), radius = R),
     ),
     (
         name = "latlon to tripolar",
         src  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1), radius = R),
-        dst  = TripolarGrid(size = (40, 20, 1), fold_topology = RightCenterFolded, radius = R),
+        dst  = TripolarGrid(size = (40, 20, 1), fold_topology = TripolarCenterFold, radius = R),
     ),
 ]
 
