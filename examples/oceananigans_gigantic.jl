@@ -8,7 +8,7 @@ using Statistics
 
 src_grid = LatitudeLongitudeGrid(size=(2880, 1440, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
 # dst_grid = LatitudeLongitudeGrid(size=(2880, 1440, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-dst_grid = TripolarGrid(size=(2880, 1440, 1), fold_topology = RightFaceFolded)
+dst_grid = TripolarGrid(size=(2880, 1440, 1), fold_topology = FaceFolded)
 
 src_field = CenterField(src_grid)
 dst_field = CenterField(dst_grid)

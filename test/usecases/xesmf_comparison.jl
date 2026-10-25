@@ -1,7 +1,6 @@
 using ConservativeRegridding
 using XESMF
 using Oceananigans
-include("../oceananigans_compat.jl")
 using Test
 import GeometryOps as GO
 using SparseArrays
@@ -32,7 +31,7 @@ latlon_configs = [
 # ---------------------------------------------------------------------------
 # Tripolar ↔ LatLon pairs
 #
-# Cell ordering for RightCenterFolded tripolar differs between CR and XESMF,
+# Cell ordering for CenterFolded tripolar differs between CR and XESMF,
 # so we compare using constant-field regridding (ordering-invariant).
 #
 # Additionally, XESMF does not know about the fold topology, so it
@@ -41,13 +40,13 @@ latlon_configs = [
 tripolar_configs = [
     (
         name = "tripolar to latlon",
-        src  = TripolarGrid(size = (40, 20, 1), fold_topology = TripolarCenterFold, radius = R),
+        src  = TripolarGrid(size = (40, 20, 1), fold_topology = CenterFolded, radius = R),
         dst  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1), radius = R),
     ),
     (
         name = "latlon to tripolar",
         src  = LatitudeLongitudeGrid(size = (36, 18, 1), longitude = (0, 360), latitude = (-90, 90), z = (0, 1), radius = R),
-        dst  = TripolarGrid(size = (40, 20, 1), fold_topology = TripolarCenterFold, radius = R),
+        dst  = TripolarGrid(size = (40, 20, 1), fold_topology = CenterFolded, radius = R),
     ),
 ]
 

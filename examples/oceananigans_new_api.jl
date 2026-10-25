@@ -15,9 +15,9 @@ lonlat_coarse_grid = LatitudeLongitudeGrid(size=(100, 100, 1), longitude=(0, 360
 lonlat_fine_grid = LatitudeLongitudeGrid(size=(200, 200, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
 lonlat_huge_grid = LatitudeLongitudeGrid(size=(2880, 1440, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
 
-tripolar_test_grid = TripolarGrid(size=(36, 18, 1), fold_topology = RightFaceFolded)
-tripolar_fine_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
-tripolar_huge_grid = TripolarGrid(size=(2880, 1440, 1), fold_topology = RightFaceFolded)
+tripolar_test_grid = TripolarGrid(size=(36, 18, 1), fold_topology = FaceFolded)
+tripolar_fine_grid = TripolarGrid(size=(360, 180, 1), fold_topology = FaceFolded)
+tripolar_huge_grid = TripolarGrid(size=(2880, 1440, 1), fold_topology = FaceFolded)
 
 # Select which grid you want to use
 dst_grid = tripolar_fine_grid
