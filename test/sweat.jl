@@ -21,7 +21,7 @@ using ConservativeRegriddingTestHelpers
 
 
 oceananigans_latlong_grid = Oceananigans.LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z = (0, 1), radius = GO.Spherical().radius)
-oceananigans_tripolar_grid = Oceananigans.TripolarGrid(size=(360, 180, 1), fold_topology = Oceananigans.RightFaceFolded)
+oceananigans_tripolar_grid = Oceananigans.TripolarGrid(size=(360, 180, 1), fold_topology = Oceananigans.FaceFolded)
 oceananigans_rotated_latlong_grid = Oceananigans.RotatedLatitudeLongitudeGrid(size=(90, 40, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1), north_pole=(70, 55))
 
 oceananigans_latlong_field = Oceananigans.CenterField(oceananigans_latlong_grid)

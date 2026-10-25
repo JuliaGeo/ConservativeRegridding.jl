@@ -233,8 +233,8 @@ end
     @test isapprox(mean(dst_vec), 1.0, atol=0.1)
 end
 
-@testset "Oceananigans TripolarGrid to ClimaCore cubed sphere (RightFaceFolded)" begin
-    tripolar_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
+@testset "Oceananigans TripolarGrid to ClimaCore cubed sphere (FaceFolded)" begin
+    tripolar_grid = TripolarGrid(size=(360, 180, 1), fold_topology = FaceFolded)
     space = CommonSpaces.CubedSphereSpace(;
         radius = tripolar_grid.radius,
         n_quad_points = 4,

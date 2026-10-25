@@ -8,7 +8,7 @@ using Statistics
 
 longlat_coarse_grid = LatitudeLongitudeGrid(size=(100, 100, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
 longlat_fine_grid = LatitudeLongitudeGrid(size=(200, 200, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-tripolar_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
+tripolar_grid = TripolarGrid(size=(360, 180, 1), fold_topology = FaceFolded)
 
 src_grid = longlat_coarse_grid
 dst_grid = longlat_fine_grid

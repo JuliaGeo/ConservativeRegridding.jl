@@ -6,7 +6,6 @@ import GeoInterface as GI
 
 using Test
 using Oceananigans
-using Oceananigans.Grids: RightFaceFolded, RightCenterFolded
 import Healpix
 
 using ClimaCore:
@@ -85,9 +84,9 @@ lonlat      = LatitudeLongitudeGrid(size=(90, 45, 1),  longitude=(0, 360), latit
 lonlat_fine = LatitudeLongitudeGrid(size=(180, 90, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
 
 # Tripolar grids: Nx must be divisible by 4 so that Nhalf is even, avoiding
-# a self-dual fold cell in RightCenterFolded.
-tripolar_f = TripolarGrid(size=(120, 60, 1), fold_topology=RightFaceFolded)
-tripolar_c = TripolarGrid(size=(120, 60, 1), fold_topology=RightCenterFolded)
+# a self-dual fold cell in CenterFolded.
+tripolar_f = TripolarGrid(size=(120, 60, 1), fold_topology=FaceFolded)
+tripolar_c = TripolarGrid(size=(120, 60, 1), fold_topology=CenterFolded)
 
 # Oceananigans planar
 rect_a = RectilinearGrid(size=(50, 50), x=(0, 1), y=(0, 1), topology=(Periodic, Periodic, Flat))

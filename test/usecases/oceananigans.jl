@@ -34,9 +34,9 @@ using Oceananigans
     @test mean(dst) ≈ mean(src) rtol=1e-5
 end
 
-@testset "Tripolar (FPivot / RightFaceFolded) to lat-long" begin
+@testset "Tripolar (FPivot / FaceFolded) to lat-long" begin
     dst_grid = LatitudeLongitudeGrid(size=(360, 180, 1),   longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-    src_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
+    src_grid = TripolarGrid(size=(360, 180, 1), fold_topology = FaceFolded)
 
     dst = CenterField(dst_grid)
     src = CenterField(src_grid)
@@ -55,9 +55,9 @@ end
     @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
 end
 
-@testset "Tripolar (UPivot / RightCenterFolded) to lat-long" begin
+@testset "Tripolar (UPivot / CenterFolded) to lat-long" begin
     dst_grid = LatitudeLongitudeGrid(size=(360, 180, 1),   longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-    src_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightCenterFolded)
+    src_grid = TripolarGrid(size=(360, 180, 1), fold_topology = CenterFolded)
 
     dst = CenterField(dst_grid)
     src = CenterField(src_grid)
@@ -69,8 +69,8 @@ end
 
     ConservativeRegridding.regrid!(vec(interior(dst)), regridder, vec(interior(src)))
 
-    # The tests on a `RightCenterFolded` grid have a lower relative tolerance because of the extra 
-    # half row thatis repeated at the top of the domain
+    # The tests on a `CenterFolded` grid have a lower relative tolerance because of the extra
+    # half row that is repeated at the top of the domain
     @test sum(vec(interior(dst)) .* regridder.dst_areas) ≈ sum(vec(interior(src)) .* regridder.src_areas) rtol=1e-7
 
     set!(src, (x, y, z) -> rand())
@@ -119,7 +119,7 @@ end
 end
 
 @testset "Tripolar (FPivot) to RotatedLatitudeLongitudeGrid" begin
-    src_grid = TripolarGrid(size=(120, 60, 1), fold_topology = RightFaceFolded)
+    src_grid = TripolarGrid(size=(120, 60, 1), fold_topology = FaceFolded)
     dst_grid = RotatedLatitudeLongitudeGrid(size=(90, 40, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1), north_pole=(70, 55))
 
     dst = CenterField(dst_grid)
@@ -139,7 +139,7 @@ end
 end
 
 @testset "Tripolar (UPivot) to RotatedLatitudeLongitudeGrid" begin
-    src_grid = TripolarGrid(size=(120, 60, 1), fold_topology = RightCenterFolded)
+    src_grid = TripolarGrid(size=(120, 60, 1), fold_topology = CenterFolded)
     dst_grid = RotatedLatitudeLongitudeGrid(size=(90, 40, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1), north_pole=(70, 55))
 
     dst = CenterField(dst_grid)

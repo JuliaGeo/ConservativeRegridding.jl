@@ -1,7 +1,7 @@
 module ConservativeRegriddingOceananigansExt
 
 using Oceananigans
-using Oceananigans.Grids: ξnode, ηnode, RightFaceFolded, RightCenterFolded
+using Oceananigans.Grids: ξnode, ηnode, Sides, Closed, CenterFolded
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Architectures: CPU
 using Oceananigans.Utils: launch!, KernelParameters
@@ -124,7 +124,7 @@ end
 
 function Trees.treeify(
     manifold::GOCore.Spherical,
-    grid::Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Oceananigans.RightCenterFolded}
+    grid::Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Sides{Closed, CenterFolded}}
 )
     # Compute the matrix of vertices - for an n×m grid, this is an (n+1)×(m+1) matrix of vertices.
     cells_longlat = compute_cell_matrix(grid)
@@ -133,7 +133,7 @@ function Trees.treeify(
     Nx = size(cells_unitspherical, 1) - 1
     Ny = size(cells_unitspherical, 2) - 1
     Nhalf = Nx ÷ 2
-    @assert iseven(Nx) "RightFaceFolded requires even number of cells in x"
+    @assert iseven(Nx) "CenterFolded requires even number of cells in x"
 
     # 1. Rest of grid: all rows except the fold row → Nx × (Ny-1) cells
     rest_vertices = cells_unitspherical[:, 1:Ny]
@@ -141,7 +141,7 @@ function Trees.treeify(
     N_rest = Nx * (Ny - 1)
 
     # 2. Fold row halves.
-    #    In a RightCenterFolded grid, fold-row cell (i, Ny) is the same physical
+    #    In a CenterFolded grid, fold-row cell (i, Ny) is the same physical
     #    quadrilateral as cell (Nx+1-i, Ny) — the fold reflects the row across
     #    its midpoint.  Each physical cell therefore shows up at two field slots.
     #    We treat half of each pair as a "real" polygon in the spatial tree
@@ -192,7 +192,7 @@ function Trees.treeify(
     return Trees.KnownFullSphereExtentWrapper(tree)
 end
 
-const RightCenterFoldedGrid = Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Oceananigans.RightCenterFolded}
+const CenterFoldedGrid = Oceananigans.Grids.ZRegOrthogonalSphericalShellGrid{<: Number, <: Any, Sides{Closed, CenterFolded}}
 
 #####
 ##### `regrid!` plumbing for Oceananigans fields.
@@ -226,7 +226,7 @@ end
 # the partner of local r is Nx+1-r.
 mirror_fold_partners!(_, _) = nothing
 
-function mirror_fold_partners!(dst, grid::RightCenterFoldedGrid)
+function mirror_fold_partners!(dst, grid::CenterFoldedGrid)
     Nx = size(grid, 1)
     Ny = size(grid, 2)
     Nq = Nx ÷ 4

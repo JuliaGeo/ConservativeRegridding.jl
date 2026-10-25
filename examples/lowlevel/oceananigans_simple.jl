@@ -54,7 +54,7 @@ end
 
 src_grid = LatitudeLongitudeGrid(size=(10, 10, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
 dst_grid = LatitudeLongitudeGrid(size=(10, 10, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1))
-# dst_grid = TripolarGrid(size=(360, 180, 1), fold_topology = RightFaceFolded)
+# dst_grid = TripolarGrid(size=(360, 180, 1), fold_topology = FaceFolded)
 
 
 src_field = CenterField(src_grid)

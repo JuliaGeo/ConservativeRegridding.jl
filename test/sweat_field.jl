@@ -7,7 +7,7 @@
 # (Oceananigans `interior`, ClimaCore `se_field_to_vec`/`vec_to_se_field!`,
 # Healpix `parent(map)`) works end-to-end. The fold
 # mirror in `OceananigansExt.finalize_regridding!` only runs on this path, so
-# regridding INTO a `RightCenterFolded` tripolar grid should pass here even
+# regridding INTO a `CenterFolded` tripolar grid should pass here even
 # though it NaNs in the vec sweat.
 
 using ConservativeRegridding
@@ -52,8 +52,8 @@ pull_from_field!(vals, field::RingGrids.AbstractField) = (copyto!(vals, field); 
 # ---- Grid / field / vals setup (mirrors sweat.jl) ----
 
 oceananigans_latlong_grid = Oceananigans.LatitudeLongitudeGrid(size=(360, 180, 1), longitude=(0, 360), latitude=(-90, 90), z = (0, 1), radius = GO.Spherical().radius)
-oceananigans_tripolar_grid = Oceananigans.TripolarGrid(size=(360, 180, 1), fold_topology = Oceananigans.RightFaceFolded)
-oceananigans_tripolarC_grid = Oceananigans.TripolarGrid(size=(360, 180, 1), fold_topology = Oceananigans.RightCenterFolded)
+oceananigans_tripolar_grid = Oceananigans.TripolarGrid(size=(360, 180, 1), fold_topology = Oceananigans.FaceFolded)
+oceananigans_tripolarC_grid = Oceananigans.TripolarGrid(size=(360, 180, 1), fold_topology = Oceananigans.CenterFolded)
 oceananigans_rotated_latlong_grid = Oceananigans.RotatedLatitudeLongitudeGrid(size=(90, 40, 1), longitude=(0, 360), latitude=(-90, 90), z=(0, 1), north_pole=(70, 55))
 
 oceananigans_latlong_field = Oceananigans.CenterField(oceananigans_latlong_grid)
@@ -108,8 +108,8 @@ ringgrids_healpix_vals = zeros(Float64, length(ringgrids_healpix_field))
 
 oceananigans_fields = [
     ("Oceananigans longitude-latitude grid", oceananigans_latlong_field, oceananigans_latlong_vals),
-    ("Oceananigans tripolar grid (RightFaceFolded)", oceananigans_tripolar_field, oceananigans_tripolar_vals),
-    ("Oceananigans tripolar grid (RightCenterFolded)", oceananigans_tripolarC_field, oceananigans_tripolarC_vals),
+    ("Oceananigans tripolar grid (FaceFolded)", oceananigans_tripolar_field, oceananigans_tripolar_vals),
+    ("Oceananigans tripolar grid (CenterFolded)", oceananigans_tripolarC_field, oceananigans_tripolarC_vals),
     ("Oceananigans rotated longitude-latitude grid", oceananigans_rotated_latlong_field, oceananigans_rotated_latlong_vals),
 ]
 
