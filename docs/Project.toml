@@ -43,7 +43,7 @@ WellKnownGeometry = "0f680547-7be7-4555-8820-bb198eeb646b"
 YAXArrayBase = "90b8fcef-0c2d-428d-9c56-5f86629e9d14"
 
 [compat]
-Oceananigans = "0.115, 0.116"
+Oceananigans = "0.115, 0.116, 0.117"
 
 [sources]
 ConservativeRegridding = {path = ".."}
