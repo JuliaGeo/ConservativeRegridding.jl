@@ -1,12 +1,19 @@
 module ConservativeRegriddingOceananigansExt
 
 using Oceananigans
-using Oceananigans.Grids: ξnode, ηnode, Sides, Closed, CenterFolded
+using Oceananigans.Grids: ξnode, ηnode, Closed, CenterFolded
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Architectures: CPU
 using Oceananigans.Utils: launch!, KernelParameters
 
 using KernelAbstractions: @kernel, @index
+
+# TODO: remove when Ocenanigans' 0.117 version is released
+const Sides = if pkgversion(Oceananigans) < v"0.117.0"
+    Oceananigans.Grids.TwoSides
+else
+    Oceananigans.Grids.Sides
+end
 
 using ConservativeRegridding
 using ConservativeRegridding: Regridder, ExampleFieldFunction
