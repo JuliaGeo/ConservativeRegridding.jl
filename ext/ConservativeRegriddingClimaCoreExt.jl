@@ -14,7 +14,6 @@ using StaticArrays: SVector, StaticArrays
 using ClimaCore:
     CommonSpaces, Fields, Spaces, Meshes, Quadratures, Topologies, DataLayouts, ClimaComms
 import ClimaCore
-import ClimaCore.Utilities: linear_ind
 
 """
     coords_for_face(mesh::CubedSphereMesh, face_idx)::Matrix{UnitSphericalPoint}
@@ -451,6 +450,7 @@ function (op::SEToFVIntersectionOperator)(rows, cols, vals, (elem, cell), src_tr
         (intersection_result,)   # single Polygon
     end
 
+    ij_linear_ind = LinearIndices((Base.OneTo(op.Nq), Base.OneTo(op.Nq)))
     for ipoly in intersection_polys
         B = accumulate_principled_b(op.manifold, op.src_space, elem, ipoly;
                                     triangle_quad_degree = op.triangle_quad_degree)
@@ -459,7 +459,7 @@ function (op::SEToFVIntersectionOperator)(rows, cols, vals, (elem, cell), src_tr
             Bᵢⱼ = B[i, j]
             Bᵢⱼ == 0 && continue
             push!(rows, cell)
-            push!(cols, offset + linear_ind((op.Nq, op.Nq), (i, j)))
+            push!(cols, offset + ij_linear_ind[i, j])
             push!(vals, Bᵢⱼ)
         end
     end
@@ -523,7 +523,7 @@ Dense `Nq² × Nq²` FV → SE local mass matrix for SE element `elem_idx`,
 
     M^{e}_{(a,b),(c,d)} = ∫_{e} ϕₐ(ξ) ϕᵦ(η) ϕ_c(ξ) ϕ_d(η) Jᵉ(ξ,η) dξ dη ,
 
-row/col flattening per `ClimaCore.Utilities.linear_ind()`. The integrand has bidegree
+(`LinearIndices`) row/col flattening. The integrand has bidegree
 `(2(Nq-1), 2(Nq-1))` (basis-function product) plus `(Nq-1, Nq-1)` (Lagrange-interpolated
 `Jᵉ`), total `(3(Nq-1), 3(Nq-1))`. A GLL rule with `n` points/direction is exact to degree
 `2n - 3`, so exactness needs `n ≥ 3Nq/2`; we use the minimum, `n = cld(3Nq, 2)`. See the
@@ -545,6 +545,7 @@ function compute_local_mass_matrix(
 
     Nq² = Nq * Nq
     M = zeros(Nq², Nq²)
+    ij_linear_ind = LinearIndices((Base.OneTo(Nq), Base.OneTo(Nq)))
 
     @inbounds for q in 1:Nq_q, p in 1:Nq_q
         ξ = ξs_q[p]
@@ -558,11 +559,11 @@ function compute_local_mass_matrix(
 
         wJ = wξ * wη * Jᵉ
         for jb in 1:Nq, ja in 1:Nq
-            row = linear_ind((Nq, Nq), (ja, jb))
+            row = ij_linear_ind[ja, jb]
             ϕaξ = Mξ[1, ja]
             ϕbη = Mη[1, jb]
             for jj in 1:Nq, ii in 1:Nq
-                col = linear_ind((Nq, Nq), (ii, jj))
+                col = ij_linear_ind[ii, jj]
                 M[row, col] += wJ * ϕaξ * Mξ[1, ii] * ϕbη * Mη[1, jj]
             end
         end
@@ -603,6 +604,7 @@ end
 
 function (op::FVToSEIntersectionOperator)(rows, cols, vals, (elem, cells), src_tree, dst_tree)
     Nq = op.Nq
+    ij_linear_ind = LinearIndices((Base.OneTo(Nq), Base.OneTo(Nq)))
     elem_poly = Trees.getcell(src_tree, elem)
 
     # Phase 1: accumulate B for this element, keyed by destination cell, value = Nq² vector.
@@ -635,7 +637,7 @@ function (op::FVToSEIntersectionOperator)(rows, cols, vals, (elem, cells), src_t
             for jb in 1:Nq, ja in 1:Nq
                 Bᵢⱼ = B[ja, jb]
                 Bᵢⱼ == 0 && continue
-                v[linear_ind((Nq, Nq), (ja, jb))] += Bᵢⱼ
+                v[ij_linear_ind[ja, jb]] += Bᵢⱼ
             end
         end
     end
