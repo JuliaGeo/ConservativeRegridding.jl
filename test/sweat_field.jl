@@ -138,6 +138,12 @@ regridder_construction_times = Pair{Tuple{String, String}, Float64}[]
         both_se = has_spectral_element(field1) && has_spectral_element(field2)
         both_se && continue
 
+        # Self-grid regridding still needs distinct input/output storage for mul!.
+        if i == j
+            field2 = deepcopy(field2)
+            vals2 = copy(vals2)
+        end
+
         tic = time()
         regridder = @test_nowarn ConservativeRegridding.Regridder(GO.Spherical(), field2, field1; normalize = false)
         toc = time()
