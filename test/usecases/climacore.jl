@@ -6,7 +6,7 @@ using Test
 import GeometryOps as GO, GeoInterface as GI, LibGEOS
 
 using ClimaCore:
-    CommonSpaces, Fields, Spaces, Meshes, Quadratures, Topologies, Domains, ClimaComms, Utilities
+    CommonSpaces, Fields, Spaces, Meshes, Quadratures, Topologies, Domains, ClimaComms
 using Oceananigans
 
 const ClimaCoreExt = Base.get_extension(ConservativeRegridding, :ConservativeRegriddingClimaCoreExt)
@@ -273,6 +273,7 @@ end
     # local mass matrix (computed with the interpolated Jacobian).
     space = make_cubedsphere_space(; h_elem = 16, n_quad_points = 4)
     Nq = Quadratures.degrees_of_freedom(Spaces.quadrature_style(space))
+    ij_linear_ind = LinearIndices((Base.OneTo(Nq), Base.OneTo(Nq)))
     manifold = GO.Spherical()
     se_tree = Trees.treeify(manifold, space)
     # A cube-corner element (most distorted) and an element at the center of a face.
@@ -281,7 +282,7 @@ end
         B = ClimaCoreExt.accumulate_principled_b(manifold, space, elem_idx, poly;
                                                  triangle_quad_degree = 8)
         row_sums = vec(sum(ClimaCoreExt.compute_local_mass_matrix(space, elem_idx); dims = 2))
-        rel_err = maximum(abs(B[i, j] / row_sums[Utilities.linear_ind((Nq, Nq), (i, j))] - 1)
+        rel_err = maximum(abs(B[i, j] / row_sums[ij_linear_ind[i, j]] - 1)
                           for j in 1:Nq, i in 1:Nq)
         # What remains is the error of the interpolated Jacobian in the row sums
         @test rel_err < 1e-5

@@ -134,7 +134,7 @@ M^e_{(ab),(cd)} = \int_e \phi_a(\xi) \, \phi_b(\eta) \, \phi_c(\xi) \, \phi_d(\e
 ```
 
 (assembled by `compute_local_mass_matrix`, with the index pairs flattened by
-`ClimaCore.Utilities.linear_ind`). Its integrand has degree ``3(N_q - 1)`` per direction,
+`LinearIndices`). Its integrand has degree ``3(N_q - 1)`` per direction,
 so it is integrated with an ``n``-point GLL rule, which is exact to degree ``2n - 3``, using
 the smallest sufficient ``n = \lceil 3N_q/2 \rceil``; the Jacobian ``J^e`` is interpolated
 from its nodal values where needed (`element_jacobian_at`). The right-hand
