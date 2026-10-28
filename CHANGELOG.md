@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.2.20
+
+### Fixed
+- ClimaCore extension: compatibility with ClimaCore 1.0.6, which removed `Utilities.linear_ind`;
+  now uses `LinearIndices` ([#158](https://github.com/JuliaGeo/ConservativeRegridding.jl/pull/158)).
+- Tests: self-grid sweat tests use independent destinations, fixing `mul!` alias-check errors on
+  Julia 1.13.3 ([#159](https://github.com/JuliaGeo/ConservativeRegridding.jl/pull/159)).
+
 ## v0.2.19
 
 ### Changed
