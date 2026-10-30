@@ -12,6 +12,33 @@ using SparseArrays
 cr_grid(manifold, x) = ConservativeRegridding.asgrid(manifold, x)
 sweep_tree(grid) = GrI.treeify(grid; leaf_capacity = GrI.ForSweeps())
 
+@testset "Polygon matrices preserve storage order independently of topology" begin
+    polygon(i, j) = GI.Polygon([GI.LinearRing([
+        (i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1), (i, j)])])
+    cells = [polygon(i, j) for i in 0:5, j in 0:3]
+    polygons = reshape(vec(cells)[mod.(7 .* (0:23), 24) .+ 1], 6, 4)
+    grid = cr_grid(GO.Planar(), polygons)
+    @test grid isa GrI.Structured.AbstractLatticeGrid
+    @test !(grid isa GrI.Structured.AbstractStructuredGrid)
+    @test all(k -> GrI.cell_geometry(grid, k) === polygons[k], eachindex(polygons))
+    @test sort(GrI.subtree_indices(sweep_tree(grid))) == collect(eachindex(polygons))
+
+    destination = (range(0.0, 6.0; length=13), range(0.0, 4.0; length=9))
+    reference = ConservativeRegridding.Regridder(destination, vec(polygons);
+        normalize=false, threaded=false)
+    for threaded in (false, true)
+        r = ConservativeRegridding.Regridder(destination, polygons; normalize=false, threaded)
+        @test r.intersections == reference.intersections
+        @test r.src_areas ≈ ones(24)
+        values = collect(1.0:24.0)
+        output = zeros(96)
+        ConservativeRegridding.regrid!(output, r, values)
+        @test sum(output .* r.dst_areas) ≈ sum(values .* r.src_areas)
+        ConservativeRegridding.regrid!(output, r, ones(24))
+        @test output ≈ ones(96)
+    end
+end
+
 @testset "DefaultIntersectionOperator task-local cache" begin
     op = ConservativeRegridding.DefaultIntersectionOperator(GO.Spherical())
     task_op = ConservativeRegridding.task_local_operator(op)

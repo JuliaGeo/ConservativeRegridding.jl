@@ -51,9 +51,9 @@ four traversal questions (`isleaf`, `getchild`, `node_extent`,
 which decides which side of a node pair opens first and sizes the threaded
 frontier. Which tree a grid gets:
 
-- a structured grid (`GridInterface.Structured`) gets a quadtree cursor over
-  its index ranges, with `leaf_capacity(grid, ForSweeps())` cells per leaf (16
-  by default);
+- a lattice grid (`GridInterface.Structured.AbstractLatticeGrid`) gets a
+  quadtree cursor over its index ranges, with
+  `leaf_capacity(grid, ForSweeps())` cells per leaf (16 by default);
 - a `Subset` gets its parent's tree restricted to its members
   ([below](@ref "Restricting a grid"));
 - a `GridAndTree` answers its stored tree;
@@ -81,13 +81,22 @@ and a grid with no tree of its own gets an R-tree over the members.
 
 ## Structured grids
 
-For a lattice of quadrilaterals (one or several faces), subtype
-`GridInterface.Structured.AbstractStructuredGrid` and implement its face hooks
-(`nfaces`, `facesize`, `facevertex`, `faceposition`, `facecell`, ...): the
-quadtree cursor, extents, neighbours and point location follow. The shipped
-`CellBasedGrid` (a corner matrix), `RegularGrid` (two axis vectors) and
-`ExplicitPolygonGrid` (a polygon matrix) are examples, as are the providers in
-the Oceananigans, ClimaCore, Healpix and RingGrids extensions.
+For shared-vertex quadrilaterals (one or several faces), subtype
+`GridInterface.Structured.AbstractStructuredGrid` and implement the face
+geometry and seam hooks (`facesize`, `facevertex`, `facecross`, ...): the
+quadtree cursor, extents, neighbours and point location follow. `nfaces`
+defaults to one; `faceposition` and `facecell` default to concatenated
+column-major face numbering. Override those mappings for native field
+ordering, as the ClimaCore, Healpix and RingGrids providers do.
+Custom numbering also declares `facecolumnmajor` false when needed.
+`CellBasedGrid` (a corner matrix), `RegularGrid` (two axis vectors) and the
+Oceananigans providers also implement this shared-vertex contract.
+
+`AbstractLatticeGrid` supplies face-shaped storage and the quadtree cursor.
+Its `ExplicitPolygonGrid` stores a polygon matrix in column-major order;
+the polygons define cell geometry and topology independently of their matrix
+positions. Use it for polygon matrices whose adjacent entries may have
+unrelated vertices or whose cells contain holes.
 
 ## Supplying a tree
 
