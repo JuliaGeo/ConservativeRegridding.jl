@@ -49,3 +49,6 @@ Oceananigans = "0.115, 0.116, 0.117"
 ConservativeRegridding = {path = ".."}
 GeometryBasics = {rev = "master", url = "https://github.com/JuliaGeometry/GeometryBasics.jl"}
 SphericalSpatialTrees = {rev = "main", url = "https://github.com/meggart/SphericalSpatialTrees.jl"}
+
+[compat]
+NaturalEarth = "0.1.1"
